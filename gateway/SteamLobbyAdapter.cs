@@ -29,7 +29,7 @@ public sealed class SteamLobbyAdapter
     {
         _config = config;
         _core = core;
-        _lobby = new SteamLobby(config.Steam ?? new SteamConfig(), () => _core.SessionCount);
+        _lobby = new SteamLobby(config.SteamSessionPath, config.SteamVersionTag, core);
     }
 
     public void Start()

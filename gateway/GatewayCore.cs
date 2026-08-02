@@ -24,6 +24,8 @@ public sealed class GatewayCore
     private string _serverPassword = "";
     /// <summary>최대 동시 접속 인원 — 오케스트레이터 AUTH_INFO로 수신 (orchestrator.json MaxPlayers).</summary>
     private int _maxPlayers = 32;
+    /// <summary>서버 이름 — 오케스트레이터 AUTH_INFO로 수신 (Steam 로비 서버명 등).</summary>
+    private string _serverName = "CasuMP Server";
 
     public GatewayCore(GatewayConfig config)
     {
@@ -35,6 +37,16 @@ public sealed class GatewayCore
 
     /// <summary>최대 동시 접속 인원 (AUTH_INFO).</summary>
     public int MaxPlayers => _maxPlayers;
+
+    /// <summary>서버 이름 (AUTH_INFO — Steam 로비 서버명 등).</summary>
+    public string ServerName => _serverName;
+
+    /// <summary>서버 비밀번호 설정 여부 (AUTH_INFO — Steam 로비 KeyHasPassword).</summary>
+    public bool HasPassword => !string.IsNullOrEmpty(_serverPassword);
+
+    /// <summary>AUTH_INFO(인증/서버 정보) 수신 여부 — Steam 로비 생성 게이트 (2026-08-03):
+    /// AUTH_INFO가 오기 전에는 서버명/인원/비밀번호 여부가 확정되지 않으므로 로비를 만들지 않는다.</summary>
+    public bool AuthInfoReceived { get; private set; }
 
     /// <summary>서버 비밀번호 검증 — 미설정이면 항상 허용 (게임 서버가 최종 권위).</summary>
     public bool ValidatePassword(string? candidate) =>
@@ -156,6 +168,24 @@ public sealed class GatewayCore
         {
             session.Kick("You are banned from this server.");
             RemoveSession(session, "banned");
+            return;
+        }
+
+        // 비밀번호/인원 검증 — Steam 경로의 유일한 방어선 (DirectIpAdapter는 접속 시도
+        // 단계에서 이미 거부하므로 중복 없음). 사유는 Kick → sink.DisconnectClient(reason) →
+        // Steam은 로비 채팅 KICK으로 전달된다 (연결 실패/추방 이유 전달 — G13).
+        // 본 세션은 이미 _sessions에 추가된 상태이므로 인원 비교는 ">" (DirectIpAdapter의
+        // 접속 시도 단계는 세션 미포함이라 ">=" — 경로별 의미가 다름).
+        if (!ValidatePassword(session.Password))
+        {
+            session.Kick("Wrong password.");
+            RemoveSession(session, "wrong password");
+            return;
+        }
+        if (SessionCount > MaxPlayers)
+        {
+            session.Kick("Server is full.");
+            RemoveSession(session, "server full");
             return;
         }
 
@@ -367,11 +397,14 @@ public sealed class GatewayCore
         {
             _serverPassword = payload.ServerPassword ?? "";
             _maxPlayers = payload.MaxPlayers > 0 ? payload.MaxPlayers : 32;
+            if (!string.IsNullOrEmpty(payload.ServerName))
+                _serverName = payload.ServerName!;
             _banned.Clear();
             foreach (string key in payload.BannedKeys ?? [])
             {
                 _banned.Add(PlayerKey.FromString(key));
             }
+            AuthInfoReceived = true;
         }
         Log.Info($"인증 정보 수신 (밴 {_banned.Count}명, 비밀번호 {(string.IsNullOrEmpty(_serverPassword) ? "미설정" : "설정")}, 최대 {_maxPlayers}명).");
     }
@@ -437,10 +470,11 @@ public sealed class GatewayCore
         public bool Banned { get; set; }
     }
 
-    /// <summary>AUTH_INFO (오케스트레이터 → 게이트웨이 — 밴 스냅샷 + 서버 비밀번호 + 최대 인원).</summary>
+    /// <summary>AUTH_INFO (오케스트레이터 → 게이트웨이 — 밴 스냅샷 + 서버 비밀번호 + 최대 인원 + 서버명).</summary>
     public sealed class AuthInfoPayload
     {
         public string? ServerPassword { get; set; }
+        public string? ServerName { get; set; }
         public string[] BannedKeys { get; set; } = [];
         public int MaxPlayers { get; set; }
     }
@@ -451,14 +485,14 @@ public sealed class GatewayCore
         public string? Message { get; set; }
     }
 
-    /// <summary>오케스트레이터가 인스턴스 리포트를 합산해 보내는 로비 동적 메타데이터 (G2).</summary>
+    /// <summary>오케스트레이터가 인스턴스 리포트를 합산해 보내는 로비 동적 메타데이터 (G2).
+    /// mod 목록은 전송하지 않는다 (2026-08-03 — 개조 전용 모드뿐이므로 로비 표시 불필요 —
+    /// EXTRADATA 와이어에는 빈 목록+false로 고정 포함).</summary>
     public sealed class LobbyMetadataPayload
     {
         public int LivingCount { get; set; }
         public int HappinessSum { get; set; }
         public ulong[]? SteamIds { get; set; }
         public string? RulesBase64 { get; set; }
-        public string[]? ModListGuids { get; set; }
-        public bool EnforceModList { get; set; }
     }
 }

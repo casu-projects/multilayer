@@ -120,6 +120,17 @@ public sealed class OperatorConsole
         }
     }
 
+    /// <summary>외부 소스(콘솔 채널 — Discord 원격 명령)의 명령 라인을 접수한다.
+    /// _pendingLines 큐(ConcurrentQueue)로 넣으면 메인 루프의 Tick이 stdin 입력과
+    /// 동일하게 Execute로 실행한다 — 터미널 입력과 완전히 동일한 경로.</summary>
+    internal void SubmitLine(string line)
+    {
+        if (!string.IsNullOrWhiteSpace(line))
+        {
+            _pendingLines.Enqueue(line.Trim());
+        }
+    }
+
     private void Execute(string line)
     {
         string[] top = line.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
@@ -144,8 +155,30 @@ public sealed class OperatorConsole
                 Console.WriteLine("run <설정> <값> - run.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)");
                 break;
             case "list":
-                foreach (PlayerState p in _sessions.All)
-                    Console.WriteLine($"  {p.Key} — depth {p.Depth}, clientId {p.ClientId}, {p.Session}");
+                // 온라인 플레이어만, 레이어별 그룹 (한 줄 = 한 명, SteamID 있으면 "(id)" 표기).
+                var online = _sessions.All
+                    .Where(p => p.Session != PlayerSessionState.Offline)
+                    .OrderBy(p => p.Depth)
+                    .ThenBy(p => p.Username ?? p.Key.Value)
+                    .ToList();
+                if (online.Count == 0)
+                {
+                    Console.WriteLine("접속 중인 플레이어가 없습니다.");
+                    break;
+                }
+                int? prevDepth = null;
+                foreach (PlayerState p in online)
+                {
+                    if (p.Depth != prevDepth)
+                    {
+                        if (prevDepth != null) Console.WriteLine();
+                        Console.WriteLine($"[L{p.Depth}]");
+                        prevDepth = p.Depth;
+                    }
+                    string name = p.Username ?? p.Key.Value;
+                    string steamId = p.Key.Value.StartsWith("STEAM_") ? p.Key.Value[6..] : "";
+                    Console.WriteLine(steamId.Length > 0 ? $"{name} ({steamId})" : name);
+                }
                 break;
             case "kick":
                 if (TryResolvePlayer(arg, out PlayerKey kick)) _kickAction(kick.Value, "Kicked by operator.");

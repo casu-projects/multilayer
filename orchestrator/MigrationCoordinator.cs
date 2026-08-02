@@ -62,6 +62,9 @@ public sealed class MigrationCoordinator
     private readonly Dictionary<PlayerKey, WalEntry> _wal = new();
     private int _lastEpoch;
 
+    /// <summary>마이그레이션 커밋 완료 이벤트 (player, fromDepth, toDepth) — Discord 알림 등 외부 구독용.</summary>
+    public event Action<PlayerKey, int, int>? MigrationCommitted;
+
     public MigrationCoordinator(OrchestratorConfig config, ControlHub hub,
         InstanceManager instances, PlayerSessionStore sessions, PlayerDataStore dataStore)
     {
@@ -520,6 +523,7 @@ public sealed class MigrationCoordinator
         }
 
         Console.WriteLine($"{player}: COMMIT — 레이어 {tx.ToDepth} 완료 (epoch {tx.Epoch}).");
+        MigrationCommitted?.Invoke(player, tx.FromDepth, tx.ToDepth);
     }
 
     /// <summary>게이트웨이 SWAP_FAILED 보고 — 트랜잭션 중단.</summary>

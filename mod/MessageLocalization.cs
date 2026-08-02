@@ -1,0 +1,144 @@
+using System.Collections.Generic;
+using HarmonyLib;
+using KrokoshaCasualtiesMP;
+using KrokoshaCasualtiesUtils;
+
+namespace CasuMod;
+
+/// <summary>내장 시스템 메시지 한글화/비활성화 (2026-08-03).
+/// A. 접속/킥 공지 한글화 + "Host is starting game." 비활성화 — Chat.Server_ChatAnnouncement
+///    단일 지점 패턴 매칭. 한글 문자열은 로케일 키가 아니므로(T$\r 접두사 없음) 클라이언트가
+///    그대로 표시한다.
+/// B. 사망 — 개인(팝업+채팅) + 전체(모든 레이어 — ANNOUNCE 릴레이), everyone-died 블록 비활성화.
+/// C. 데디 서버 자동 종료(전원 퇴장/사망 → ToMainMenu) 비활성화 — 인스턴스 수명은 오케스트레이터가 관리.</summary>
+public static class MessageLocalization
+{
+    /// <summary>채팅 공지 패턴 번역 — "[이름] just joined the game!" / "Kicked [이름]" /
+    /// "Host is starting game." 처리 후 false 반환(원본 스킵), 그 외 true.</summary>
+    internal static bool TryTranslateAnnouncement(string message, out string? translated, out bool suppress)
+    {
+        translated = null;
+        suppress = false;
+
+        // A-3: 게임 시작 공지 비활성화.
+        if (message == "Host is starting game.")
+        {
+            suppress = true;
+            return true;
+        }
+
+        // A-1: 접속 — "{이름} just joined the game!" (+ "{n}/{min} minimum to start." 접미사 제거).
+        const string joinSuffix = " just joined the game!";
+        int joinIdx = message.IndexOf(joinSuffix, System.StringComparison.Ordinal);
+        if (joinIdx >= 0)
+        {
+            string name = message.Substring(0, joinIdx);
+            if (!string.IsNullOrEmpty(name))
+            {
+                translated = $"{name}님이 접속하였습니다.";
+                return true;
+            }
+        }
+
+        // A-2: 킥 — "Kicked {이름}".
+        const string kickPrefix = "Kicked ";
+        if (message.StartsWith(kickPrefix, System.StringComparison.Ordinal))
+        {
+            string name = message.Substring(kickPrefix.Length);
+            if (!string.IsNullOrEmpty(name))
+            {
+                translated = $"{name}님이 추방되었습니다.";
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+/// <summary>A — 채팅 공지 번역/비활성화 (Server_ChatAnnouncement 단일 지점).
+/// 바닐라는 AllClientIds 고정이므로, 한국어 재전송은 AnnounceRelay의 10098 와이어 미러를 사용한다.</summary>
+[HarmonyPatch(typeof(Chat), nameof(Chat.Server_ChatAnnouncement), new[] { typeof(string) })]
+[HarmonyPriority(Priority.First)]
+internal static class Chat_ServerChatAnnouncement_LocalizePatch
+{
+    private static bool Prefix(string message)
+    {
+        if (!KrokoshaScavMultiplayer.is_dedicated_server)
+            return true;
+
+        if (MessageLocalization.TryTranslateAnnouncement(message, out string? translated, out bool suppress))
+        {
+            if (suppress)
+                return false;
+
+            if (!string.IsNullOrEmpty(translated))
+            {
+                // 데디 콘솔 에코 (바닐라의 LogMessage("*SERVER*", ...) 대응).
+                Chat.LogMessage("*SERVER*", translated, false);
+                AnnounceRelay.SendChatAnnouncementTo(translated, new List<knetid>(ServerMain.AllClientIds));
+            }
+            return false;
+        }
+        return true;
+    }
+}
+
+/// <summary>B — 사망 처리 대체: 개인(팝업+채팅) + 전체(모든 레이어) 공지,
+/// everyone-died 블록 비활성화. 바닐라 유지분(튜토리얼/시체 컴포넌트)만 재현한다.
+/// 기존 Discord DIED Postfix(DiscordEventPatch)는 원본 스킵 후에도 실행된다.</summary>
+[HarmonyPatch(typeof(ServerMain), nameof(ServerMain.OnPlayerDeath))]
+[HarmonyPriority(Priority.First)]
+internal static class ServerMain_OnPlayerDeath_LocalizedPatch
+{
+    private static bool Prefix(NetPlayer plr)
+    {
+        if (!KrokoshaScavMultiplayer.is_dedicated_server)
+            return true;
+        if (plr == null)
+            return true;
+
+        Plugin.Log.LogInfo($"{plr.playername} is ded, not big suprise.");
+
+        // 개인 — 팝업 (10006, important).
+        plr.Server_DoAlertSingle("사망하였습니다.\n!respawn 명령어를 사용하여 부활하세요.",
+            important: true, reliable: true);
+        // 개인 — 채팅 (10098 타겟 — 사망자 본인).
+        AnnounceRelay.SendChatAnnouncementTo("사망하였습니다. !respawn 명령어를 사용하여 부활하세요.",
+            plr.clientId);
+
+        // 전체 — 모든 레이어 (오케스트레이터 ANNOUNCE 릴레이).
+        AnnounceRelay.SendDeath(plr);
+
+        // 바닐라 유지: 튜토리얼 완료 처리 (데디에서 발신 안 되는 경로).
+        if (Util.IsTutorialWorld())
+        {
+            plr.OnFinishTutorial(tp: false);
+        }
+        // everyone-died 블록 — 비활성화 (개인 리스폰이 가능하므로 — 채팅/알림/호스트 팝업 생략).
+
+        // 바닐라 유지: 시체 컴포넌트 (ComponentHolderProtocol.AddComponent 대응 — Get-or-Add).
+        var corpse = plr.gameObject.GetComponent<Krokosha_CorpseScript_MultiplayerAdditionComponent>();
+        if (corpse == null)
+        {
+            corpse = plr.gameObject.AddComponent<Krokosha_CorpseScript_MultiplayerAdditionComponent>();
+        }
+        corpse.animalCorpse = false;
+
+        return false;
+    }
+}
+
+/// <summary>C — 데디 서버 자동 종료 비활성화 (전원 퇴장/사망 시 ToMainMenu로 인스턴스 자살).
+/// 오케스트레이터의 RUN DORMANT/유휴 정리가 인스턴스 수명을 관리한다.</summary>
+[HarmonyPatch(typeof(ServerMain), "HandleDedicatedServerUpdate")]
+[HarmonyPriority(Priority.First)]
+internal static class ServerMain_HandleDedicatedServerUpdate_DisablePatch
+{
+    private static bool Prefix()
+    {
+        if (!KrokoshaScavMultiplayer.is_dedicated_server)
+            return true;
+        return false;
+    }
+}

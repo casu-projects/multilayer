@@ -54,6 +54,23 @@ public sealed class OrchestratorConfig
     public double CommandRetryIntervalSeconds { get; set; } = 3;
     public int CommandMaxRetries { get; set; } = 3;
 
+    /// <summary>Discord 봇 토큰 — 빈 값이면 봇 비활성 (D1).</summary>
+    public string DiscordBotToken { get; set; } = "";
+
+    /// <summary>Discord 채팅/알림 채널 ID — 0이면 봇 비활성 (D1).</summary>
+    public ulong DiscordChannelId { get; set; } = 0;
+
+    /// <summary>Discord 콘솔 채널 ID — 0이면 콘솔 로그 릴레이/원격 명령 비활성 (D1).
+    /// 이 채널에 전체 콘솔 로그가 전송되고, 채널 메시지가 서버 콘솔 명령으로 실행된다
+    /// (채팅 채널과 반드시 분리 — 동일 시 콘솔 채널 경로가 우선).</summary>
+    public ulong DiscordConsoleChannelId { get; set; } = 0;
+
+    /// <summary>Steam Web API 키 — 플레이어 아바타 조회용 (없으면 아바타 생략, D1).</summary>
+    public string SteamWebApiKey { get; set; } = "";
+
+    /// <summary>calladmin 알림 시 멘션할 관리자 Discord 사용자 ID — 0이면 멘션 없음.</summary>
+    public ulong DiscordAdminUserId { get; set; } = 0;
+
     public static OrchestratorConfig Load(string path)
     {
         if (!File.Exists(path))

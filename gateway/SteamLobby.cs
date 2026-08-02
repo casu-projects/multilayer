@@ -30,8 +30,9 @@ public sealed class SteamLobby
     /// unconditionally and a missing key throws, hiding the whole lobby from search.</summary>
     private const string KeyExtraData = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_EXTRADATA";
 
-    private readonly SteamConfig _config;
-    private readonly Func<int> _connectedSessionCount;
+    private readonly string _sessionPath;
+    private readonly string _versionTag;
+    private readonly GatewayCore _core;
 
     private SteamClient? _steamClient;
     private CallbackManager? _callbackManager;
@@ -39,24 +40,26 @@ public sealed class SteamLobby
     private SteamMatchmaking? _matchmaking;
     private SteamID? _lobbyId;
     private bool _lobbyCreated;
+    private bool _loggedOn;
+    private bool _authWaitLogged;
 
     private DateTime _lastMetadataRefresh = DateTime.MinValue;
     private static readonly TimeSpan MetadataRefreshInterval = TimeSpan.FromSeconds(8);
 
-    /// <summary>오케스트레이터의 LOBBY_METADATA 명령으로 갱신되는 동적 값 (플레이어 수는 코어 세션 수).</summary>
+    /// <summary>오케스트레이터의 LOBBY_METADATA 명령으로 갱신되는 동적 값 (플레이어 수는 코어 세션 수).
+    /// mod 목록은 전송하지 않는다 (2026-08-03 — EXTRADATA 와이어에는 빈 목록 + false 고정).</summary>
     private int _livingCount;
     private int _happinessSum;
     private ulong[] _steamIds = Array.Empty<ulong>();
     private byte[]? _rulesBytes;
-    private string[] _modListGuids = Array.Empty<string>();
-    private bool _enforceModList;
 
     public bool Initialized { get; private set; }
 
-    public SteamLobby(SteamConfig config, Func<int> connectedSessionCount)
+    public SteamLobby(string sessionPath, string versionTag, GatewayCore core)
     {
-        _config = config;
-        _connectedSessionCount = connectedSessionCount;
+        _sessionPath = sessionPath;
+        _versionTag = versionTag;
+        _core = core;
     }
 
     /// <summary>오케스트레이터 LOBBY_METADATA 명령 적용 (PLAN.md — 인스턴스 리포트는 오케스트레이터가 수집).</summary>
@@ -65,8 +68,6 @@ public sealed class SteamLobby
         _livingCount = payload.LivingCount;
         _happinessSum = payload.HappinessSum;
         _steamIds = payload.SteamIds ?? Array.Empty<ulong>();
-        _modListGuids = payload.ModListGuids ?? Array.Empty<string>();
-        _enforceModList = payload.EnforceModList;
         if (!string.IsNullOrEmpty(payload.RulesBase64))
         {
             try
@@ -83,16 +84,16 @@ public sealed class SteamLobby
 
     public void Start()
     {
-        if (!File.Exists(_config.SessionPath))
+        if (!File.Exists(_sessionPath))
         {
-            Log.Info($"세션 파일이 없습니다: {_config.SessionPath} (Steam 로비 비활성).");
+            Log.Info($"세션 파일이 없습니다: {_sessionPath} (Steam 로비 비활성).");
             return;
         }
 
         SavedSteamSession session;
         try
         {
-            string json = File.ReadAllText(_config.SessionPath);
+            string json = File.ReadAllText(_sessionPath);
             session = JsonSerializer.Deserialize<SavedSteamSession>(json)
                 ?? throw new InvalidOperationException("세션 파일 파싱 결과가 비어있습니다.");
         }
@@ -132,6 +133,25 @@ public sealed class SteamLobby
     public void Tick()
     {
         _callbackManager?.RunCallbacks();
+
+        // 로비 생성 게이트 (2026-08-03): SteamKit2 로그인 + 오케스트레이터 AUTH_INFO가 모두
+        // 도착해야 생성한다 — AUTH_INFO 이전에는 서버명/인원/비밀번호 여부가 확정되지 않으므로
+        // 로비를 만들지 않는다 (코어 기본값 레이스 원천 제거).
+        if (_loggedOn && !_lobbyCreated)
+        {
+            if (!_core.AuthInfoReceived)
+            {
+                if (!_authWaitLogged)
+                {
+                    _authWaitLogged = true;
+                    Log.Info("Steam 로그인 완료 — AUTH_INFO 대기 중 (로비 생성 보류).");
+                }
+            }
+            else
+            {
+                CreateLobbyNow();
+            }
+        }
 
         if (_lobbyCreated && DateTime.UtcNow - _lastMetadataRefresh > MetadataRefreshInterval)
         {
@@ -184,7 +204,15 @@ public sealed class SteamLobby
         }
 
         Log.Info($"로그인 성공 (SteamID {_steamClient!.SteamID}).");
-        _matchmaking!.CreateLobby(AppId, ELobbyType.Public, _config.MaxPlayers,
+        _loggedOn = true;
+        // 로비 생성은 Tick의 게이트에서 (AUTH_INFO 수신 후) 수행한다.
+    }
+
+    private void CreateLobbyNow()
+    {
+        if (_lobbyCreated) return;
+        Log.Info($"AUTH_INFO 수신 — 로비 생성 (인원 {_core.MaxPlayers}).");
+        _matchmaking!.CreateLobby(AppId, ELobbyType.Public, _core.MaxPlayers,
             metadata: BuildBaseMetadata());
     }
 
@@ -210,7 +238,7 @@ public sealed class SteamLobby
             return;
         }
 
-        _matchmaking!.SetLobbyData(AppId, _lobbyId, ELobbyType.Public, _config.MaxPlayers,
+        _matchmaking!.SetLobbyData(AppId, _lobbyId, ELobbyType.Public, _core.MaxPlayers,
             metadata: BuildBaseMetadata());
     }
 
@@ -220,15 +248,15 @@ public sealed class SteamLobby
 
         return new()
         {
-            [KeyLobbyName] = _config.ServerName,
-            [KeyVersion] = _config.VersionTag,
+            [KeyLobbyName] = _core.ServerName,
+            [KeyVersion] = _versionTag,
             [KeyGamemode] = "loading",
             [KeyCurrentLayer] = "0",
             [KeyDepth] = "0",
             [KeyAvgMood] = avgMood.ToString(),
             [KeyLivingCount] = _livingCount.ToString(),
-            [KeyPlrCount] = _connectedSessionCount().ToString(),
-            [KeyHasPassword] = _config.HasPassword ? "1" : "0",
+            [KeyPlrCount] = _core.SessionCount.ToString(),
+            [KeyHasPassword] = _core.HasPassword ? "1" : "0",
             [KeyIsDedicated] = "1",
             [KeyLocked] = "0",
             [KeyRunSettings] = "0",
@@ -251,8 +279,10 @@ public sealed class SteamLobby
         var inner = new NetDataWriter();
         inner.Put(_rulesBytes);
         inner.PutArray(allSteamIds);
-        inner.Put(_enforceModList);
-        inner.PutArray(_modListGuids);
+        // mod 목록은 전송하지 않음 — 클라이언트가 항상 읽는 bool + 배열은 빈 값으로 고정
+        // (enforceModList=false → 모드리스트 잠금 없음).
+        inner.Put(false);
+        inner.PutArray(Array.Empty<string>());
 
         byte[] compressed;
         using (var outStream = new MemoryStream())

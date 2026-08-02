@@ -159,6 +159,9 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "CHAT":
                 ChatRelay.Receive(msg.PayloadAs<ChatPayload>());
                 break;
+            case "ANNOUNCE":
+                AnnounceRelay.Handle(msg.PayloadAs<AnnouncePayload>());
+                break;
             case "LIST_RESULT":
                 ChatCommands.HandleListResult(msg);
                 break;

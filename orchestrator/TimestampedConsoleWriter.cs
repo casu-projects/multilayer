@@ -13,6 +13,11 @@ public sealed class TimestampedConsoleWriter : TextWriter
     /// <summary>전역 인스턴스 — LOG 릴레이 핸들러가 PrintRelayed로 접근한다.</summary>
     public static TimestampedConsoleWriter? Instance { get; private set; }
 
+    /// <summary>완성된 로그 라인 콜백 (접두사 포함 — D1 Discord 콘솔 릴레이용).
+    /// EmitLine/PrintRelayed가 표시 전에 호출한다 — 오케스트레이터 자체 로그와
+    /// 게이트웨이/에이전트/인스턴스 릴레이 로그가 전부 이 경로로 수집된다.</summary>
+    public Action<string>? OnConsoleLine;
+
     private readonly TextWriter _inner;
     private readonly StringBuilder _buffer = new();
 
@@ -24,13 +29,21 @@ public sealed class TimestampedConsoleWriter : TextWriter
 
     public override Encoding Encoding => _inner.Encoding;
 
-    private void EmitLine(string line) =>
-        ConsoleIO.WriteLine($"[{DateTime.Now:HH:mm:ss} orch] {line}");
+    private void EmitLine(string line)
+    {
+        string formatted = $"[{DateTime.Now:HH:mm:ss} orch] {line}";
+        OnConsoleLine?.Invoke(formatted);
+        ConsoleIO.WriteLine(formatted);
+    }
 
     /// <summary>릴레이 로그 표시 (agent/gateway/인스턴스 — LOG 메시지 수신 시).
     /// 소스는 "name:subname/thirdname" 규약 (예: agent:m1/depth-1) — 단일 블록에 통합.</summary>
-    public void PrintRelayed(string source, string message) =>
-        ConsoleIO.WriteLine($"[{DateTime.Now:HH:mm:ss} {source}] {message}");
+    public void PrintRelayed(string source, string message)
+    {
+        string formatted = $"[{DateTime.Now:HH:mm:ss} {source}] {message}";
+        OnConsoleLine?.Invoke(formatted);
+        ConsoleIO.WriteLine(formatted);
+    }
 
     private void FlushBuffer()
     {

@@ -78,6 +78,9 @@ internal static class Program
                 {
                     hub.SendNoAck(conn, "RUN_RULES_STATE", new { runSettings, rules });
                 }
+                // G13 — rule/run 변경 시 로비 rulesblob 즉시 반영 (run.json은 로비에 영향 없어도
+                // 함께 전송 — 규칙 구조체는 rule.json만 사용).
+                PushLobbyMetadata(hub, runRules, sessions, force: true);
             },
             command =>
             {
@@ -93,6 +96,52 @@ internal static class Program
         console.ShutdownRequested = () => shutdownCts.Cancel();
         console.Start();
 
+        // Discord 관리 봇 (D1) — 토큰/채널 미설정 시 비활성.
+        var discordBot = new DiscordBot(config.DiscordBotToken, config.DiscordChannelId,
+            config.DiscordConsoleChannelId, config.SteamWebApiKey, config.DiscordAdminUserId,
+            text =>
+            {
+                // Discord 채팅 → 게임 — 전 인스턴스에 "관리자" 스피커로 브로드캐스트.
+                // 모드 ChatRelay는 플레이어 채팅만 오케스트레이터로 올리므로 루프 없음.
+                foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                {
+                    hub.SendNoAck(conn, "CHAT", new { speaker = "관리자", message = text, color = "", layer = "" });
+                }
+            },
+            text =>
+            {
+                // Discord 콘솔 채널 → 서버 콘솔 명령 — 터미널 입력과 동일 경로 (SubmitLine).
+                console.SubmitLine(text);
+            });
+        // 전체 콘솔 로그 → Discord 콘솔 채널 (접두사 포함 — 오케스트레이터 + 릴레이 전부).
+        TimestampedConsoleWriter.Instance!.OnConsoleLine = line => discordBot.EnqueueConsoleLog(line);
+
+        // 마이그레이션 커밋 → Discord 알림 (L{from} > L{to}) + 로비 메타데이터 갱신 + 인게임 공지.
+        migrations.MigrationCommitted += (player, fromDepth, toDepth) =>
+        {
+            var state = sessions.Get(player);
+            _ = discordBot.SendMigrationAsync(state?.Username ?? player.Value, SteamIdOf(player),
+                fromDepth, toDepth);
+            PushLobbyMetadata(hub, runRules, sessions, force: true);
+
+            // 인게임 공지 — 본인 제외 전 인스턴스 ({이름}님이 L{from}에서 L{to}로 이동합니다).
+            string name = state?.Username ?? player.Value;
+            foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+            {
+                hub.SendNoAck(conn, "ANNOUNCE", new
+                {
+                    kind = "migration",
+                    playerKey = player.Value,
+                    name,
+                    fromDepth,
+                    toDepth,
+                });
+            }
+        };
+
+        // D1 — Discord 봇 시작 (토큰/채널 미설정 시 내부 no-op).
+        _ = discordBot.StartAsync();
+
         // 메인 루프 — 모든 상태 접근은 이 스레드에서만.
         while (!shutdownCts.IsCancellationRequested)
         {
@@ -101,7 +150,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, conn, msg);
+                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, discordBot, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -109,6 +158,8 @@ internal static class Program
                 }
             });
             migrations.Tick();
+            // Steam 로비 메타데이터 주기 갱신 (8초 스로틀 — 세션 변동 시 force 푸시가 즉시 반영).
+            PushLobbyMetadata(hub, runRules, sessions);
             // 유휴 정리 계수 (2026-08-02): 마이그레이션 중인 플레이어(Migrating, InstanceId=출발지)와
             // 도착 대기 중인 목적지(tx.TargetInstance)도 인원으로 계산 — FREEZE/READY 대기 중
             // 출발지·목적지가 유휴 오판정으로 강제 정지되는 것을 방지한다.
@@ -148,7 +199,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, conn, msg);
+                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, discordBot, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -162,6 +213,7 @@ internal static class Program
         sessions.PersistAllOffline();
 
         Console.WriteLine("종료 완료.");
+        try { discordBot.StopAsync().GetAwaiter().GetResult(); } catch { }
         hub.Stop();
         // 허브 백그라운드 태스크(리스너/연결 서비스) 정리 — 프로세스가 곧 종료되지만 명시적 해제.
         cts.Cancel();
@@ -183,7 +235,8 @@ internal static class Program
 
     private static void Dispatch(OrchestratorConfig config, ControlHub hub, PlayerSessionStore sessions,
         InstanceManager instances, MigrationCoordinator migrations, PlayerDataStore dataStore,
-        BanList banList, RunRuleStore runRules, ControlHub.ClientConnection conn, ControlMessage msg)
+        BanList banList, RunRuleStore runRules, DiscordBot discordBot,
+        ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -196,8 +249,10 @@ internal static class Program
                 // 인증/밴 정보 푸시 — 밴 목록 단일 소유자는 오케스트레이터, 게이트웨이는
                 // 메모리 사본으로 접속 시 검증 (O6-8 — 재연결 시 스냅샷 재푸시로 수렴)
                 hub.SendNoAck(conn, "AUTH_INFO",
-                    new { serverPassword = config.ServerPassword, bannedKeys = banList.All, maxPlayers = config.MaxPlayers });
+                    new { serverName = config.ServerName, serverPassword = config.ServerPassword, bannedKeys = banList.All, maxPlayers = config.MaxPlayers });
                 hub.SendNoAck(conn, "ACK_REPLY", null);
+                // 새 게이트웨이 — Steam 로비 메타데이터 즉시 푸시 (rules/players).
+                PushLobbyMetadata(hub, runRules, sessions, force: true);
                 return;
 
             case "AGENT_HELLO":
@@ -248,19 +303,19 @@ internal static class Program
         switch (conn.Kind)
         {
             case ClientKind.Gateway:
-                DispatchGateway(config, hub, sessions, migrations, conn, msg);
+                DispatchGateway(config, hub, sessions, migrations, runRules, discordBot, conn, msg);
                 break;
             case ClientKind.Agent:
                 DispatchAgent(instances, sessions, conn, msg);
                 break;
             case ClientKind.Mod:
-                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, conn, msg);
+                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, discordBot, conn, msg);
                 break;
         }
     }
 
     private static void DispatchGateway(OrchestratorConfig config, ControlHub hub, PlayerSessionStore sessions, MigrationCoordinator migrations,
-        ControlHub.ClientConnection conn, ControlMessage msg)
+        RunRuleStore runRules, DiscordBot discordBot, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -278,6 +333,14 @@ internal static class Program
                         break;
                     }
                     sessions.OnSessionConnected(connected, GetUsername(msg));
+
+                    // G13 — 접속 시 생존 상태 기본값(생존) + 로비 목록 즉시 갱신.
+                    _alive[connected] = true;
+                    PushLobbyMetadata(hub, runRules, sessions, force: true);
+
+                    // D1 — Discord 접속 알림.
+                    _ = discordBot.SendJoinLeaveAsync(GetUsername(msg) ?? connected.Value,
+                        SteamIdOf(connected), joined: true);
                 }
                 break;
             case "SESSION_DISCONNECTED":
@@ -291,6 +354,16 @@ internal static class Program
                     else
                     {
                         sessions.OnSessionDisconnected(disc);
+
+                        // G13 — 생존 상태 해제 + 로비 목록 즉시 갱신.
+                        _alive.Remove(disc);
+                        PushLobbyMetadata(hub, runRules, sessions, force: true);
+
+                        // D1 — Discord 퇴장 알림 (마이그레이션 중 퇴장은 마이그레이션 알림이
+                        // 별도로 발행되므로 중복 방지).
+                        var discState = sessions.Get(disc);
+                        _ = discordBot.SendJoinLeaveAsync(discState?.Username ?? disc.Value,
+                            SteamIdOf(disc), joined: false);
                     }
                 }
                 break;
@@ -331,7 +404,7 @@ internal static class Program
     }
 
     private static void DispatchMod(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
-        MigrationCoordinator migrations, PlayerDataStore dataStore, RunRuleStore runRules,
+        MigrationCoordinator migrations, PlayerDataStore dataStore, RunRuleStore runRules, DiscordBot discordBot,
         ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
@@ -409,6 +482,37 @@ internal static class Program
                     {
                         Console.WriteLine($"{chat.Speaker} → {forwarded}개 인스턴스 릴레이 (L{conn.InstanceDepth}).");
                     }
+
+                    // D1 — 게임 채팅 → Discord (시스템 공지 "*" 제외 — 플레이어 메시지만).
+                    if (chat.Speaker != "*")
+                    {
+                        _ = discordBot.SendChatAsync(chat.Speaker, chat.Message,
+                            layerLabel, chat.Color ?? "");
+                    }
+                }
+                break;
+            case "DIED":
+            case "RESPAWNED":
+                if (msg.PayloadAs<PlayerEventPayload>() is { } deathEvent)
+                {
+                    // 생존 상태 추적 — 사망/리스폰 즉시 로비 생존자 수 반영 (G13).
+                    if (TryPlayerKey(deathEvent.PlayerKey, out var evKey))
+                    {
+                        _alive[evKey] = msg.Type == "RESPAWNED";
+                        PushLobbyMetadata(hub, runRules, sessions, force: true);
+                    }
+
+                    // 마이그레이션 중 사망/리스폰은 마이그레이션 알림과 중복 — Discord는 스킵.
+                    bool migrating = TryPlayerKey(deathEvent.PlayerKey, out var evKey2)
+                        && migrations.IsMigrating(evKey2);
+                    if (!migrating)
+                    {
+                        _ = discordBot.SendDeathRespawnAsync(
+                            deathEvent.Username ?? deathEvent.PlayerKey ?? "?",
+                            TryPlayerKey(deathEvent.PlayerKey, out var evKey3) ? SteamIdOf(evKey3) : 0,
+                            died: msg.Type == "DIED",
+                            deathEvent.Layer ?? "");
+                    }
                 }
                 break;
             case "LIST_REQUEST":
@@ -433,6 +537,28 @@ internal static class Program
                 if (msg.PayloadAs<CallAdminPayload>() is { } callAdmin)
                 {
                     Console.WriteLine($"{callAdmin.Username} ({callAdmin.PlayerKey}) — 관리자 호출.");
+
+                    // D1 — Discord 관리자 호출 알림 (+ 멘션).
+                    bool callOk = TryPlayerKey(callAdmin.PlayerKey, out var callKey);
+                    _ = discordBot.SendCallAdminAsync(callAdmin.Username ?? callKey.Value ?? "?",
+                        callOk ? SteamIdOf(callKey) : 0);
+                }
+                break;
+            case "ANNOUNCE":
+                // 크로스 인스턴스 시스템 공지 — 발신 포함 전 인스턴스 에코 (사망 공지 등).
+                if (msg.PayloadAs<AnnouncePayload>() is { } announce)
+                {
+                    foreach (var other in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                    {
+                        hub.SendNoAck(other, "ANNOUNCE", new
+                        {
+                            kind = announce.Kind,
+                            playerKey = announce.PlayerKey,
+                            name = announce.Name,
+                            fromDepth = announce.FromDepth,
+                            toDepth = announce.ToDepth,
+                        });
+                    }
                 }
                 break;
             default:
@@ -546,6 +672,71 @@ internal static class Program
     {
         public string PlayerKey { get; set; } = "";
         public string Username { get; set; } = "";
+    }
+
+    /// <summary>사망/리스폰 이벤트 (mod → orchestrator — D1 Discord 알림).</summary>
+    private sealed class PlayerEventPayload
+    {
+        public string PlayerKey { get; set; } = "";
+        public string Username { get; set; } = "";
+        public string Layer { get; set; } = "";
+    }
+
+    /// <summary>크로스 인스턴스 시스템 공지 (mod ↔ orchestrator ↔ mod — 사망/마이그레이션).</summary>
+    private sealed class AnnouncePayload
+    {
+        public string Kind { get; set; } = "";
+        public string PlayerKey { get; set; } = "";
+        public string Name { get; set; } = "";
+        public int FromDepth { get; set; }
+        public int ToDepth { get; set; }
+    }
+
+    /// <summary>PlayerKey에서 SteamID64 추출 — STEAM_ 접두사가 아니면 0 (직접연결/steam 비활성).</summary>
+    private static ulong SteamIdOf(PlayerKey key) =>
+        key.Value.StartsWith("STEAM_") && ulong.TryParse(key.Value.AsSpan(6), out ulong sid) ? sid : 0;
+
+    // ── Steam 로비 메타데이터 (G13 — LOBBY_METADATA) ──
+
+    /// <summary>세션별 생존 상태 — DIED/RESPAWNED 이벤트로 갱신, 접속 시 기본 생존,
+    /// 퇴장 시 제거. livingCount(=로비 KeyLivingCount) 산출에 사용 (실시간 반영).</summary>
+    private static readonly Dictionary<PlayerKey, bool> _alive = new();
+
+    private static DateTime _lastLobbyMetadataPush = DateTime.MinValue;
+    /// <summary>안전망 주기 (2026-08-03): 이벤트 구동이 기본 — 드문 푸시 유실/엣지 케이스의
+    /// 자가 치유용 저빈도 폴링 (접속/퇴장/사망/리스폰/rule 명령/마이그레이션 시 force 푸시가 즉시 반영).</summary>
+    private static readonly TimeSpan LobbyMetadataInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>Steam 로비 동적 메타데이터 푸시: livingCount = 온라인 세션 중 생존 상태 수,
+    /// happinessSum = 0 (기본값 고정 — 2026-08-03), steamIds = STEAM_ 세션 목록,
+    /// rulesBase64 = rule.json 기반 규칙 구조체 (RulesBlobBuilder — 규칙 단일 정본).
+    /// mod 목록은 전송하지 않는다 (개조 전용 모드뿐 — 게이트웨이가 빈 값으로 고정).
+    /// 30초 안전망 스로틀 — force=true면 즉시 (게이트웨이 재연결/세션 변동/사망·리스폰/rule 명령 시).</summary>
+    private static void PushLobbyMetadata(ControlHub hub, RunRuleStore runRules,
+        PlayerSessionStore sessions, bool force = false)
+    {
+        DateTime now = DateTime.UtcNow;
+        if (!force && now - _lastLobbyMetadataPush < LobbyMetadataInterval) return;
+        _lastLobbyMetadataPush = now;
+
+        var gateway = hub.GatewayConnection;
+        if (gateway == null) return;
+
+        var online = sessions.All.Where(s => s.Session != PlayerSessionState.Offline).ToList();
+        ulong[] steamIds = online
+            .Select(s => SteamIdOf(s.Key))
+            .Where(id => id != 0)
+            .ToArray();
+        int livingCount = online.Count(s => _alive.GetValueOrDefault(s.Key, true));
+
+        string rulesBase64 = Convert.ToBase64String(RulesBlobBuilder.Build(runRules.RuleSnapshot));
+        hub.SendNoAck(gateway, "LOBBY_METADATA", new
+        {
+            livingCount,
+            happinessSum = 0,
+            steamIds,
+            rulesBase64,
+        });
     }
 }
 

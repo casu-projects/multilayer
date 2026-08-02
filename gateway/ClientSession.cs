@@ -25,6 +25,10 @@ public sealed class ClientSession : INetEventListener
     public PlayerKey Player { get; }
     public string Username { get; }
     public ulong? SteamId { get; }
+
+    /// <summary>핸드셰이크에서 파싱한 서버 비밀번호 (DirectIpAdapter와 동일 규약 — Steam 경로
+    /// 검증용. 파싱 실패 시 빈 문자열 — 게임 서버가 최종 검증하므로 안전).</summary>
+    public string Password { get; }
     public SessionState State { get; private set; }
     public string? InstanceId { get; private set; }
     public string BackendAddr { get; private set; } = "";
@@ -46,9 +50,14 @@ public sealed class ClientSession : INetEventListener
         _clientSink = clientSink;
         _intro = intro;
         Player = player;
-        Username = username;
-        SteamId = steamId;
         _core = core;
+        // 핸드셰이크에서 username/password 파싱 — DirectIpAdapter와 동일 규약.
+        // Steam 경로는 username이 비어 전달되므로 여기서 채운다 (SESSION_CONNECTED 보고/
+        // Discord 알림/!list 표시용 — 게임 서버가 최종 검증하므로 안전).
+        HandshakeReader.TryParseCredentials(intro, out string introUsername, out string pw);
+        Username = !string.IsNullOrEmpty(username) ? username : introUsername;
+        Password = pw;
+        SteamId = steamId;
         State = SessionState.Accepted;
         _backendManager = new NetManager(this) { UnconnectedMessagesEnabled = false };
     }

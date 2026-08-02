@@ -36,6 +36,9 @@ mv "$TMP/CasuMpGateway"       "$DIST/casu-gateway"
 # gateway 네이티브 부수 파일 (Steam 모드 대비 — Steam 비활성이면 런타임에 불필요)
 [ -f "$TMP/libsteam_api.so" ] && mv "$TMP/libsteam_api.so" "$DIST/"
 [ -f "$TMP/steam_appid.txt" ] && mv "$TMP/steam_appid.txt" "$DIST/"
+# Steam 모드: libsteam_api.so는 단일파일 번들에 content로 묻히면 SteamAPI.InitEx의
+# DllImport가 앱 디렉토리에서 로드하지 못하므로 반드시 별도 파일로 배치한다 (구 시스템과 동일).
+[ -f "$ROOT/../instance/libsteam_api.so" ] && cp "$ROOT/../instance/libsteam_api.so" "$DIST/"
 rm -rf "$TMP"
 
 # 2) mod — Release 빌드 → 단일 DLL (BepInEx 플러그인 — 단일파일 대상 아님)

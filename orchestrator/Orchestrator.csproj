@@ -12,4 +12,9 @@
 
   <!-- 제어 허브(ControlHub): 게이트웨이/에이전트/모드 3종 클라이언트를 TCP로 수용 (PLAN.md D3/O6-1) -->
 
+  <!-- Discord 관리 봇 (D1) — 구 시스템과 동일 버전 (검증됨) -->
+  <ItemGroup>
+    <PackageReference Include="Discord.Net.WebSocket" Version="3.20.1" />
+  </ItemGroup>
+
 </Project>

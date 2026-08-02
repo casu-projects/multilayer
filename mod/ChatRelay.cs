@@ -68,9 +68,12 @@ public static class ChatRelay
         // 최종 표시 "[L1] [player2222]: message"를 만들기 위해 레이어 태그의 앞 '['는
         // 생략하고, 안쪽 '['는 포함하되 닫는 ']'는 넣지 않는다 — 클라이언트가 앞 '['와
         // 뒤 ']'를 각각 하나씩 붙인다 ("L1] [<color>이름</color>" → "[L1] [이름]: ").
+        // 레이어가 없으면(Discord 관리자 채팅 등) 내부 '['도 생략 — 클라이언트가 붙이는
+        // 단일 '['만으로 "[관리자]: 메시지"가 완성된다 (이중 대괄호 방지).
         string layerTag = string.IsNullOrEmpty(payload.Layer) ? "" : $"{payload.Layer}] ";
+        string innerBracket = string.IsNullOrEmpty(payload.Layer) ? "" : "[";
         string colorTag = string.IsNullOrEmpty(payload.Color) ? "" : $"<color={payload.Color}>";
         string closeTag = string.IsNullOrEmpty(payload.Color) ? "" : "</color>";
-        return $"{layerTag}[{colorTag}{payload.Speaker}{closeTag}";
+        return $"{layerTag}{innerBracket}{colorTag}{payload.Speaker}{closeTag}";
     }
 }

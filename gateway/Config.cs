@@ -17,8 +17,14 @@ public sealed class GatewayConfig
     /// <summary>Steam 어댑터 활성화 여부 (PLAN.md G13 — Steam은 게이트웨이 1곳에만 존재).</summary>
     public bool SteamEnabled { get; set; } = false;
 
-    /// <summary>Steam 어댑터 설정 (SteamEnabled=true일 때만 사용).</summary>
-    public SteamConfig? Steam { get; set; }
+    /// <summary>SteamKit2 봇 세션 파일 경로 (AccountName + RefreshToken — 기존
+    /// tools/SteamLoginSetup 형식과 동일). GUI/비밀번호 저장 없이 토큰 로그온.
+    /// (2026-08-03 — 로비 서버명/인원/비밀번호 여부는 오케스트레이터 AUTH_INFO에서 수신 —
+    /// 게이트웨이는 세션 파일 + 버전 태그만 보유)</summary>
+    public string SteamSessionPath { get; set; } = "steam_session.json";
+
+    /// <summary>로비 KeyVersion 값 (기존 오케스트레이터: GameVersionTag + "_MPv4.0.1").</summary>
+    public string SteamVersionTag { get; set; } = "7.0.1_MPv4.0.1";
 
     // ── 타임아웃/재시도 (PLAN.md G12-R2) ──
 
@@ -56,25 +62,6 @@ public sealed class GatewayConfig
         }
         return JsonSerializer.Deserialize<GatewayConfig>(File.ReadAllText(path)) ?? new GatewayConfig();
     }
-}
-
-public sealed class SteamConfig
-{
-    /// <summary>SteamKit2 봇 세션 파일 경로 (AccountName + RefreshToken — 기존
-    /// tools/SteamLoginSetup 형식과 동일). GUI/비밀번호 저장 없이 토큰 로그온.</summary>
-    public string SessionPath { get; set; } = "steam_session.json";
-
-    /// <summary>로비 메타데이터용 서버 이름.</summary>
-    public string ServerName { get; set; } = "CasuMP Server";
-
-    /// <summary>로비 최대 인원.</summary>
-    public int MaxPlayers { get; set; } = 32;
-
-    /// <summary>로비 KeyVersion 값 (기존 오케스트레이터: GameVersionTag + "_MPv4.0.1").</summary>
-    public string VersionTag { get; set; } = "7.0.1_MPv4.0.1";
-
-    /// <summary>로비 KeyHasPassword — 서버에 비밀번호가 있는지 (실제 인증은 백엔드가 수행).</summary>
-    public bool HasPassword { get; set; } = false;
 }
 
 /// <summary>라우팅 테이블 엔트리 — 오케스트레이터 원본의 미러 (PLAN.md G1-8).</summary>

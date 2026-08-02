@@ -49,7 +49,8 @@ public static class ChatCommands
                     || PlayerListCommand.TryHandle(plr, argv)
                     || CurrentRunCommand.TryHandle(plr, argv)
                     || CallAdminCommand.TryHandle(plr, argv)
-                    || RespawnCommand.TryHandle(plr, argv))
+                    || RespawnCommand.TryHandle(plr, argv)
+                    || VoteCommands.TryHandle(plr, argv))
                 {
                     return false;
                 }
@@ -135,6 +136,8 @@ public static class ChatCommands
             ChatPrivateReply.SendToPlayer(caller, "!currentrun [key] - 현재 Run 설정 보기 (생략 시 전체 목록)");
             ChatPrivateReply.SendToPlayer(caller, "!calladmin - 관리자 호출");
             ChatPrivateReply.SendToPlayer(caller, "!respawn - 사망 시 레이어 1에서 새 캐릭터로 리스폰");
+            ChatPrivateReply.SendToPlayer(caller, "!runvote <설정> <값> - Run 설정 변경 투표 (전체 레이어)");
+            ChatPrivateReply.SendToPlayer(caller, "!banvote <이름> - 플레이어 영구 차단 투표 (전체 레이어)");
             return true;
         }
     }

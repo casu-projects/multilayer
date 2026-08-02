@@ -41,6 +41,9 @@ internal static class Program
 
         var banList = new BanList(config.BanListPath);
 
+        // 크로스 인스턴스 투표 조정 (VOTE_START → VOTE_RUN 릴레이 → tally 합산 → VOTE_RESULT).
+        var votes = new VoteCoordinator(graceSeconds: 5);
+
         hub.OnConnectionClosed += conn =>
         {
             switch (conn.Kind)
@@ -72,14 +75,8 @@ internal static class Program
             () =>
             {
                 // rule/run 변경 → 전 인스턴스 즉시 반영 (모드가 재적용).
-                var runSettings = runRules.RunSnapshot;
-                var rules = runRules.RuleSnapshot;
-                foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
-                {
-                    hub.SendNoAck(conn, "RUN_RULES_STATE", new { runSettings, rules });
-                }
-                // G13 — rule/run 변경 시 로비 rulesblob 즉시 반영 (run.json은 로비에 영향 없어도
-                // 함께 전송 — 규칙 구조체는 rule.json만 사용).
+                PushRunRulesToInstances(hub, runRules);
+                // G13 — rule/run 변경 시 로비 rulesblob 즉시 반영.
                 PushLobbyMetadata(hub, runRules, sessions, force: true);
             },
             command =>
@@ -150,7 +147,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, discordBot, conn, msg);
+                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, votes, discordBot, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -160,6 +157,12 @@ internal static class Program
             migrations.Tick();
             // Steam 로비 메타데이터 주기 갱신 (8초 스로틀 — 세션 변동 시 force 푸시가 즉시 반영).
             PushLobbyMetadata(hub, runRules, sessions);
+
+            // 투표 확정 — 전 인스턴스 VOTE_RESULT + Discord + 가결 시 효과 적용 (밴/런).
+            if (votes.TryFinalize(DateTime.UtcNow, out VoteCoordinator.VoteFinalizeResult voteResult))
+            {
+                FinalizeVote(hub, sessions, runRules, banList, discordBot, voteResult);
+            }
             // 유휴 정리 계수 (2026-08-02): 마이그레이션 중인 플레이어(Migrating, InstanceId=출발지)와
             // 도착 대기 중인 목적지(tx.TargetInstance)도 인원으로 계산 — FREEZE/READY 대기 중
             // 출발지·목적지가 유휴 오판정으로 강제 정지되는 것을 방지한다.
@@ -199,7 +202,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, discordBot, conn, msg);
+                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, votes, discordBot, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -235,7 +238,7 @@ internal static class Program
 
     private static void Dispatch(OrchestratorConfig config, ControlHub hub, PlayerSessionStore sessions,
         InstanceManager instances, MigrationCoordinator migrations, PlayerDataStore dataStore,
-        BanList banList, RunRuleStore runRules, DiscordBot discordBot,
+        BanList banList, RunRuleStore runRules, VoteCoordinator votes, DiscordBot discordBot,
         ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
@@ -309,7 +312,7 @@ internal static class Program
                 DispatchAgent(instances, sessions, conn, msg);
                 break;
             case ClientKind.Mod:
-                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, discordBot, conn, msg);
+                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, votes, discordBot, conn, msg);
                 break;
         }
     }
@@ -404,8 +407,8 @@ internal static class Program
     }
 
     private static void DispatchMod(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
-        MigrationCoordinator migrations, PlayerDataStore dataStore, RunRuleStore runRules, DiscordBot discordBot,
-        ControlHub.ClientConnection conn, ControlMessage msg)
+        MigrationCoordinator migrations, PlayerDataStore dataStore, RunRuleStore runRules, VoteCoordinator votes,
+        DiscordBot discordBot, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -561,6 +564,18 @@ internal static class Program
                     }
                 }
                 break;
+            case "VOTE_START":
+                if (msg.PayloadAs<VoteStartMarker>() is { } voteStart)
+                {
+                    HandleVoteStart(hub, sessions, votes, discordBot, conn, voteStart);
+                }
+                break;
+            case "VOTE_TALLY":
+                if (msg.PayloadAs<VoteTallyMarker>() is { } tally)
+                {
+                    votes.RecordTally(tally, conn.InstanceKey ?? "");
+                }
+                break;
             default:
                 Console.WriteLine($"모드 알 수 없는 메시지: {msg.Type}");
                 break;
@@ -574,6 +589,152 @@ internal static class Program
         if (string.IsNullOrEmpty(value)) return false;
         key = PlayerKey.FromString(value);
         return true;
+    }
+
+    // ── 크로스 인스턴스 투표 (VOTE_START 처리) ──
+
+    /// <summary>VOTE_START 수신 — ban 대상 해석(온라인 세션) + 활성 투표 검증 후 전 인스턴스
+    /// VOTE_RUN 브로드캐스트 + Discord 공지. 거부 시 VOTE_REJECTED로 발신자 개인 회신.</summary>
+    private static void HandleVoteStart(ControlHub hub, PlayerSessionStore sessions, VoteCoordinator votes,
+        DiscordBot discordBot, ControlHub.ClientConnection conn, VoteStartMarker marker)
+    {
+        string? callerClientId = marker.Payload.GetValueOrDefault("callerClientId");
+
+        // ban 대상 해석 — 온라인 세션만 (이름 또는 PlayerKey).
+        if (marker.Kind == "ban")
+        {
+            string targetQuery = marker.Payload.GetValueOrDefault("targetQuery", "");
+            if (!TryResolveOnlinePlayer(sessions, targetQuery, out string resolvedKey, out string resolvedName))
+            {
+                RejectVote(hub, discordBot, conn, marker, callerClientId,
+                    $"플레이어를 찾을 수 없습니다: {targetQuery}");
+                return;
+            }
+            marker.Payload["targetName"] = resolvedName;
+            marker.Payload["targetKey"] = resolvedKey;
+            marker.PromptBody = resolvedName;
+        }
+
+        var expected = hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed)
+            .Select(c => c.InstanceKey ?? "")
+            .Where(k => k.Length > 0)
+            .ToList();
+
+        if (!votes.TryStart(marker, expected))
+        {
+            RejectVote(hub, discordBot, conn, marker, callerClientId,
+                "이미 진행 중인 투표가 있습니다. 잠시 후 다시 시도해주세요.");
+            return;
+        }
+
+        // 전 인스턴스 VOTE_RUN (발신 포함 — 모든 레이어가 투표).
+        foreach (var other in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+        {
+            hub.SendNoAck(other, "VOTE_RUN", new
+            {
+                voteId = marker.VoteId,
+                kind = marker.Kind,
+                title = marker.Title,
+                promptBody = marker.PromptBody,
+                timeoutSeconds = marker.TimeoutSeconds,
+                payload = marker.Payload,
+            });
+        }
+
+        _ = discordBot.SendVoteStartAsync(marker.Kind, marker.Title, marker.PromptBody, marker.TimeoutSeconds);
+        Console.WriteLine($"[Vote] 투표 {marker.VoteId}({marker.Kind}) 시작 — {expected.Count}개 인스턴스 전파.");
+    }
+
+    private static void RejectVote(ControlHub hub, DiscordBot discordBot, ControlHub.ClientConnection conn,
+        VoteStartMarker marker, string? callerClientId, string reason)
+    {
+        if (!string.IsNullOrEmpty(callerClientId))
+        {
+            hub.SendNoAck(conn, "VOTE_REJECTED", new { callerClientId, reason });
+        }
+        _ = discordBot.SendVoteRejectedAsync(marker.Kind, marker.Title, reason);
+        Console.WriteLine($"[Vote] 투표 {marker.VoteId}({marker.Kind}) 거부: {reason}");
+    }
+
+    /// <summary>온라인 세션에서 대상 해석 — 이름(대소문자 무시) 또는 PlayerKey 일치.</summary>
+    private static bool TryResolveOnlinePlayer(PlayerSessionStore sessions, string query,
+        out string playerKey, out string name)
+    {
+        playerKey = "";
+        name = "";
+        var match = sessions.All
+            .Where(s => s.Session != PlayerSessionState.Offline)
+            .FirstOrDefault(s =>
+                (s.Username != null && s.Username.Equals(query, StringComparison.OrdinalIgnoreCase))
+                || s.Key.Value.Equals(query, StringComparison.OrdinalIgnoreCase));
+        if (match == null) return false;
+
+        playerKey = match.Key.Value;
+        name = match.Username ?? match.Key.Value;
+        return true;
+    }
+
+    /// <summary>투표 확정 처리 — VOTE_RESULT 브로드캐스트 + Discord 결과 + 가결 시 효과:
+    /// ban → 밴 파일 + 게이트웨이 즉시 차단/킥, run → run.json 즉시 반영 (RUN_RULES_STATE 푸시).</summary>
+    private static void FinalizeVote(ControlHub hub, PlayerSessionStore sessions, RunRuleStore runRules,
+        BanList banList, DiscordBot discordBot, VoteCoordinator.VoteFinalizeResult voteResult)
+    {
+        foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+        {
+            hub.SendNoAck(conn, "VOTE_RESULT", new
+            {
+                voteId = voteResult.VoteId,
+                kind = voteResult.Kind,
+                yes = voteResult.Yes,
+                no = voteResult.No,
+                ignore = voteResult.Ignore,
+                payload = voteResult.Payload,
+            });
+        }
+
+        int totalVotes = voteResult.Yes + voteResult.No + voteResult.Ignore;
+        bool votePassed = totalVotes > 0 && (float)voteResult.Yes / totalVotes > 0.5f;
+        string? title = voteResult.Payload.GetValueOrDefault("key")
+            ?? voteResult.Payload.GetValueOrDefault("targetName")
+            ?? "";
+        _ = discordBot.SendVoteResultAsync(voteResult.Kind, title,
+            voteResult.Yes, voteResult.No, voteResult.Ignore, votePassed, null);
+
+        if (!votePassed) return;
+
+        if (voteResult.Kind == "ban")
+        {
+            string? targetKey = voteResult.Payload.GetValueOrDefault("targetKey");
+            if (!string.IsNullOrEmpty(targetKey))
+            {
+                banList.Toggle(targetKey, true);
+                hub.Send(hub.GatewayConnection, "BAN", new { playerKey = targetKey, banned = true });
+                Console.WriteLine($"[Vote] 투표 가결 — {targetKey} 밴 처리 (파일 + 게이트웨이 차단/킥).");
+            }
+        }
+        else if (voteResult.Kind == "run")
+        {
+            string? key = voteResult.Payload.GetValueOrDefault("key");
+            string? rawValue = voteResult.Payload.GetValueOrDefault("rawValue");
+            if (!string.IsNullOrEmpty(key) && rawValue != null)
+            {
+                runRules.SetRun(key, rawValue);   // run.json 재기록 (정본)
+                PushRunRulesToInstances(hub, runRules);
+                PushLobbyMetadata(hub, runRules, sessions, force: true);
+                Console.WriteLine($"[Vote] 투표 가결 — {key} = {rawValue} 즉시 적용 (전 인스턴스).");
+            }
+        }
+    }
+
+    /// <summary>RUN_RULES_STATE 전 인스턴스 브로드캐스트 (rule/run 명령 푸시와 동일 경로).</summary>
+    private static void PushRunRulesToInstances(ControlHub hub, RunRuleStore runRules)
+    {
+        var runSettings = runRules.RunSnapshot;
+        var rules = runRules.RuleSnapshot;
+        foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+        {
+            hub.SendNoAck(conn, "RUN_RULES_STATE", new { runSettings, rules });
+        }
     }
 
     private static bool TryPlayerKey(string? value, out PlayerKey key)

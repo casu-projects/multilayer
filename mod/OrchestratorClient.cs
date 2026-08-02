@@ -162,6 +162,15 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "ANNOUNCE":
                 AnnounceRelay.Handle(msg.PayloadAs<AnnouncePayload>());
                 break;
+            case "VOTE_RUN":
+                VoteRelay.HandleRun(msg.PayloadAs<VoteRunPayload>());
+                break;
+            case "VOTE_RESULT":
+                VoteRelay.HandleResult(msg.PayloadAs<VoteResultPayload>());
+                break;
+            case "VOTE_REJECTED":
+                VoteRelay.HandleRejected(msg.PayloadAs<VoteRejectedPayload>());
+                break;
             case "LIST_RESULT":
                 ChatCommands.HandleListResult(msg);
                 break;

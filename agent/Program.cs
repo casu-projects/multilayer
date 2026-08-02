@@ -10,6 +10,9 @@ internal static class Program
 {
     /// <summary>시작 시 자동 탐지된 게이트웨이 직결용 호스트 IP (AGENT_HELLO address).</summary>
     private static string _localIp = "127.0.0.1";
+
+    /// <summary>SHUTDOWN 수신 시 메인 루프 종료 요청 (Main에서 cts.Cancel과 연결).</summary>
+    private static Action? _shutdownRequested;
     private static void Main(string[] args)
     {
         string configPath = args.Length > 0 ? args[0] : "agent.json";
@@ -26,6 +29,7 @@ internal static class Program
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+        _shutdownRequested = () => cts.Cancel();
 
         var instances = new Dictionary<string, InstanceProcess>();
         var inbound = new ConcurrentQueue<(ControlMessage Msg, Action<ControlMessage> Ack)>();
@@ -122,6 +126,14 @@ internal static class Program
                 outboundReports.Enqueue(ControlMessage.Create(0, "INSTANCE_EXITED",
                     new { instanceKey = payload.InstanceKey, code = proc.ExitCode ?? 0 }));
                 ack(ControlMessage.Create(msg.Seq, "ACK", new { ok = true }));
+                break;
+            }
+            case "SHUTDOWN":
+            {
+                // 오케스트레이터 종료 신호 — 메인 루프 종료 → 전 인스턴스 graceful 정리 + 프로세스 종료.
+                AgentLog.Info("종료 신호 수신 — 인스턴스 정리 후 종료.");
+                ack(ControlMessage.Create(msg.Seq, "ACK", new { ok = true }));
+                _shutdownRequested?.Invoke();
                 break;
             }
             default:

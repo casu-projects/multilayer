@@ -99,10 +99,16 @@ public sealed class MigrationModule : MonoBehaviour
             Plugin.Log.LogInfo($"[Migration] {playerKey} FREEZE — 리스폰 캡처 스킵.");
         }
 
-        // 인벤토리/착용 아이템을 월드에 드랍하지 않고 클라이언트 동기화와 함께 파괴한다.
-        // 드랍 방식은 다른 유저가 주워 아이템을 복사할 수 있고, 파괴 없이 두면 클라이언트가
-        // 구 netId 아이템을 새 레이어로 가져가 유령 아이템이 된다. SafeDestroyObject는
-        // forcesync로 클라이언트의 복사본 제거를 통지한다 (유령 아이템 원천 차단).
+        // ① 먼저: 클라이언트 레지스트리 정리 버스트 — 파괴 전이라 인벤토리 아이템이 아직
+        //    등록 상태여서 버스트에 포함된다. ReliableOrdered 직접 전송이라 forcesync 큐
+        //    (사망 플레이어 한도 20 — Server_RunFastSync가 초과 시 건너뜀)에 의존하지 않고
+        //    결정적으로 클라이언트에 삭제가 전달된다. 파괴 후 버스트를 보내면 등록 해제된
+        //    아이템이 server_objects에 없어 유령 아이템이 잔존한다.
+        SendRegistryCleanupBurst(plr);
+
+        // ② 인벤토리/착용 아이템을 월드에 드랍하지 않고 파괴한다 (클라이언트는 ①에서 이미
+        //    삭제됨 — 여기서는 서버 상태 정리. SafeDestroyObject의 forcesync 적재는 중복·무해).
+        //    드랍 방식은 다른 유저가 주워 아이템을 복사할 수 있어 채택하지 않는다.
         try
         {
             foreach (Item item in plr.body.GetAllItemsThorough())
@@ -133,13 +139,12 @@ public sealed class MigrationModule : MonoBehaviour
         // 발신 중단은 QuiescencePatches의 ShouldPackPacketFor/PackObjectForPlr 게이트가 담당
         // (IsFrozen — CharSync 바디/PlrSync/객체 스트림 전부).
 
-        // 파괴 forcesync(틱 ~0.2초)가 클라이언트에 도달·처리된 뒤 로딩 화면과 FREEZE_DONE을
-        // 보낸다 — SWAP이 구 인스턴스 연결을 끊기 전에 플러시를 보장 (순서: 캡처→파괴→1초→10016→완료).
+        // ③ 1초 후: 10016(로딩 화면) + FREEZE_DONE — SWAP이 구 인스턴스 연결을 끊기 전에
+        //    버스트/파괴가 정리될 시간 확보 (순서: 버스트→파괴→1초→10016→완료).
         KrokoshaCasualtiesUtils.Util.DelayCallLambda(1f, (Action)(() =>
         {
             if (plr == null) return;
             SendRegenerateWorld(plr);
-            SendRegistryCleanupBurst(plr);   // Fix I — 클라이언트 CoolSync 레지스트리 정리
             _loadingTriggered.Add(playerKey);
             Plugin.Log.LogInfo($"[Migration] {playerKey} FREEZE — 로딩 트리거 + 완료 보고.");
             OrchestratorClient.Instance?.SendEvent("FREEZE_DONE", new { playerKey, epoch });
@@ -182,28 +187,6 @@ public sealed class MigrationModule : MonoBehaviour
         catch (System.Exception ex)
         {
             Plugin.Log.LogWarning($"[Migration] 레지스트리 정리 버스트 실패: {ex.Message}");
-        }
-    }
-
-    /// <summary>월드젠 완료(10168) 시 바디 레지스트리 정리 (2026-08-02, Fix I2).
-    /// 출발지 정리 버스트는 FREEZE 시점에 출발지에 존재하는 바디만 삭제한다 — 먼저
-    /// 마이그레이션한 유저의 바디는 이미 출발지에서 제거되어 버스트에 포함되지 않고,
-    /// SWAP으로 삭제 패킷도 도달하지 않아 나중 마이그레이터 클라이언트에 스테일 CharSync
-    /// 항목(netId=clientId — 인스턴스 간 동일)이 잔존한다. 목적지 바디 동기화가
-    /// finished_worldgen+RELEASE 이후 시작되는데 이 삭제가 그보다 먼저 도착하므로,
-    /// 스테일 항목을 비우고 목적지 CharSync가 새 바디를 생성하게 한다 (재접속/신규
-    /// 조인에도 동일 적용 — 프레시 클라이언트는 no-op).</summary>
-    private static void SendBodyCleanupOnWorldgen(NetPlayer plr)
-    {
-        if (plr == null) return;
-        foreach (BaseCoolSyncSubSystem sys in CoolSyncManager.AllSystems)
-        {
-            if (sys.syncsystemid != 2) continue; // CharSync(바디)만
-            int sent = SendDeleteBurstForSystem(plr, sys, 2, excludeSelf: true);
-            if ((sent & 0xFFFF) > 0)
-            {
-                Plugin.Log.LogInfo($"[Migration] {plr.playername} 월드젠 완료 — 바디 레지스트리 정리 ({sent & 0xFFFF}개).");
-            }
         }
     }
 
@@ -295,6 +278,10 @@ public sealed class MigrationModule : MonoBehaviour
             NetPlayer plr = FindByPersistentId(playerKey);
             if (plr != null)
             {
+                // FREEZE에서 파괴된 인벤토리/객체의 스테일 항목을 먼저 정리 후 구 월드
+                // 재생성 (10016 이전에 삭제 버스트 — FREEZE 경로와 동일한 순서 원칙).
+                try { SendRegistryCleanupBurst(plr); }
+                catch (System.Exception ex) { Plugin.Log.LogWarning($"[Migration] UNFREEZE 레지스트리 정리 실패: {ex.Message}"); }
                 SendRegenerateWorld(plr);
                 try
                 {
@@ -307,14 +294,15 @@ public sealed class MigrationModule : MonoBehaviour
                 }
 
                 // pre-swap 중단: 인벤토리는 FREEZE에서 이미 파괴됨 — 캡처 데이터로 즉시
-                // 재적용한다 (땅 드랍 없이 복원 — 드랍을 다시 주울 필요가 없음)
+                // 재적용한다 (땅 드랍 없이 복원 — 드랍을 다시 주울 필요가 없음).
+                // 위치는 RestorePlayer의 QueuePosition이 적재하며, 구 월드 재생성 후 바닐라
+                // LateSpawnLocation 시점(저장 위치 Prefix)에 적용된다.
                 JToken payload = msg.Inner("payload");
                 if (payload != null && payload.Type == JTokenType.Object && plr.body != null)
                 {
                     try
                     {
                         SaveModule.RestorePlayer(plr.body, plr, (JObject)payload);
-                        SaveModule.ApplyPendingPositions();
                         Plugin.Log.LogInfo($"[Migration] {playerKey} UNFREEZE — 데이터 재적용 완료.");
                     }
                     catch (System.Exception ex)
@@ -451,22 +439,9 @@ public sealed class MigrationModule : MonoBehaviour
             if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
             if (!NetPlayer.TryGetPlayerFromClientId(clientId, out NetPlayer plr)) return;
 
-            // 저장 위치 지연 적용 (2026-08-02): 바닐라 스폰 리로케이션(10019, 10167 후 전송)이
-            // Body.Start 시점에 적용한 저장 위치를 덮어쓰는 경합을 해결한다 — 여기서(10168,
-            // 바닐라 스폰 이후) 다시 적용하면 저장 위치가 최종 반영된다. 레이어 불일치
-            // (마이그레이션 도착)는 내부 로직이 기본 스폰으로 드랍한다.
-            try { SaveModule.ApplyPendingPositions(); }
-            catch (System.Exception ex) { Plugin.Log.LogWarning($"[Save] 위치 지연 적용 실패: {ex.Message}"); }
-
             // 로스터 배리어 — 멱등 (중복 수신은 이름/색 갱신만)
             try { RosterBarrier(plr); }
             catch (System.Exception ex) { Plugin.Log.LogWarning($"[Roster] 배리어 실패: {ex.Message}"); }
-
-            // Fix I2 — 목적지 측 바디 레지스트리 정리 (스테일 CharSync 항목 제거).
-            // 목적지 바디 동기화가 이 뒤에 시작되므로, 먼저 마이그레이터의 스테일 바디
-            // 항목이 새 바디 생성을 막는 문제를 해소한다.
-            try { SendBodyCleanupOnWorldgen(plr); }
-            catch (System.Exception ex) { Plugin.Log.LogWarning($"[Migration] 월드젠 바디 정리 실패: {ex.Message}"); }
 
             string pid = plr.GetPersistentId();
             if (IsFrozen(pid))
@@ -478,7 +453,19 @@ public sealed class MigrationModule : MonoBehaviour
     }
 
     /// <summary>월드젠 완료 플레이어를 기준으로 신원 교환을 결정적으로 완료한다:
-    /// ① 나의 신원 → 다른 모든 클라이언트 ② 다른 모든 플레이어의 신원 → 나.</summary>
+    /// ① 나의 신원 → 다른 모든 클라이언트 ② 다른 모든 플레이어의 신원 → 나.
+    ///
+    /// 2026-08-03: 바디 DELETE(전행렬/로스터/월드젠 정리) 전부 제거 — 살아있는 플레이어
+    /// 바디의 CharSync 항목을 삭제하면, 같은 프레임의 재동기화가 파괴 지연(DestroyNPC —
+    /// 프레임 말미) 전의 기존 바디를 반환하고(plr.body != null 경로), 이후 파괴된 바디에
+    /// Apply → NRE + 바디 미표시 영구 스턱이 발생한다 (2026-08-03 실측). 신원(10023)은
+    /// 바디 CharSync와 별개 채널이므로 삭제 없이도 안전하게 교환된다.
+    ///
+    /// 복귀 플레이어(재접속/마이그레이션) 전용: 재동기화가 10023 처리 전에 도착하면
+    /// 관찰자가 NPC 바디를 만들고, 클라이언트 수리 경로는 BodyToPlayerDict를 갱신하지
+    /// 않아 shift에 누락된다. 신원 교환 후 해당 netId의 신뢰성 DELETE를 전송해 NPC/
+    /// 스테일 항목을 제거하면, 다음 동기화가 10023 처리 후(plr.body == null) 도착해
+    /// 플레이어 바디로 클린 재생성된다 (신규 접속은 delete 미전송 — 동일-프레임 레이스 없음).</summary>
     private static void RosterBarrier(NetPlayer plr)
     {
         List<knetid> others = NetPlayer.ClientIdToPlayerDict.Keys
@@ -493,24 +480,106 @@ public sealed class MigrationModule : MonoBehaviour
             try { other.Server__ResponsePlayerName(new List<knetid> { plr.clientId }); }
             catch { }
         }
+
+        // 복귀 플레이어 전용 — 관찰자들의 NPC/스테일 항목 정리 (신원 처리 이후).
+        string pid = plr.GetPersistentId();
+        bool isReturning = IsFrozen(pid) || ReturningTracker.ClientIds.Contains(plr.clientId);
+        if (isReturning)
+        {
+            try
+            {
+                SendReliableCharSyncDelete(plr.clientId);
+                Plugin.Log.LogInfo($"[Roster] {plr.playername}({plr.clientId}) 복귀 — 관찰자 항목 정리 DELETE 전송.");
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogWarning($"[Roster] 복귀 DELETE 실패: {ex.Message}");
+            }
+        }
+
         Plugin.Log.LogInfo($"[Roster] {plr.playername}({plr.clientId}) 로스터 배리어 — 타인 {others.Count}명.");
     }
 
-    /// <summary>동결(FREEZE)된 플레이어의 퇴장 → PLAYER_LEFT (오케스트레이터가 데이터 확정).</summary>
+    /// <summary>동결(FREEZE)된 플레이어의 퇴장 → PLAYER_LEFT (오케스트레이터가 데이터 확정).
+    /// 동시에 (2026-08-03, Fix S5) 퇴장 플레이어의 CharSync 바디 객체를 서버측에서
+    /// 제거한다 — 바닐라 OnDestroy는 PlrSync만 삭제하고 CharSync 바디는 고아로 남겨
+    /// 동기화가 계속된다. 10170으로 클라이언트 바디가 파괴되어도 CharSync 항목이 스테일로
+    /// 잔존하고, 같은 clientId(같은 netId)로 재접속/마이그레이션 시 재동기화가 파괴된
+    /// 바디에 Apply → Client_CoolSyncReceiver(10174) NRE 스팸의 근본 원인.
+    /// Server_DeleteObject는 서버 객체 제거 + result4=0 삭제 패킷으로 모든 클라이언트의
+    /// 항목을 깨끗이 제거하므로, 재접속 시 생성 분기로 클린 등록된다.</summary>
     [HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.OnDestroy))]
     internal static class NetPlayer_OnDestroy_ReportLeftPatch
     {
         private static void Prefix(NetPlayer __instance)
         {
             if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
-            if (__instance == null) return;
+            if (__instance == null || __instance.is_local) return;
             string pid = __instance.GetPersistentId();
             if (IsFrozen(pid))
             {
                 OrchestratorClient.Instance?.SendEvent("PLAYER_LEFT",
                     new { playerKey = pid, epoch = FrozenEpoch(pid) });
             }
+
+            // S5 — CharSync 바디 고아화 방지 (일반 퇴장 포함 전 케이스).
+            // ① 서버측 객체 제거 (고아 동기화 중단 — 삭제-재생성 창의 NPC 재생성 방지).
+            // ② 신뢰성 있는 raw 10174 DELETE를 남은 클라이언트 전체에 즉시 전송 —
+            //    바닐라 10170(신뢰성)이 클라이언트 바디를 파괴해도 CharSync 항목이
+            //    스테일로 잔존하고, 같은 clientId 재접속의 재동기화가 파괴된 바디에
+            //    Apply → NRE 스팸 + 미표시. Server_DeleteObject의 삭제 패킷은 비신뢰
+            //    CharSync 채널이라 재접속 재동기화와 레이스하므로, 신뢰성 채널로
+            //    먼저 항목을 확실히 제거한다 (재접속은 수 초 후 — 안전한 간격).
+            try
+            {
+                foreach (BaseCoolSyncSubSystem sys in CoolSyncManager.AllSystems)
+                {
+                    if (sys.syncsystemid != 2) continue;
+                    if (sys is CoolSyncSubSystemForObjects objSys)
+                    {
+                        objSys.Server_DeleteObject(__instance.clientId);
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogWarning($"[Migration] CharSync 바디 정리 실패: {ex.Message}");
+            }
+
+            try
+            {
+                SendReliableCharSyncDelete(__instance.clientId);
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogWarning($"[Migration] CharSync 항목 삭제 전송 실패: {ex.Message}");
+            }
+
+            ReturningTracker.ClientIds.Remove(__instance.clientId);
         }
+    }
+
+    /// <summary>퇴장 플레이어의 CharSync 바디 항목을 남은 클라이언트 전체에서 제거
+    /// (10174 system 2, result4=0 — ReliableOrdered). 바닐라 10170이 클라이언트 바디를
+    /// 파괴해도 CharSync 항목은 잔존하므로, 재접속(같은 clientId=같은 netId) 재동기화가
+    /// 파괴된 바디에 Apply하는 NRE 스턱을 방지한다. 본인(퇴장)은 연결 종료로 수신 불가 —
+    /// 포함해도 무해하나 대상 목록에서 제외한다.</summary>
+    private static void SendReliableCharSyncDelete(ushort leavingClientId)
+    {
+        List<knetid> targets = NetPlayer.ClientIdToPlayerDict.Keys
+            .Where(id => id != leavingClientId)
+            .ToList();
+        if (targets.Count == 0) return;
+
+        var writer = Net.CreateWriter(10174);
+        writer.Put((byte)2);          // CharSync
+        int startToIgnore = writer.Length + 2;
+        writer.Put((ushort)0);        // deltaid — 삭제는 값 무시
+        writer.Put((byte)1);
+        writer.Put(leavingClientId);
+        writer.Put((byte)0);          // result4 == 0 → 삭제
+        writer.CompressWriter(startToIgnore);
+        Net.Server_SendToClients(DeliveryMethod.ReliableOrdered, in writer, targets);
     }
 
     private static NetPlayer FindByPersistentId(string persistentId)

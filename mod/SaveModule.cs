@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -120,9 +121,21 @@ public static class SaveModule
         var result = new JObject();
         foreach (FieldInfo f in obj.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (!IsSavableType(f.FieldType)) continue;
-            try { result[f.Name] = JToken.FromObject(f.GetValue(obj)); }
-            catch { }
+            if (IsSavableType(f.FieldType))
+            {
+                try { result[f.Name] = JToken.FromObject(f.GetValue(obj)); }
+                catch { }
+            }
+            else if (f.IsDefined(typeof(JsonPropertyAttribute), false)
+                     && !typeof(UnityEngine.Object).IsAssignableFrom(f.FieldType))
+            {
+                // [JsonProperty] 클래스 타입 필드 (예: WaterContainerItem.stack — List<LiquidStack>,
+                // NonDescriptCan.liquidIds — List<string>) — base SaveSystem은 Newtonsoft로
+                // 직렬화하므로(액체 상태 등) 동일하게 처리한다. 화이트리스트(IsSavableType)가
+                // 클래스 타입을 걸러 유실되던 문제 해결.
+                try { result[f.Name] = JToken.FromObject(f.GetValue(obj)); }
+                catch { }
+            }
         }
         return result;
     }
@@ -134,9 +147,19 @@ public static class SaveModule
         foreach (JProperty prop in fields.Properties())
         {
             FieldInfo f = type.GetField(prop.Name, BindingFlags.Public | BindingFlags.Instance);
-            if (f == null || !IsSavableType(f.FieldType)) continue;
-            try { f.SetValue(target, prop.Value.ToObject(f.FieldType)); }
-            catch { }
+            if (f == null) continue;
+            if (IsSavableType(f.FieldType))
+            {
+                try { f.SetValue(target, prop.Value.ToObject(f.FieldType)); }
+                catch { }
+            }
+            else if (f.IsDefined(typeof(JsonPropertyAttribute), false)
+                     && !typeof(UnityEngine.Object).IsAssignableFrom(f.FieldType))
+            {
+                // 클래스 타입 — JSON에서 새 인스턴스로 복원 (기존 참조 교체).
+                try { f.SetValue(target, prop.Value.ToObject(f.FieldType)); }
+                catch { }
+            }
         }
     }
 
@@ -178,7 +201,7 @@ public static class SaveModule
         if (token is not JObject comps) return;
         foreach (JProperty prop in comps.Properties())
         {
-            Type t = Type.GetType(prop.Name);
+            Type t = ResolveType(prop.Name);
             if (t == null) continue;
             Component c = go.GetComponent(t);
             if (c == null)
@@ -205,6 +228,22 @@ public static class SaveModule
             if (body.limbs[i] != null)
                 ApplyComponents(body.limbs[i].gameObject, arr[i]);
         }
+    }
+
+    /// <summary>타입 이름 → Type 해석. Type.GetType은 호출 어셈블리/mscorlib만 검색하므로,
+    /// 게임 어셈블리(Assembly-CSharp)의 [Saveable] 컴포넌트(WaterContainerItem 등)는
+    /// 이름만으로 조회하면 null이 되어 복원이 조용히 스킵된다 — 로드된 어셈블리를 전부
+    /// 검색해 해석한다.</summary>
+    private static Type ResolveType(string name)
+    {
+        Type t = Type.GetType(name);
+        if (t != null) return t;
+        foreach (System.Reflection.Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            t = asm.GetType(name);
+            if (t != null) return t;
+        }
+        return null;
     }
 
     // ── 인벤토리 (계층 — S9-1) ──
@@ -394,7 +433,7 @@ public static class SaveModule
         }
     }
 
-    // ── 위치 (월드젠 완료 후 적용) ──
+    // ── 위치 (바닐라 스폰 위치 전송 시점에 적용 — LateSpawnLocation Prefix) ──
 
     private static void QueuePosition(Body body, NetPlayer plr, JToken token)
     {
@@ -404,40 +443,55 @@ public static class SaveModule
             pos.Value<float?>("y") ?? 0f,
             pos.Value<int?>("layer") ?? 0);
     }
-    internal static void ApplyPendingPositions()
+
+    /// <summary>저장 위치 적용 — 바닐라 스폰 위치 전송(LateSpawnLocation) 시점에 호출되어
+    /// 클라이언트가 처음 받는 스폰 위치가 저장 위치가 되게 한다 (기존 10168 지연 적용은
+    /// 바닐라 스폰 전송 이후라 클라이언트에 반영되지 않았다). 성공 시 true — 호출부가
+    /// 바닐라 스폰 계산을 스킵한다.</summary>
+    internal static bool TryApplyPendingPosition(NetPlayer plr, NetBody pb)
     {
-        if (WorldGeneration.world == null) return;
+        if (plr == null || pb == null || WorldGeneration.world == null) return false;
+        if (!PendingPositions.TryRemove(plr.GetPersistentId(), out var p)) return false;
 
-        foreach (var kv in PendingPositions.ToList())
+        if (p.Layer != WorldGeneration.world.biomeDepth)
         {
-            if (!NetPlayer.BodyToPlayerDict.Values.Any(p => p.GetPersistentId() == kv.Key))
-                continue;
-            NetPlayer plr = NetPlayer.BodyToPlayerDict.Values.First(p => p.GetPersistentId() == kv.Key);
-            if (plr.body == null) continue;
-            if (kv.Value.Layer != WorldGeneration.world.biomeDepth)
+            // 레이어 불일치 — 마이그레이션/레이어 전환: 위치 복원 없이 새 레이어 기본 스폰 사용
+            return false;
+        }
+
+        Vector2 pos = new Vector2(
+            Mathf.Clamp(p.X, -WorldGeneration.world.halfWidth, WorldGeneration.world.halfWidth),
+            Mathf.Clamp(p.Y, -WorldGeneration.world.halfHeight, WorldGeneration.world.halfHeight));
+
+        Vector2? safe = FindSafePosition(pos);
+        if (safe == null)
+        {
+            // 안전 위치 탐색 실패 — 적용 포기, 바닐라 기본 스폰(LateSpawnLocation)으로 폴백.
+            return false;
+        }
+
+        pb.body.transform.position = safe.Value;
+        // 바닐라 스폰 플로우가 저장 위치를 덮어쓰지 않도록 플래그 설정 (PlayerSavedState.Apply와 동일 규약).
+        plr.server_plrstate.did_give_spawn_location_from_a_save = true;
+        Plugin.Log.LogInfo($"[Save] {plr.playername} 위치 적용 ({safe.Value.x:F1}, {safe.Value.y:F1}).");
+        return true;
+    }
+
+    /// <summary>바닐라 스폰 위치 계산(LateSpawnLocation)을 저장 위치로 대체 — 저장된 위치가
+    /// 있으면 그 위치를 적용하고 바닐라(기본 스폰/타인 근처) 계산을 스킵한다. 이후 바닐라가
+    /// "Sending a spawn location"으로 현재 위치를 클라이언트에 전송하므로, 클라이언트가
+    /// 처음 받는 스폰 위치가 저장 위치가 된다.</summary>
+    [HarmonyPatch(typeof(ServerMain), nameof(ServerMain.LateSpawnLocation))]
+    internal static class ServerMain_LateSpawnLocation_SavedPositionPatch
+    {
+        private static bool Prefix(NetBody b)
+        {
+            if (!KrokoshaScavMultiplayer.is_dedicated_server || b == null || b.plr == null) return true;
+            if (TryApplyPendingPosition(b.plr, b))
             {
-                // 레이어 불일치 — 마이그레이션/레이어 전환: 위치 복원 없이 새 레이어 기본 스폰 사용
-                PendingPositions.TryRemove(kv.Key, out _);
-                continue;
+                return false;
             }
-
-            Vector2 pos = new Vector2(
-                Mathf.Clamp(kv.Value.X, -WorldGeneration.world.halfWidth, WorldGeneration.world.halfWidth),
-                Mathf.Clamp(kv.Value.Y, -WorldGeneration.world.halfHeight, WorldGeneration.world.halfHeight));
-
-            Vector2? safe = FindSafePosition(pos);
-            PendingPositions.TryRemove(kv.Key, out _);
-            if (safe == null)
-            {
-                // 안전 위치 탐색 실패 — 적용 포기, 바닐라 기본 스폰(LateSpawnLocation)으로 폴백.
-                continue;
-            }
-
-            plr.body.transform.position = safe.Value;
-            // 바닐라 스폰 플로우(HeyPlayerJustJoinedGiveHimASpawnLocationOkay)가 저장 위치를
-            // 덮어쓰지 않도록 플래그 설정 (PlayerSavedState.Apply와 동일 규약).
-            plr.server_plrstate.did_give_spawn_location_from_a_save = true;
-            Plugin.Log.LogInfo($"[Save] {plr.playername} 위치 적용 ({safe.Value.x:F1}, {safe.Value.y:F1}).");
+            return true;
         }
     }
 

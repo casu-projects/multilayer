@@ -15,6 +15,8 @@ internal static class Program
 
         var core = new GatewayCore(config);
         Log.Core = core;
+        // 오케스트레이터 종료 신호 → 메인 루프 종료 (전 세션 Kick은 ApplyShutdown이 수행)
+        core.ShutdownRequested += () => cts.Cancel();
 
         var direct = new DirectIpAdapter(config, core);
         direct.Start();

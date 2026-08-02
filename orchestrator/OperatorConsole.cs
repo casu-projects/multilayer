@@ -16,6 +16,9 @@ public sealed class OperatorConsole
     private readonly Action<string, string?> _kickAction;
     private readonly Action<string>? _consoleRelay;   // (game command) — 전 인스턴스 게임 콘솔 실행
 
+    /// <summary>종료 신호 수신 시 호출 (Program.Main에서 cts.Cancel과 연결 — 대화형 Ctrl+C용).</summary>
+    internal Action? ShutdownRequested;
+
     public OperatorConsole(PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, Action<string, string?> banAction, Action<string, string?> kickAction,
         Action<string>? consoleRelay = null)
@@ -61,6 +64,15 @@ public sealed class OperatorConsole
             catch (Exception ex)
             {
                 Console.WriteLine($"stdin 읽기 실패, 운영 콘솔 스레드 종료 — {ex.Message}");
+                return;
+            }
+
+            // Ctrl+C — 대화형 ReadKey가 SIGINT를 키로 소비하므로 직접 graceful 종료를 요청한다
+            // (CancelKeyPress는 비대화형 경로에서만 유효).
+            if (key.Key == ConsoleKey.C && (key.Modifiers & ConsoleModifiers.Control) != 0)
+            {
+                ConsoleIO.WriteLine("종료 신호 수신 — graceful 종료 시작.");
+                ShutdownRequested?.Invoke();
                 return;
             }
 
@@ -122,7 +134,7 @@ public sealed class OperatorConsole
                 Console.WriteLine("instance - 인스턴스 상태를 표시합니다");
                 Console.WriteLine("clear - 터미널 화면을 지웁니다");
                 Console.WriteLine("migrate <player> - 특정 유저를 수동 마이그레이션합니다 (구현 예정)");
-                Console.WriteLine("run <command...> - 모든 인스턴스에 게임 콘솔 명령을 실행합니다");
+                Console.WriteLine("exec <command...> - 모든 인스턴스에 게임 콘솔 명령을 실행합니다");
                 break;
             case "list":
                 foreach (PlayerState p in _sessions.All)
@@ -151,7 +163,7 @@ public sealed class OperatorConsole
                 if (TryResolvePlayer(arg, out PlayerKey migrate))
                     Console.WriteLine("수동 마이그레이션은 구현 예정 — LAYER_END 이벤트로만 동작.");
                 break;
-            case "run":
+            case "exec":
                 HandleRun(arg);
                 break;
             default:
@@ -161,13 +173,13 @@ public sealed class OperatorConsole
     }
 
     /// <summary>구 시스템 의미 복원 — 매개변수 전체를 게임 콘솔 명령으로 보고
-    /// 지금 떠 있는 모든 인스턴스에 실행시킨다 (예: run kill player2222).
+    /// 지금 떠 있는 모든 인스턴스에 실행시킨다 (예: exec kill player2222).
     /// 플레이어가 없는 인스턴스는 게임 콘솔이 no-op 처리한다.</summary>
     private void HandleRun(string command)
     {
         if (string.IsNullOrWhiteSpace(command))
         {
-            Console.WriteLine("실행할 명령이 비어있습니다. 예: run kill player2222");
+            Console.WriteLine("실행할 명령이 비어있습니다. 예: exec kill player2222");
             return;
         }
         if (_consoleRelay == null)

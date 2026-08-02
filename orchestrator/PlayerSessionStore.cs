@@ -185,6 +185,18 @@ public sealed class PlayerSessionStore
         Console.WriteLine($"{key} 마이그레이션 커밋 → 레이어 {newDepth}.");
     }
 
+    /// <summary>종료 시 전 세션 Offline 영속화 — 재시작 시 클린 상태 (스테일 온라인 복원 방지).
+    /// 마이그레이션 중이던 세션도 Offline으로 기록되지만, WAL 복구가 목적지/상태를 재설정한다.</summary>
+    public void PersistAllOffline()
+    {
+        foreach (PlayerState state in _players.Values)
+        {
+            state.Session = PlayerSessionState.Offline;
+            SaveOne(state);
+        }
+        Console.WriteLine($"전 세션 Offline 영속화 ({_players.Count}명).");
+    }
+
     /// <summary>리스폰 데이터 계층 (P5): 플레이어를 완전 신규 접속자 상태로 리셋 —
     /// depth=1, 라우팅 배정 해제, isReturning=false. 세이브 폐기는 PlayerDataStore.DeleteSave가
     /// 담당 (단일 소유자 규칙). keepOnline: 레이어 1 인플레이스 리스폰은 플레이어가 계속

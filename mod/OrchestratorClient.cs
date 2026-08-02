@@ -96,6 +96,19 @@ public sealed class OrchestratorClient : MonoBehaviour
         _outbound.Enqueue(ControlMessage.Create(0, type, payload));
     }
 
+    /// <summary>outbound 큐가 비워질 때까지 대기 — 종료 전 제출(PLAYER_DATA_SUBMIT)이
+    /// WriteLoop를 통해 소켓에 전달되도록 보장 (Application.Quit 전에 호출).</summary>
+    public void WaitForOutboundFlush(int timeoutMs)
+    {
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (_outbound.IsEmpty) return;
+            Thread.Sleep(10);
+        }
+        Plugin.Log.LogWarning("[Orch] 종료 전 outbound flush 타임아웃 — 일부 보고가 유실될 수 있음.");
+    }
+
     private void Ack(ControlMessage msg, bool ok, string reason = null)
     {
         _outbound.Enqueue(ControlMessage.Ack(msg.Seq, ok, reason));

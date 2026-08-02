@@ -235,9 +235,16 @@ public static class ChatCommands
             OrchestratorClient.Instance.SendEvent("RESPAWN", new { playerKey = pid, fromDepth = 1 });
 
             // 인벤토리/착용 파괴 (드랍 아님 — FREEZE와 동일 정책, 유령 아이템 원천 차단).
+            // 주의 1: slots[i]=null 금지 — slots는 InventorySlot[] (컴포넌트 배열)이라 참조를
+            // 깨뜨리면 살아있는 바디의 HoldingItem/PickUpItem 등에서 NRE가 발생한다.
+            // 주의 2: Object.Destroy는 프레임 말에 실제 반영 — 보급품 지급은 그 이후로 지연한다
+            // (아래 DelayCallLambda — 구 RespawnCommand의 ScheduleDelayedRespawn과 동일 원리).
+            // 주의 3: 컨테이너는 파괴 시 내용물을 월드에 드랍(unload)하므로 자식부터 파괴한다.
             try
             {
-                foreach (Item item in caller.body.GetAllItemsThorough())
+                var all = new List<Item>(caller.body.GetAllItemsThorough());
+                all.Reverse(); // 컨테이너 내용물(자식) → 컨테이너(부모) 순으로 파괴
+                foreach (Item item in all)
                 {
                     if (item == null) continue;
                     NetObjectRegistry.SafeDestroyObject(item.gameObject);
@@ -247,9 +254,13 @@ public static class ChatCommands
                     if (wearable == null) continue;
                     NetObjectRegistry.SafeDestroyObject(wearable.gameObject);
                 }
-                for (int i = 0; i < caller.body.slots.Length; i++)
+                // 슬롯 직결 아이템 안전망 — 게임과 동일한 접근(HoldingItem: GetChild(0))으로
+                // 파괴 (thorough가 놓친 항목 커버).
+                foreach (InventorySlot slot in caller.body.slots)
                 {
-                    caller.body.slots[i] = null;
+                    if (slot == null || slot.transform.childCount == 0) continue;
+                    Item item = slot.transform.GetChild(0).GetComponent<Item>();
+                    if (item != null) NetObjectRegistry.SafeDestroyObject(item.gameObject);
                 }
             }
             catch (System.Exception ex)
@@ -265,8 +276,22 @@ public static class ChatCommands
                 // level_transition:false — 드랍 경로 없음 (위에서 이미 파괴 — 중첩 안전).
                 caller.body.ResetMind(); // RespawnKeepSkills 규칙 무관 — 무조건 초기화
                 caller.Server_RespawnCharacter(Body_PlaceBody_MultiplayerPatch.spawnlocation, level_transition: false);
-                SaveModule.GrantStartingSupplies(caller.body, caller); // startingsupplies 런 규칙
                 ChatPrivateReply.SendToPlayer(caller, "리스폰했습니다.");
+
+                // Object.Destroy는 프레임 말에 실제 반영 — 파괴가 끝나 슬롯이 비워진 뒤에
+                // 보급품을 지급한다 (같은 프레임 지급 시 옛 아이템 때문에 바닥에 드랍됨).
+                KrokoshaCasualtiesUtils.Util.DelayCallLambda(0.6f, (Action)(() =>
+                {
+                    if (caller == null || caller.body == null) return;
+                    try
+                    {
+                        SaveModule.GrantStartingSupplies(caller.body, caller); // startingsupplies 런 규칙
+                    }
+                    catch (System.Exception ex2)
+                    {
+                        Plugin.Log.LogWarning($"[Respawn] {caller.playername} 보급품 지급 실패: {ex2.Message}");
+                    }
+                }));
             }
             catch (System.Exception ex)
             {

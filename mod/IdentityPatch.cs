@@ -79,6 +79,13 @@ internal static class Net_GetNextPlayerId_ForceClientIdPatch
     }
 }
 
+/// <summary>복귀(재접속/세션 복원) 플레이어 clientId 집합 — RosterBarrier가 신뢰성 DELETE로
+/// 관찰자들의 NPC/스테일 항목을 정리해 재생성하게 하는 데 사용 (2026-08-03).</summary>
+internal static class ReturningTracker
+{
+    internal static readonly System.Collections.Generic.HashSet<knetid> ClientIds = new();
+}
+
 /// <summary>신원 적용: SteamID64 + 접속 시 PLAYER_DATA_REQUEST 전송.</summary>
 [HarmonyPatch(typeof(TransportLiteNetLib), nameof(TransportLiteNetLib.CreateNetPlayerWithPeer))]
 internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
@@ -90,7 +97,13 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
 
         ulong? steamId = OnConnectionRequest_TailV2Patch.TakeSteamId();
         bool isMigrating = OnConnectionRequest_TailV2Patch.TakeIsMigrating() ?? false;
-        OnConnectionRequest_TailV2Patch.TakeIsReturning();
+        bool isReturning = OnConnectionRequest_TailV2Patch.TakeIsReturning();
+        if (isReturning || isMigrating)
+        {
+            ReturningTracker.ClientIds.Add(__result.clientId);
+            Plugin.Log.LogInfo($"[Identity] {__result.playername}({__result.clientId}) 복귀 플레이어"
+                + (isMigrating ? " (마이그레이션)" : " (재접속)") + " — RosterBarrier DELETE 대상.");
+        }
 
         if (steamId.HasValue && steamId.Value != 0)
         {

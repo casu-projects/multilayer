@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Runtime.InteropServices;
 
 namespace CasuMpOrchestrator;
 
@@ -20,8 +21,16 @@ internal static class Program
         Console.WriteLine($"구성 로드: {configPath}");
         Console.WriteLine($"제어 허브 포트: {config.Port}");
 
+        // 허브 수명 토큰(cts)과 종료 신호(shutdownCts) 분리 — graceful 종료 중에도 허브의
+        // 연결이 유지되어야 SHUTDOWN 브로드캐스트가 전달된다. cts를 종료 신호에 직접
+        // 사용하면 ControlHub의 per-connection CTS가 링크되어 연결이 먼저 끊겨 전파가 불가능.
         using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+        using var shutdownCts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdownCts.Cancel(); };
+        // SIGTERM (kill/데몬) — graceful 종료 캐스케이드. 대화형 Ctrl+C는 ReadKey가 SIGINT를
+        // 키로 소비하므로 OperatorConsole.ShutdownRequested(아래)가 담당한다.
+        using var sigTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM,
+            ctx => { ctx.Cancel = true; shutdownCts.Cancel(); });
 
         var hub = new ControlHub(config, cts.Token);
         var runRules = new RunRuleStore(config.RunTablePath, config.RuleTablePath);
@@ -62,19 +71,19 @@ internal static class Program
             command =>
             {
                 // `run <command...>` — 게임 콘솔 명령을 전 온라인 인스턴스에 릴레이 (구 시스템 의미 복원).
-                // 모드의 CONSOLE 핸들러(RunModule.HandleConsole)가 ConsoleScript.TryExecuteCommand로 실행.
-                int sent = 0;
+                // 모드의 CONSOLE 핸들러(RunModule.HandleConsole)가 실행하고, 실행 결과는
+                // 인스턴스 로그(에이전트 DrainAsync)로 자연히 표시된다 — 여기서는 전송만.
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
                     hub.SendNoAck(conn, "CONSOLE", new { command });
-                    sent++;
                 }
-                Console.WriteLine($"게임 콘솔 명령 → {sent}개 인스턴스: {command}");
             });
+        // 대화형 Ctrl+C → graceful 종료 (ReadKey가 SIGINT를 소비하므로 키 감지로 연결)
+        console.ShutdownRequested = () => shutdownCts.Cancel();
         console.Start();
 
         // 메인 루프 — 모든 상태 접근은 이 스레드에서만.
-        while (!cts.IsCancellationRequested)
+        while (!shutdownCts.IsCancellationRequested)
         {
             hub.Tick();
             hub.DrainInbound((conn, msg) =>
@@ -101,8 +110,50 @@ internal static class Program
         }
 
         ConsoleIO.DisableInteractive();
-        Console.WriteLine("종료 중...");
+        Console.WriteLine("종료 중 — 데이터 저장 후 스택 종료...");
+
+        // ── 종료 캐스케이드 (오케스트레이터 주도) ──
+        // ① SHUTDOWN 브로드캐스트:
+        //    모드들 — 접속 플레이어 데이터 제출(동결 제외) + outbound flush + quit
+        //    게이트웨이 — 전 세션 Kick + 종료
+        //    에이전트 — 전 인스턴스 graceful 정리 + 종료
+        foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+        {
+            hub.SendNoAck(conn, "SHUTDOWN", null);
+        }
+        hub.SendNoAck(hub.GatewayConnection, "SHUTDOWN", null);
+        foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Agent && !c.Closed))
+        {
+            hub.SendNoAck(conn, "SHUTDOWN", null);
+        }
+
+        // ② 유예 창: 메인 루프를 계속 돌리며 플레이어 데이터 제출(PLAYER_DATA_SUBMIT)을
+        //    수신·디스크 저장한다 (모드가 제출 → 오케스트레이터가 영속화 → 재시작 시 복원).
+        DateTime shutdownDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < shutdownDeadline)
+        {
+            hub.Tick();
+            hub.DrainInbound((conn, msg) =>
+            {
+                try
+                {
+                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, conn, msg);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"메시지 처리 실패 ({msg.Type}): {ex.Message}");
+                }
+            });
+            Thread.Sleep(20);
+        }
+
+        // ③ 세션 전부 Offline 영속화 — 재시작 시 클린 상태 (스테일 온라인 복원 방지).
+        sessions.PersistAllOffline();
+
+        Console.WriteLine("종료 완료.");
         hub.Stop();
+        // 허브 백그라운드 태스크(리스너/연결 서비스) 정리 — 프로세스가 곧 종료되지만 명시적 해제.
+        cts.Cancel();
     }
 
     private static void TickRunLifecycle(PlayerSessionStore sessions)    {

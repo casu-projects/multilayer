@@ -83,27 +83,54 @@ public static class RunModule
         }
     }
 
-    /// <summary>SHUTDOWN — 전 플레이어 데이터 제출 후 종료 (G-4).</summary>
+    /// <summary>SHUTDOWN — 전 플레이어 데이터 제출 후 종료 (오케스트레이터 종료 캐스케이드).
+    /// 제출이 quit으로 유실되지 않도록 outbound flush를 대기한 뒤 종료한다.</summary>
     internal static void HandleShutdown()
     {
         Plugin.Log.LogInfo("[Run] SHUTDOWN — 데이터 제출 후 종료.");
         foreach (NetPlayer p in NetPlayer.BodyToPlayerDict.Values)
         {
+            // 마이그레이션 동결 중(FREEZE) 플레이어 제외 — 캡처 데이터를 파괴된 인벤토리
+            // 상태로 덮어쓰지 않는다 (WAL/캡처가 재시작 복구 담당 — OnDestroy 패치 S9-5와 동일).
+            if (MigrationModule.IsFrozen(p.GetPersistentId())) continue;
             SaveModule.SubmitPlayer(p);
         }
+        // fire-and-forget 제출(PLAYER_DATA_SUBMIT)이 소켓으로 전달될 시간을 확보.
+        OrchestratorClient.Instance?.WaitForOutboundFlush(1500);
         Application.Quit();
     }
 
-    /// <summary>CONSOLE — 오케스트레이터 명령을 게임 콘솔로 실행 (ConsoleScript.TryExecuteCommand).</summary>
+    /// <summary>CONSOLE — 오케스트레이터 명령을 게임 콘솔로 실행 (ConsoleScript.TryExecuteCommand).
+    /// 실행 결과(게임 콘솔 로그에 추가된 라인 — 성공/실패 메시지)를 일반 로그처럼 릴레이한다:
+    /// Plugin.Log → 게임 stdout → 에이전트 DrainAsync → 오케스트레이터 표시. 출력이 없는
+    /// 명령은 자연히 로그에 남지 않는다 (실행 여부는 인스턴스 태그로 식별).</summary>
     internal static void HandleConsole(string command)
     {
         if (string.IsNullOrEmpty(command)) return;
-        Plugin.Log.LogInfo($"[Run] 콘솔 명령 실행: {command}");
         try
         {
+            var console = ConsoleScript.instance;
+            if (console == null || console.logs == null)
+            {
+                Plugin.Log.LogWarning($"[Run] 콘솔 미준비 — 실행 불가: {command}");
+                return;
+            }
+
+            int start = console.logs.Count;   // 실행 전 로그 위치
             var method = HarmonyLib.AccessTools.Method(typeof(ConsoleScript), "TryExecuteCommand");
             string[] args = command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            method?.Invoke(ConsoleScript.instance, new object[] { args, false });
+            method?.Invoke(console, new object[] { args, false });
+
+            // 실행 후 추가된 라인 = 실행 결과. 리치 텍스트 태그(<color> 등)만 제거하고
+            // 게임 콘솔 타임스탬프([mm:ss])는 유지한 채 그대로 로그로 캡처한다.
+            if (start <= console.logs.Count)
+            {
+                for (int i = start; i < console.logs.Count; i++)
+                {
+                    string line = System.Text.RegularExpressions.Regex.Replace(console.logs[i], "<[^>]*>", "");
+                    Plugin.Log.LogInfo(line);
+                }
+            }
         }
         catch (System.Exception ex)
         {

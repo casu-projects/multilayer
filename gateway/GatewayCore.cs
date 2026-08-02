@@ -40,6 +40,23 @@ public sealed class GatewayCore
     public bool ValidatePassword(string? candidate) =>
         string.IsNullOrEmpty(_serverPassword) || candidate == _serverPassword;
 
+    /// <summary>오케스트레이터 종료 신호 — 전 세션 정리 후 프로세스 종료 요청.</summary>
+    public event Action? ShutdownRequested;
+
+    private void ApplyShutdown()
+    {
+        lock (_lock)
+        {
+            foreach (ClientSession session in _sessions.Values.ToList())
+            {
+                session.Kick("Server is shutting down.");
+                RemoveSession(session, "shutdown");
+            }
+        }
+        Log.Info("종료 신호 수신 — 서버 종료.");
+        ShutdownRequested?.Invoke();
+    }
+
     /// <summary>활성 세션 수 (로비 PLRCOUNT 메타데이터용).</summary>
     public int SessionCount => _sessions.Count;
 
@@ -206,6 +223,9 @@ public sealed class GatewayCore
                     break;
                 case "MAINTENANCE":
                     ApplyMaintenance(msg);
+                    break;
+                case "SHUTDOWN":
+                    ApplyShutdown();
                     break;
                 case "LOBBY_METADATA":
                     ApplyLobbyMetadata(msg);

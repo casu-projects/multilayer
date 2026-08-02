@@ -8,14 +8,21 @@ namespace CasuMpAgent;
 
 internal static class Program
 {
+    /// <summary>시작 시 자동 탐지된 게이트웨이 직결용 호스트 IP (AGENT_HELLO address).</summary>
+    private static string _localIp = "127.0.0.1";
     private static void Main(string[] args)
     {
         string configPath = args.Length > 0 ? args[0] : "agent.json";
         AgentConfig config = AgentConfig.Load(configPath);
         AgentLog.Init(config.MachineId);
 
+        // 게이트웨이가 인스턴스에 직결할 호스트 IP — 자동 탐지 (config 필드 없음)
+        string localIp = AgentConfig.DetectLocalIPv4();
+        _localIp = localIp;
+
         AgentLog.Info($"구성 로드: {configPath}");
-        AgentLog.Info($"머신 {config.MachineId} (수용 {config.Capacity}, 주소 {config.Address})");
+        // 휴리스틱 결과는 릴레이하지 않음 — 에이전트 콘솔 자체에만 (게이트웨이 부팅 로그와 동일 방식)
+        Console.WriteLine($"머신 {config.MachineId} — 에이전트 서버 IP: {localIp}");
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -143,12 +150,12 @@ internal static class Program
                 using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
                 using var reader = new StreamReader(stream, new UTF8Encoding(false));
 
-                // HELLO 등록 (D3)
+                // HELLO 등록 (D3) — address는 시작 시 자동 탐지된 게이트웨이 직결용 IP
                 writer.WriteLine(ControlMessage.Create(1, "AGENT_HELLO", new
                 {
                     machineId = config.MachineId,
                     capacity = config.Capacity,
-                    address = config.Address,
+                    address = _localIp,
                 }).Serialize());
 
                 // 보류 보고 flush
@@ -168,7 +175,9 @@ internal static class Program
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
-                AgentLog.Info($"오케스트레이터 연결 오류: {ex.Message}");
+                // 연결 오류는 릴레이 없이 자체 stdout에만 — 재시도 루프가 오케스트레이터
+                // 콘솔을 도배하지 않도록 한다 (정상 연결 로그는 릴레이됨).
+                Console.WriteLine($"오케스트레이터 연결 오류: {ex.Message}");
             }
             await Task.Delay(delay, ct);
         }

@@ -1,4 +1,9 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.IO;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 
 namespace CasuMpAgent;
 
@@ -14,26 +19,44 @@ public sealed class AgentConfig
     /// <summary>동시 실행 가능한 인스턴스 수 (배치 결정용).</summary>
     public int Capacity { get; set; } = 4;
 
-    /// <summary>이 머신의 대외 주소 — 게이트웨이가 인스턴스에 연결할 때 사용 (D4).</summary>
-    public string Address { get; set; } = "127.0.0.1";
-
     /// <summary>인스턴스 실행 파일/스크립트 경로 (기존 run_bepinex.sh 방식).</summary>
     public string GameExecutablePath { get; set; } = "";
 
-    /// <summary>게임 실행 인자 템플릿 (구 오케스트레이터 GameArgsTemplate과 동일).</summary>
-    public string GameArgsTemplate { get; set; } =
-        "{GAMEEXEPATH} --ksmulti-servername \"{SERVERNAME}\" --ksmulti-setpass \"{PASSWORD}\" "
-        + "--ksmulti-runcommand \"startserver {PORT}\" "
-        + "-batchmode -nographics -logFile \"{UNITYLOGPATH}\"";
-
-    /// <summary>인스턴스 홈 디렉토리 루트 (인스턴스당 {instancesDir}/{key}/home).</summary>
-    public string InstancesDir { get; set; } = "./instances";
+    /// <summary>인스턴스 홈 디렉토리 루트 (인스턴스당 {instancesDir}/{key}/home) — 실행 위치(pwd)
+    /// 기준: 게임 폴더와 분리해 에이전트가 실행되는 디렉토리 아래 {pwd}/instances에 유지한다.
+    /// [JsonIgnore] — 파생 값이라 config에 노출하지 않는다.</summary>
+    [JsonIgnore]
+    public string InstancesDir => Path.Combine(Directory.GetCurrentDirectory(), "instances");
 
     /// <summary>STOP 시 graceful 대기(초) 후 강제 종료 (G-4).</summary>
     public int StopGraceSeconds { get; set; } = 5;
 
     /// <summary>오케스트레이터 재연결 간격(초).</summary>
     public double ReconnectIntervalSeconds { get; set; } = 2;
+
+    /// <summary>게이트웨이가 인스턴스에 직결할 때 사용할 호스트 IP 자동 탐지 —
+    /// 첫 비루프백 IPv4 (루프백/가상 인터페이스/APIPA 제외). 게이트웨이와 같은 머신이면
+    /// 루프백과 동일하게 동작하고, 게이트웨이가 원격이어도 이 머신의 LAN IP로 도달한다.
+    /// 탐지 실패(인터페이스 없음) 시 127.0.0.1 폴백.</summary>
+    public static string DetectLocalIPv4()
+    {
+        foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up) continue;
+            string name = ni.Name;
+            if (name == "lo" || name.StartsWith("docker") || name.StartsWith("veth")
+                || name.StartsWith("br-") || name.StartsWith("tun") || name.StartsWith("virbr")) continue;
+            foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
+            {
+                if (ip.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                if (IPAddress.IsLoopback(ip.Address)) continue;
+                byte[] b = ip.Address.GetAddressBytes();
+                if (b[0] == 169 && b[1] == 254) continue;   // APIPA
+                return ip.Address.ToString();
+            }
+        }
+        return "127.0.0.1";
+    }
 
     public static AgentConfig Load(string path)
     {

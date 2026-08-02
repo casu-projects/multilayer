@@ -62,13 +62,13 @@ public sealed class ControlHub
     {
         _config = config;
         _ct = ct;
-        _listener = new TcpListener(IPAddress.Any, config.ControlPort);
+        _listener = new TcpListener(IPAddress.Any, config.Port);
     }
 
     public void Start()
     {
         _listener.Start();
-        Console.WriteLine($"리스너 시작 :{_config.ControlPort}");
+        Console.WriteLine($"리스너 시작 :{_config.Port}");
         _ = AcceptLoopAsync();
     }
 

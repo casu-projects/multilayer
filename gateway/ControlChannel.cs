@@ -32,7 +32,9 @@ public sealed class ControlChannel
             }
             catch (Exception ex)
             {
-                Log.Info($"연결 오류: {ex.Message}");
+                // 연결 오류는 릴레이 없이 자체 stdout에만 — 재시도 루프가 오케스트레이터
+                // 콘솔을 도배하지 않도록 한다 (정상 연결 로그는 릴레이됨).
+                Console.WriteLine($"연결 오류: {ex.Message}");
             }
             await Task.Delay(reconnectDelay, ct);
         }
@@ -41,9 +43,9 @@ public sealed class ControlChannel
     private async Task ConnectAndServeAsync(CancellationToken ct)
     {
         using var client = new TcpClient();
-        var (host, port) = SplitAddr(_config.ControlEndpoint);
+        var (host, port) = SplitAddr(_config.OrchestratorAddr);
         await client.ConnectAsync(host, port, ct);
-        Log.Info($"오케스트레이터 연결 성공: {_config.ControlEndpoint}");
+        Log.Info($"오케스트레이터 연결 성공: {_config.OrchestratorAddr}");
 
         using var stream = client.GetStream();
         using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };

@@ -18,7 +18,7 @@ internal static class Program
         OrchestratorConfig config = OrchestratorConfig.Load(configPath);
 
         Console.WriteLine($"구성 로드: {configPath}");
-        Console.WriteLine($"제어 허브 포트: {config.ControlPort}");
+        Console.WriteLine($"제어 허브 포트: {config.Port}");
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -51,7 +51,13 @@ internal static class Program
         hub.Start();
 
         var console = new OperatorConsole(sessions, instances, migrations,
-            (key, unban) => { banList.Toggle(key, banned: unban != "unban"); },
+            (key, unban) =>
+            {
+                bool banned = unban != "unban";
+                banList.Toggle(key, banned);
+                // 게이트웨이에 즉시 전파 — 접속 중이면 킥 (O6-8 전파 구현)
+                hub.Send(hub.GatewayConnection, "BAN", new { playerKey = key, banned });
+            },
             (key, reason) => hub.Send(hub.GatewayConnection, "KICK", new { playerKey = key, reason }),
             command =>
             {
@@ -75,7 +81,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, conn, msg);
+                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -113,7 +119,7 @@ internal static class Program
         }
     }
 
-    private static void Dispatch(ControlHub hub, PlayerSessionStore sessions,
+    private static void Dispatch(OrchestratorConfig config, ControlHub hub, PlayerSessionStore sessions,
         InstanceManager instances, MigrationCoordinator migrations, PlayerDataStore dataStore,
         BanList banList, RunRuleStore runRules, ControlHub.ClientConnection conn, ControlMessage msg)
     {
@@ -125,6 +131,10 @@ internal static class Program
                 conn.GatewayVersion = msg.PayloadAs<HelloVersion>()?.Version;
                 Console.WriteLine($"게이트웨이 등록 (version {conn.GatewayVersion}).");
                 sessions.PushTableSnapshot();
+                // 인증/밴 정보 푸시 — 밴 목록 단일 소유자는 오케스트레이터, 게이트웨이는
+                // 메모리 사본으로 접속 시 검증 (O6-8 — 재연결 시 스냅샷 재푸시로 수렴)
+                hub.SendNoAck(conn, "AUTH_INFO",
+                    new { serverPassword = config.ServerPassword, bannedKeys = banList.All, maxPlayers = config.MaxPlayers });
                 hub.SendNoAck(conn, "ACK_REPLY", null);
                 return;
 
@@ -176,7 +186,7 @@ internal static class Program
         switch (conn.Kind)
         {
             case ClientKind.Gateway:
-                DispatchGateway(sessions, migrations, conn, msg);
+                DispatchGateway(config, hub, sessions, migrations, conn, msg);
                 break;
             case ClientKind.Agent:
                 DispatchAgent(instances, sessions, conn, msg);
@@ -187,14 +197,26 @@ internal static class Program
         }
     }
 
-    private static void DispatchGateway(PlayerSessionStore sessions, MigrationCoordinator migrations,
+    private static void DispatchGateway(OrchestratorConfig config, ControlHub hub, PlayerSessionStore sessions, MigrationCoordinator migrations,
         ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
             case "SESSION_CONNECTED":
                 if (TryPlayerKey(msg, out var connected))
+                {
+                    // 인원 제한 2차 검증 (1차는 게이트웨이 접속 단계 — 여기는 게이트웨이
+                    // 카운트가 낡은 경우의 안전망). 초과 시 게이트웨이에 KICK.
+                    int online = sessions.All.Count(s => s.Session != PlayerSessionState.Offline);
+                    if (online >= config.MaxPlayers)
+                    {
+                        Console.WriteLine($"인원 초과 — {connected} 접속 거부 (최대 {config.MaxPlayers}).");
+                        hub.Send(hub.GatewayConnection, "KICK",
+                            new { playerKey = connected.Value, reason = "Server is full." });
+                        break;
+                    }
                     sessions.OnSessionConnected(connected, GetUsername(msg));
+                }
                 break;
             case "SESSION_DISCONNECTED":
                 if (TryPlayerKey(msg, out var disc))
@@ -483,6 +505,9 @@ public sealed class BanList
         else _banned.Remove(playerKey);
         Save();
     }
+
+    /// <summary>전체 목록 (게이트웨이 AUTH_INFO 푸시용).</summary>
+    public IReadOnlyCollection<string> All => _banned.ToList();
 
     private void Load()
     {

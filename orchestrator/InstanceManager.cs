@@ -135,7 +135,6 @@ public sealed class InstanceManager
             port,
             serverName = _config.ServerName,
             serverPassword = _config.ServerPassword,
-            orchestratorAddr = _config.AdvertisedAddr,
         }, (ok, reason) =>
         {
             if (!ok)

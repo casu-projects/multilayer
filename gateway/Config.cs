@@ -7,20 +7,18 @@ namespace CasuMpGateway;
 public sealed class GatewayConfig
 {
     /// <summary>오케스트레이터 제어 채널 주소 (host:port). 게이트웨이가 연결하는 방향.
-    /// 기본값은 오케스트레이터 기본 리스너(17900)와 일치 — config 자동생성 시에도 정상 연결.</summary>
-    public string ControlEndpoint { get; set; } = "127.0.0.1:17900";
+    /// 기본값은 오케스트레이터 기본 리스너(17900)와 일치 — config 자동생성 시에도 정상 연결.
+    /// (에이전트의 OrchestratorAddr과 동일한 의미 — 이름 통일)</summary>
+    public string OrchestratorAddr { get; set; } = "127.0.0.1:17900";
 
     /// <summary>직접연결(DirectIpAdapter) 리스너 포트.</summary>
-    public int DirectListenPort { get; set; } = 17801;
+    public int DirectListenPort { get; set; } = 7790;
 
     /// <summary>Steam 어댑터 활성화 여부 (PLAN.md G13 — Steam은 게이트웨이 1곳에만 존재).</summary>
     public bool SteamEnabled { get; set; } = false;
 
     /// <summary>Steam 어댑터 설정 (SteamEnabled=true일 때만 사용).</summary>
     public SteamConfig? Steam { get; set; }
-
-    /// <summary>밴 목록 파일 경로 (플레이어 키 목록).</summary>
-    public string BanListPath { get; set; } = "gateway_banlist.json";
 
     // ── 타임아웃/재시도 (PLAN.md G12-R2) ──
 

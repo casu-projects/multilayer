@@ -8,7 +8,7 @@ internal static class Program
         GatewayConfig config = GatewayConfig.Load(configPath);
 
         Log.Info($"구성 로드 완료: {configPath}");
-        Log.Info($"제어 채널: {config.ControlEndpoint} (오케스트레이터 대기)");
+        Log.Info($"제어 채널: {config.OrchestratorAddr} (오케스트레이터 대기)");
         Log.Info($"직접연결 포트: {config.DirectListenPort}");
 
         using var cts = new CancellationTokenSource();

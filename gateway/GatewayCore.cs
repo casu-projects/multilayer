@@ -20,15 +20,25 @@ public sealed class GatewayCore
 
     private bool _maintenance;
     private string _maintenanceMessage = "";
+    /// <summary>서버 비밀번호 — 오케스트레이터 AUTH_INFO로 수신 (게임 setpass와 별개 조기 검증용 사본).</summary>
+    private string _serverPassword = "";
+    /// <summary>최대 동시 접속 인원 — 오케스트레이터 AUTH_INFO로 수신 (orchestrator.json MaxPlayers).</summary>
+    private int _maxPlayers = 32;
 
     public GatewayCore(GatewayConfig config)
     {
         Config = config;
-        LoadBanList();
     }
 
     public bool IsMaintenance => _maintenance;
     public string MaintenanceMessage => _maintenanceMessage;
+
+    /// <summary>최대 동시 접속 인원 (AUTH_INFO).</summary>
+    public int MaxPlayers => _maxPlayers;
+
+    /// <summary>서버 비밀번호 검증 — 미설정이면 항상 허용 (게임 서버가 최종 권위).</summary>
+    public bool ValidatePassword(string? candidate) =>
+        string.IsNullOrEmpty(_serverPassword) || candidate == _serverPassword;
 
     /// <summary>활성 세션 수 (로비 PLRCOUNT 메타데이터용).</summary>
     public int SessionCount => _sessions.Count;
@@ -191,6 +201,9 @@ public sealed class GatewayCore
                 case "BAN":
                     ApplyBan(msg);
                     break;
+                case "AUTH_INFO":
+                    ApplyAuthInfo(msg);
+                    break;
                 case "MAINTENANCE":
                     ApplyMaintenance(msg);
                     break;
@@ -322,7 +335,25 @@ public sealed class GatewayCore
                 _banned.Remove(key);
             }
         }
-        SaveBanList();
+    }
+
+    /// <summary>AUTH_INFO (오케스트레이터 → 게이트웨이 — 연결 시/재연결 시 스냅샷).
+    /// 밴 목록 단일 소유자는 오케스트레이터 — 여기서는 메모리 사본 교체 + 서버 비밀번호/
+    /// 최대 인원 저장 (파일 영속화 없음 — 게이트웨이 재시작 시 AUTH_INFO 재수신으로 수렴).</summary>
+    private void ApplyAuthInfo(ControlMessage msg)
+    {
+        var payload = msg.PayloadAs<AuthInfoPayload>() ?? throw new InvalidDataException("payload 없음");
+        lock (_lock)
+        {
+            _serverPassword = payload.ServerPassword ?? "";
+            _maxPlayers = payload.MaxPlayers > 0 ? payload.MaxPlayers : 32;
+            _banned.Clear();
+            foreach (string key in payload.BannedKeys ?? [])
+            {
+                _banned.Add(PlayerKey.FromString(key));
+            }
+        }
+        Log.Info($"인증 정보 수신 (밴 {_banned.Count}명, 비밀번호 {(string.IsNullOrEmpty(_serverPassword) ? "미설정" : "설정")}, 최대 {_maxPlayers}명).");
     }
 
     private void ApplyMaintenance(ControlMessage msg)
@@ -356,40 +387,6 @@ public sealed class GatewayCore
         }
     }
 
-    private void LoadBanList()
-    {
-        try
-        {
-            if (!File.Exists(Config.BanListPath)) return;
-            var list = JsonSerializer.Deserialize<string[]>(File.ReadAllText(Config.BanListPath)) ?? [];
-            foreach (string key in list)
-            {
-                _banned.Add(PlayerKey.FromString(key));
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"밴 목록 로드 실패: {ex.Message}");
-        }
-    }
-
-    private void SaveBanList()
-    {
-        try
-        {
-            string[] list;
-            lock (_lock)
-            {
-                list = _banned.Select(b => b.Value).ToArray();
-            }
-            File.WriteAllText(Config.BanListPath, JsonSerializer.Serialize(list));
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"밴 목록 저장 실패: {ex.Message}");
-        }
-    }
-
     /// <summary>백엔드 연결 가능한 주소인지 — 빈/무효 주소는 스테일 라우트로 취급한다.</summary>
     internal static bool IsUsableBackendAddr(string? addr) =>
         !string.IsNullOrEmpty(addr) && addr.Contains(':');
@@ -418,6 +415,14 @@ public sealed class GatewayCore
     {
         public string PlayerKey { get; set; } = "";
         public bool Banned { get; set; }
+    }
+
+    /// <summary>AUTH_INFO (오케스트레이터 → 게이트웨이 — 밴 스냅샷 + 서버 비밀번호 + 최대 인원).</summary>
+    public sealed class AuthInfoPayload
+    {
+        public string? ServerPassword { get; set; }
+        public string[] BannedKeys { get; set; } = [];
+        public int MaxPlayers { get; set; }
     }
 
     public sealed class MaintenancePayload

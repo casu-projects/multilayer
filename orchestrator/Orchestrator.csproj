@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>CasuMpOrchestrator</AssemblyName>
+    <RootNamespace>CasuMpOrchestrator</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- 제어 허브(ControlHub): 게이트웨이/에이전트/모드 3종 클라이언트를 TCP로 수용 (PLAN.md D3/O6-1) -->
+
+</Project>

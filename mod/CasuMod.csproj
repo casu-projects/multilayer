@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>CasuMod</AssemblyName>
+    <RootNamespace>CasuMod</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- BepInEx 5 코어 (리눅스 데디서버 — 루트 instance/와 동일 버전) -->
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>../../instance/BepInEx/core/BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>../../instance/BepInEx/core/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 게임/모드 어셈블리 — 수정하지 않는 원본 참조 -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.Physics2DModule">
+      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.Physics2DModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="KrokoshaCasualtiesMP">
+      <HintPath>../../assets/casualties-together/KrokoshaCasualtiesMP.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="LiteNetLib">
+      <HintPath>../../assets/casualties-together/LiteNetLib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,11 @@
+{
+  "OrchestratorAddr": "127.0.0.1:17900",
+  "MachineId": "m1",
+  "Capacity": 4,
+  "Address": "127.0.0.1",
+  "GameExecutablePath": "",
+  "GameArgsTemplate": "{GAMEEXEPATH} --ksmulti-servername \u0022{SERVERNAME}\u0022 --ksmulti-setpass \u0022{PASSWORD}\u0022 --ksmulti-runcommand \u0022startserver {PORT}\u0022 -batchmode -nographics -logFile \u0022{UNITYLOGPATH}\u0022",
+  "InstancesDir": "./instances",
+  "StopGraceSeconds": 5,
+  "ReconnectIntervalSeconds": 2
+}

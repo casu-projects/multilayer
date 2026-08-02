@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>CasuMpAgent</AssemblyName>
+    <RootNamespace>CasuMpAgent</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- 노드 에이전트 (PLAN.md D3) — 프로세스 수명주기 전용. 오케스트레이터와 TCP JSON 라인으로 통신 -->
+
+</Project>

@@ -50,6 +50,18 @@ public sealed class RunRuleStore
         }
     }
 
+    /// <summary>런 설정 존재 여부 — 없는 키의 변경을 거부하기 위한 검증.</summary>
+    public bool ContainsRun(string key)
+    {
+        lock (_lock) { return _run.ContainsKey(key); }
+    }
+
+    /// <summary>규칙 존재 여부 — 없는 키의 변경을 거부하기 위한 검증.</summary>
+    public bool ContainsRule(string key)
+    {
+        lock (_lock) { return _rules.ContainsKey(key); }
+    }
+
     private void Load()
     {
         _run = LoadFile(_runPath);

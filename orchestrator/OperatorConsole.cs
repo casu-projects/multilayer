@@ -4,8 +4,9 @@ using System.Text.Json;
 namespace CasuMpOrchestrator;
 
 /// <summary>운영자 콘솔 — stdin 명령 (G-7 확장).
-/// `run <command...>` — 매개변수 전체를 게임 콘솔 명령으로 전 인스턴스에 릴레이
-/// (구 시스템 의미 복원 — 설정 변경이 아니라 게임 명령 실행).</summary>
+/// `exec <command...>` — 매개변수 전체를 게임 콘솔 명령으로 전 인스턴스에 릴레이
+/// (구 시스템 의미 복원 — 설정 변경이 아니라 게임 명령 실행).
+/// `rule <이름> <값>` / `run <설정> <값>` — rule.json/run.json 수정 + 전 인스턴스 실시간 반영.</summary>
 public sealed class OperatorConsole
 {
     private readonly ConcurrentQueue<string> _pendingLines = new();
@@ -15,19 +16,23 @@ public sealed class OperatorConsole
     private readonly Action<string, string?> _banAction;   // (playerKey, reason)
     private readonly Action<string, string?> _kickAction;
     private readonly Action<string>? _consoleRelay;   // (game command) — 전 인스턴스 게임 콘솔 실행
+    private readonly RunRuleStore _runRuleStore;      // rule.json/run.json 정본
+    private readonly Action? _pushRulesAction;        // 변경 후 전 인스턴스 RUN_RULES_STATE 푸시
 
     /// <summary>종료 신호 수신 시 호출 (Program.Main에서 cts.Cancel과 연결 — 대화형 Ctrl+C용).</summary>
     internal Action? ShutdownRequested;
 
     public OperatorConsole(PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, Action<string, string?> banAction, Action<string, string?> kickAction,
-        Action<string>? consoleRelay = null)
+        RunRuleStore runRuleStore, Action? pushRulesAction = null, Action<string>? consoleRelay = null)
     {
         _sessions = sessions;
         _instances = instances;
         _migrations = migrations;
         _banAction = banAction;
         _kickAction = kickAction;
+        _runRuleStore = runRuleStore;
+        _pushRulesAction = pushRulesAction;
         _consoleRelay = consoleRelay;
     }
 
@@ -135,6 +140,8 @@ public sealed class OperatorConsole
                 Console.WriteLine("clear - 터미널 화면을 지웁니다");
                 Console.WriteLine("migrate <player> - 특정 유저를 수동 마이그레이션합니다 (구현 예정)");
                 Console.WriteLine("exec <command...> - 모든 인스턴스에 게임 콘솔 명령을 실행합니다");
+                Console.WriteLine("rule <이름> <값> - rule.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)");
+                Console.WriteLine("run <설정> <값> - run.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)");
                 break;
             case "list":
                 foreach (PlayerState p in _sessions.All)
@@ -166,6 +173,12 @@ public sealed class OperatorConsole
             case "exec":
                 HandleRun(arg);
                 break;
+            case "rule":
+                HandleSet("rule", arg, isRun: false);
+                break;
+            case "run":
+                HandleSet("run", arg, isRun: true);
+                break;
             default:
                 Console.WriteLine($"알 수 없는 명령: {command}");
                 break;
@@ -188,6 +201,55 @@ public sealed class OperatorConsole
             return;
         }
         _consoleRelay(command.Trim());
+    }
+
+    /// <summary>rule.json/run.json 설정 변경 — `rule <이름> <값>` / `run <설정> <값>`.
+    /// 존재하지 않는 키는 거부하고, 값 변환 규칙:
+    /// ① 기존 저장값이 boolean 형식("True"/"False")이고 입력이 1/0이면 True/False로 변환.
+    /// ② 그 외(숫자 형식 필드, "1.0"/"0.0" 등)는 문자열 그대로 저장.
+    /// 성공 시 파일 재기록 + 전 인스턴스 RUN_RULES_STATE 푸시 (즉시 반영).</summary>
+    private void HandleSet(string commandName, string arg, bool isRun)
+    {
+        string[] parts = arg.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+        {
+            Console.WriteLine($"사용법: {commandName} <이름> <값>  (예: {commandName} ShowPlayerDirections 1)");
+            return;
+        }
+        string key = parts[0];
+        string rawValue = parts[1].Trim();
+
+        bool exists = isRun ? _runRuleStore.ContainsRun(key) : _runRuleStore.ContainsRule(key);
+        if (!exists)
+        {
+            Console.WriteLine($"실패: {commandName}.json에 없는 키입니다 — {key}");
+            return;
+        }
+
+        string current = (isRun ? _runRuleStore.RunSnapshot : _runRuleStore.RuleSnapshot)
+            .TryGetValue(key, out string? cur) ? cur : "";
+        string value = ConvertValue(current, rawValue);
+
+        if (isRun) _runRuleStore.SetRun(key, value);
+        else _runRuleStore.SetRule(key, value);
+
+        _pushRulesAction?.Invoke();
+        Console.WriteLine($"{commandName} {key} = {value} 반영 (파일 + 전 인스턴스 푸시).");
+    }
+
+    /// <summary>값 변환 — 기존 저장값이 bool 형식("True"/"False")이면 1/0 → True/False.
+    /// 숫자 형식 필드나 그 외 입력은 문자열 그대로 (bool 필드가 아니면 게임이 1/0을
+    /// 숫자로 인식해야 하므로 변환하지 않는다).</summary>
+    private static string ConvertValue(string current, string raw)
+    {
+        bool isBoolField = string.Equals(current, "True", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(current, "False", StringComparison.OrdinalIgnoreCase);
+        if (isBoolField)
+        {
+            if (string.Equals(raw, "1", StringComparison.Ordinal)) return "True";
+            if (string.Equals(raw, "0", StringComparison.Ordinal)) return "False";
+        }
+        return raw;
     }
 
     private bool TryResolvePlayer(string input, out PlayerKey key)

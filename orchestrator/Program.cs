@@ -68,9 +68,20 @@ internal static class Program
                 hub.Send(hub.GatewayConnection, "BAN", new { playerKey = key, banned });
             },
             (key, reason) => hub.Send(hub.GatewayConnection, "KICK", new { playerKey = key, reason }),
+            runRules,
+            () =>
+            {
+                // rule/run 변경 → 전 인스턴스 즉시 반영 (모드가 재적용).
+                var runSettings = runRules.RunSnapshot;
+                var rules = runRules.RuleSnapshot;
+                foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                {
+                    hub.SendNoAck(conn, "RUN_RULES_STATE", new { runSettings, rules });
+                }
+            },
             command =>
             {
-                // `run <command...>` — 게임 콘솔 명령을 전 온라인 인스턴스에 릴레이 (구 시스템 의미 복원).
+                // `exec <command...>` — 게임 콘솔 명령을 전 온라인 인스턴스에 릴레이 (구 시스템 의미 복원).
                 // 모드의 CONSOLE 핸들러(RunModule.HandleConsole)가 실행하고, 실행 결과는
                 // 인스턴스 로그(에이전트 DrainAsync)로 자연히 표시된다 — 여기서는 전송만.
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))

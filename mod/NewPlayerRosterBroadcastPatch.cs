@@ -56,6 +56,5 @@ internal static class RosterBroadcast
             return;
 
         player.Server__ResponsePlayerName(others);
-        Plugin.Log.LogInfo($"[Roster] {player.playername}({player.clientId}) 신원 → {others.Count}명 브로드캐스트 ({source}).");
     }
 }

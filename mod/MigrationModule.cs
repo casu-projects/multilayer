@@ -11,9 +11,7 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>마이그레이션 (O3/S9-6) — LAYER_END 감지 + FREEZE/RESUME/TRIGGER_WORLDGEN/RELEASE.
 /// 오케스트레이터가 트랜잭션을 주도하고, 모드는 이벤트 보고/지시 수행만 한다.
-/// P2/P3: epoch 멱등 + FREEZE 시 발신 중단(10170 브로드캐스트) + 월드젠 완료 시 로스터 배리어.</summary>
 public sealed class MigrationModule : MonoBehaviour
 {
     private readonly HashSet<string> _reported = new();
@@ -49,7 +47,6 @@ public sealed class MigrationModule : MonoBehaviour
                 // 취소·재시작되고 상태가 손상된다.
                 int fromDepth = WorldGeneration.world.biomeDepth + 1;
                 int maxLayers = WorldGeneration.world.amountOfLayers;
-                Plugin.Log.LogInfo($"[Migration] {p.playername} 레이어 끝 도달 — LAYER_END 보고 (depth {fromDepth}).");
                 OrchestratorClient.Instance.SendEvent("LAYER_END", new
                 {
                     playerKey = pid,
@@ -96,10 +93,8 @@ public sealed class MigrationModule : MonoBehaviour
         {
             // 리스폰: 캡처 금지 — 죽은 상태 데이터가 목적지에 전달되면 리스폰이 실패한다
             // (프레시 신규 상태 보장 — 세이브는 오케스트레이터가 이미 폐기).
-            Plugin.Log.LogInfo($"[Migration] {playerKey} FREEZE — 리스폰 캡처 스킵.");
         }
 
-        // ① 먼저: 클라이언트 레지스트리 정리 버스트 — 파괴 전이라 인벤토리 아이템이 아직
         //    등록 상태여서 버스트에 포함된다. ReliableOrdered 직접 전송이라 forcesync 큐
         //    (사망 플레이어 한도 20 — Server_RunFastSync가 초과 시 건너뜀)에 의존하지 않고
         //    결정적으로 클라이언트에 삭제가 전달된다. 파괴 후 버스트를 보내면 등록 해제된
@@ -125,7 +120,6 @@ public sealed class MigrationModule : MonoBehaviour
             {
                 plr.body.slots[i] = null;
             }
-            Plugin.Log.LogInfo($"[Migration] {playerKey} FREEZE — 인벤토리 동기화 파괴 (데이터는 캡처됨).");
         }
         catch (System.Exception ex)
         {
@@ -146,12 +140,10 @@ public sealed class MigrationModule : MonoBehaviour
             if (plr == null) return;
             SendRegenerateWorld(plr);
             _loadingTriggered.Add(playerKey);
-            Plugin.Log.LogInfo($"[Migration] {playerKey} FREEZE — 로딩 트리거 + 완료 보고.");
             OrchestratorClient.Instance?.SendEvent("FREEZE_DONE", new { playerKey, epoch });
         }));
     }
 
-    /// <summary>클라이언트 CoolSync 레지스트리 정리 버스트 (2026-08-02, Fix I).
     /// 클라이언트의 client_objects 레지스트리는 forcedelete 패킷(10174, result4==0)으로만
     /// 제거되고 월드 재생성(10016) 시 정리되지 않는다 — 출발지 월드의 객체/타인 바디가
     /// SWAP으로 백엔드가 끊겨 삭제 패킷 없이 고아로 잔존하고, 목적지 인스턴스가 낮은
@@ -181,12 +173,10 @@ public sealed class MigrationModule : MonoBehaviour
 
             if (sentPackets > 0)
             {
-                Plugin.Log.LogInfo($"[Migration] {plr.playername} 레지스트리 정리 버스트 — {sentObjects}개 객체 / {sentPackets}패킷.");
             }
         }
         catch (System.Exception ex)
         {
-            Plugin.Log.LogWarning($"[Migration] 레지스트리 정리 버스트 실패: {ex.Message}");
         }
     }
 
@@ -250,7 +240,6 @@ public sealed class MigrationModule : MonoBehaviour
                 .ToList();
             if (targets.Count == 0) return;
             SendPlayerLeft(leaving.clientId, targets);
-            Plugin.Log.LogInfo($"[Migration] {leaving.playername}({leaving.clientId}) 퇴장 신호 → {targets.Count}명 브로드캐스트.");
         }
         catch (System.Exception ex)
         {
@@ -264,7 +253,6 @@ public sealed class MigrationModule : MonoBehaviour
         int epoch = msg.PayloadAs<PlayerKeyPayload>()?.Epoch ?? -1;
         if (!FrozenPlayers.TryGetValue(playerKey, out int current) || (epoch >= 0 && epoch != current))
         {
-            Plugin.Log.LogInfo($"[Migration] {playerKey} UNFREEZE 무시 (epoch {epoch} — 현재 {current}).");
             return;
         }
         FrozenPlayers.TryRemove(playerKey, out _);
@@ -286,7 +274,6 @@ public sealed class MigrationModule : MonoBehaviour
                 try
                 {
                     ServerMain.Server_AnnounceSeed(new List<knetid> { plr.clientId });
-                    Plugin.Log.LogInfo($"[Migration] {playerKey} UNFREEZE — 구 월드 재생성 복구.");
                 }
                 catch (System.Exception ex)
                 {
@@ -303,7 +290,6 @@ public sealed class MigrationModule : MonoBehaviour
                     try
                     {
                         SaveModule.RestorePlayer(plr.body, plr, (JObject)payload);
-                        Plugin.Log.LogInfo($"[Migration] {playerKey} UNFREEZE — 데이터 재적용 완료.");
                     }
                     catch (System.Exception ex)
                     {
@@ -312,7 +298,6 @@ public sealed class MigrationModule : MonoBehaviour
                 }
             }
         }
-        Plugin.Log.LogInfo($"[Migration] {playerKey} UNFREEZE.");
     }
 
     internal static void HandleResume(ControlMessage msg)
@@ -339,7 +324,6 @@ public sealed class MigrationModule : MonoBehaviour
             // S9-6: 데이터 보관 없음 — 목적지 Body.Start가 "데이터 없음" 경로로 프레시 생성 +
             // 시작 보급품 자동 지급. 잔존 엔트리가 있으면 정리 (중복/스테일 방어).
             SaveModule.PendingData.TryRemove(playerKey, out _);
-            Plugin.Log.LogInfo($"[Migration] {playerKey} RESUME — 리스폰 (프레시 신규, 데이터 없음).");
         }
         else
         {
@@ -366,13 +350,11 @@ public sealed class MigrationModule : MonoBehaviour
             }
             if (sent > 0)
             {
-                Plugin.Log.LogInfo($"[Migration] {playerKey} RESUME — 이전 레이어 플레이어 {sent}명 정리 신호.");
             }
         }
         // 로딩 트리거는 구 인스턴스의 FREEZE(1초 플러시 후 10016)가 단일 발신원이다.
         // 여기서 재전송하면 대기 중인 클라이언트의 재생성이 취소·재시작되어 상태가 손상된다.
 
-        Plugin.Log.LogInfo($"[Migration] {playerKey} RESUME — 데이터 보관 + 동결 (epoch {epoch}).");
         OrchestratorClient.Instance?.SendEvent("RESUME_DONE", new { playerKey, epoch });
     }
 
@@ -381,24 +363,20 @@ public sealed class MigrationModule : MonoBehaviour
         NetPlayer plr = FindByPersistentId(playerKey);
         if (plr == null)
         {
-            Plugin.Log.LogWarning($"[Migration] TRIGGER_WORLDGEN: {playerKey} 플레이어 없음.");
             return;
         }
 
         SendRegenerateWorld(plr);
-        Plugin.Log.LogInfo($"[Migration] {playerKey} TRIGGER_WORLDGEN (10016 전송).");
     }
 
     internal static void HandleRelease(string playerKey, int epoch)
     {
         if (!FrozenPlayers.TryGetValue(playerKey, out int current) || (epoch >= 0 && epoch != current))
         {
-            Plugin.Log.LogInfo($"[Migration] {playerKey} RELEASE 무시 (epoch {epoch} — 현재 {current}).");
             return;
         }
         FrozenPlayers.TryRemove(playerKey, out _);
         _loadingTriggered.Remove(playerKey);
-        Plugin.Log.LogInfo($"[Migration] {playerKey} RELEASE — 소유권 이전 완료.");
     }
 
     /// <summary>클라이언트에 10170(RegenerateWorld) 전송 — 즉시 로딩 화면 진입.
@@ -413,7 +391,6 @@ public sealed class MigrationModule : MonoBehaviour
     }
 
     /// <summary>클라이언트에 10170(플레이어 퇴장) 전송 — 마이그레이션 후 잔존하는
-    /// 이전 레이어 플레이어들의 NetPlayer를 즉시 정리한다 (ClientReceiver__PlayerLeft:
     /// clientId를 읽고 해당 NetPlayer 파괴). 서버 발신 프로토콜: [ushort clientId][ulong steam_id]
     /// — steam_id는 클라이언트 수신기가 읽지 않으므로 0으로 전송한다.</summary>
     private static void SendPlayerLeft(ushort leavingClientId, List<knetid> targets)
@@ -426,8 +403,6 @@ public sealed class MigrationModule : MonoBehaviour
 
     // ── 후킹 ──
 
-    /// <summary>10168(월드젠 완료) 수신 → WORLDGEN_DONE 보고 (마이그레이션 커밋 신호).
-    /// P3 로스터 배리어: 월드젠 완료는 전역 동기화 기준점 — 완료한 플레이어에게 전 로스터를
     /// 재전송하고, 그 신원을 타인에게 일괄 재브로드캐스트한다 (수신자별 finished_worldgen
     /// 이후 발신이므로 로딩 중 유실이 원천적으로 불가능 — "나중 마이그레이션 유저가
     /// 안 보이는" 레이스의 결정적 해결).</summary>
@@ -439,7 +414,6 @@ public sealed class MigrationModule : MonoBehaviour
             if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
             if (!NetPlayer.TryGetPlayerFromClientId(clientId, out NetPlayer plr)) return;
 
-            // 로스터 배리어 — 멱등 (중복 수신은 이름/색 갱신만)
             try { RosterBarrier(plr); }
             catch (System.Exception ex) { Plugin.Log.LogWarning($"[Roster] 배리어 실패: {ex.Message}"); }
 
@@ -447,7 +421,6 @@ public sealed class MigrationModule : MonoBehaviour
             if (IsFrozen(pid))
             {
                 OrchestratorClient.Instance?.SendEvent("WORLDGEN_DONE", new { playerKey = pid, epoch = FrozenEpoch(pid) });
-                Plugin.Log.LogInfo($"[Migration] {plr.playername} WORLDGEN_DONE 보고.");
             }
         }
     }
@@ -489,7 +462,6 @@ public sealed class MigrationModule : MonoBehaviour
             try
             {
                 SendReliableCharSyncDelete(plr.clientId);
-                Plugin.Log.LogInfo($"[Roster] {plr.playername}({plr.clientId}) 복귀 — 관찰자 항목 정리 DELETE 전송.");
             }
             catch (System.Exception ex)
             {
@@ -497,7 +469,6 @@ public sealed class MigrationModule : MonoBehaviour
             }
         }
 
-        Plugin.Log.LogInfo($"[Roster] {plr.playername}({plr.clientId}) 로스터 배리어 — 타인 {others.Count}명.");
     }
 
     /// <summary>동결(FREEZE)된 플레이어의 퇴장 → PLAYER_LEFT (오케스트레이터가 데이터 확정).

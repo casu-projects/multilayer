@@ -81,7 +81,6 @@ internal static class CoolSyncSnapshotGuardPatch
             var snapshots = snapshotsField.GetValue(kv.Value) as IDictionary;
             if (snapshots != null && snapshots.Count > MaxSnapshotsPerPlayer)
             {
-                Plugin.Log.LogInfo($"CoolSyncSnapshotGuard: {kv.Key} 스냅샷 큐 {snapshots.Count}개 → 50% 정리");
                 (toTrim ??= new List<object>()).Add(kv.Key);
             }
         }

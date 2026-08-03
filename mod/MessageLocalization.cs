@@ -57,12 +57,21 @@ public static class MessageLocalization
 }
 
 /// <summary>A — 채팅 공지 번역/비활성화 (Server_ChatAnnouncement 단일 지점).
-/// 바닐라는 AllClientIds 고정이므로, 한국어 재전송은 AnnounceRelay의 10098 와이어 미러를 사용한다.</summary>
-[HarmonyPatch(typeof(Chat), nameof(Chat.Server_ChatAnnouncement), new[] { typeof(string) })]
+/// 바닐라는 AllClientIds 고정이므로, 한국어 재전송은 AnnounceRelay의 10098 와이어 미러를 사용한다.
+/// 1-arg 오버로드의 매개변수는 byref(string& — in string) — by-value string으로 지정하면
+/// 타겟 매칭 실패로 PatchAll이 throw한다 (2026-08-03 확인). MakeByRefType으로 지정.</summary>
+[HarmonyPatch]
 [HarmonyPriority(Priority.First)]
 internal static class Chat_ServerChatAnnouncement_LocalizePatch
 {
-    private static bool Prefix(string message)
+    [HarmonyTargetMethod]
+    private static System.Reflection.MethodBase TargetMethod()
+    {
+        return AccessTools.DeclaredMethod(typeof(Chat), nameof(Chat.Server_ChatAnnouncement),
+            new[] { typeof(string).MakeByRefType() });
+    }
+
+    private static bool Prefix(ref string message)
     {
         if (!KrokoshaScavMultiplayer.is_dedicated_server)
             return true;
@@ -98,7 +107,6 @@ internal static class ServerMain_OnPlayerDeath_LocalizedPatch
         if (plr == null)
             return true;
 
-        Plugin.Log.LogInfo($"{plr.playername} is ded, not big suprise.");
 
         // 개인 — 팝업 (10006, important).
         plr.Server_DoAlertSingle("사망하였습니다.\n!respawn 명령어를 사용하여 부활하세요.",

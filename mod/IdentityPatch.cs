@@ -101,15 +101,11 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
         if (isReturning || isMigrating)
         {
             ReturningTracker.ClientIds.Add(__result.clientId);
-            Plugin.Log.LogInfo($"[Identity] {__result.playername}({__result.clientId}) 복귀 플레이어"
-                + (isMigrating ? " (마이그레이션)" : " (재접속)") + " — RosterBarrier DELETE 대상.");
         }
 
         if (steamId.HasValue && steamId.Value != 0)
         {
             __result.steam_id = steamId.Value;
-            Plugin.Log.LogInfo($"[Identity] {__result.playername} → SteamID {steamId.Value}"
-                + (isMigrating ? " (마이그레이션 도착)" : ""));
         }
 
         // S9-4: 접속 시 플레이어 데이터 요청 — 직접연결(steam_id=0) 포함 전 플레이어.

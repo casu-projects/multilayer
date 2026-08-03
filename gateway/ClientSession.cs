@@ -153,7 +153,6 @@ public sealed class ClientSession : INetEventListener
         if (!GatewayCore.IsUsableBackendAddr(addr))
         {
             // 빈/무효 주소 — 연결 시도 자체를 하지 않고 재시도 대기 (예외 → 추방 방지).
-            Log.Info($"{Username} 백엔드 주소 무효 — 재시도 대기 ({(string.IsNullOrEmpty(addr) ? "(빈 주소)" : addr)}).");
             _nextRetryAtUtc = DateTime.UtcNow + TimeSpan.FromSeconds(_core.Config.BackendRetryIntervalSeconds);
             return;
         }
@@ -167,7 +166,6 @@ public sealed class ClientSession : INetEventListener
             if (State == SessionState.Active && _backendPeer != null
                 && _backendPeer.ConnectionState == ConnectionState.Connected)
             {
-                Log.Info($"{Username} 백엔드 연결 이미 성립 — 재연결 스킵.");
                 return;
             }
             _backendManager.Stop();   // 이전 매니저 정리 (재라우팅/재시도 누수 방지)

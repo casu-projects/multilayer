@@ -42,8 +42,6 @@ public sealed class VoteCoordinator
         {
             if (_active != null)
             {
-                Console.WriteLine($"[Vote] 투표 {marker.VoteId}({marker.Kind}) 무시 — "
-                    + $"이미 진행 중({_active.VoteId}).");
                 return false;
             }
 

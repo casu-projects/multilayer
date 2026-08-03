@@ -141,7 +141,6 @@ public sealed class MigrationCoordinator
 
                 tx.StepDeadline = DateTime.UtcNow + StepTimeout();
                 _transactions[player] = tx;
-                Console.WriteLine($"{player} WAL 복구 — {entry.State} (epoch {entry.Epoch}).");
             }
         }
         catch (Exception ex)
@@ -218,19 +217,16 @@ public sealed class MigrationCoordinator
     {
         if (_transactions.ContainsKey(player))
         {
-            Console.WriteLine($"{player} 이미 마이그레이션 중 — LAYER_END 무시.");
             return;
         }
 
         PlayerState? state = _sessions.Get(player);
         if (state == null)
         {
-            Console.WriteLine($"{player} 세션 없음 — LAYER_END 무시.");
             return;
         }
         if (state.Session == PlayerSessionState.Offline)
         {
-            Console.WriteLine($"{player} 오프라인 — LAYER_END 무시.");
             return;
         }
 
@@ -238,7 +234,6 @@ public sealed class MigrationCoordinator
         InstanceInfo? fromInstance = _instances.FindByDepth(fromDepth);
         if (fromInstance == null)
         {
-            Console.WriteLine($"{player} 출발 인스턴스 없음 (depth {fromDepth}) — 무시.");
             return;
         }
 
@@ -264,7 +259,6 @@ public sealed class MigrationCoordinator
         state.Session = PlayerSessionState.Migrating;
         WriteWal(tx);
 
-        Console.WriteLine($"{player}: 레이어 {fromDepth} → {toDepth} 시작 (epoch {epoch}, FREEZE).");
         _hub.Send(fromInstance.ModConnection, "FREEZE",
             new { playerKey = player.Value, epoch }, (ok, reason) =>
             {
@@ -283,18 +277,15 @@ public sealed class MigrationCoordinator
     {
         if (_transactions.ContainsKey(player))
         {
-            Console.WriteLine($"{player} 이미 마이그레이션 중 — RESPAWN 무시.");
             return;
         }
         PlayerState? state = _sessions.Get(player);
         if (state == null)
         {
-            Console.WriteLine($"{player} 세션 없음 — RESPAWN 무시.");
             return;
         }
         if (state.Session == PlayerSessionState.Offline)
         {
-            Console.WriteLine($"{player} 오프라인 — RESPAWN 무시.");
             return;
         }
 
@@ -305,7 +296,6 @@ public sealed class MigrationCoordinator
         {
             // Case B — 인플레이스 (레이어 1): 세션만 프레시 표기. 라우팅/접속 상태 보존.
             _sessions.ResetToFresh(player, keepOnline: true);
-            Console.WriteLine($"{player} 리스폰 (인플레이스) — 세이브 폐기 완료.");
             return;
         }
 
@@ -340,7 +330,6 @@ public sealed class MigrationCoordinator
         state.Session = PlayerSessionState.Migrating;
         WriteWal(tx);
 
-        Console.WriteLine($"{player}: 리스폰 — 레이어 {fromDepth} → 1 (epoch {epoch}, FREEZE).");
         _hub.Send(fromInstance.ModConnection, "FREEZE",
             new { playerKey = player.Value, epoch, respawn = true }, (ok, reason) =>
             {
@@ -361,7 +350,6 @@ public sealed class MigrationCoordinator
         tx.StepDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(_config.MigrationReadyWaitTimeoutSeconds);
         WriteWal(tx);
 
-        Console.WriteLine($"{player}: FREEZE 완료 — 목적지 READY 대기.");
         TryProceedSwap(tx);
     }
 
@@ -389,7 +377,6 @@ public sealed class MigrationCoordinator
         if (addr == null) return;
 
         tx.SwapSent = true;
-        Console.WriteLine($"{tx.Player}: 목적지 READY — SWAP → {tx.TargetInstance}.");
         _hub.Send(_hub.GatewayConnection, "SWAP",
             new { playerKey = tx.Player.Value, instanceId = tx.TargetInstance, backendAddr = addr, epoch = tx.Epoch },
             (ok, reason) =>
@@ -432,7 +419,6 @@ public sealed class MigrationCoordinator
         if (targetConn == null)
         {
             // 목적지 모드 미연결 (부팅/크래시) — Tick이 재시도 (Resuming 타임아웃이 상한).
-            Console.WriteLine($"{tx.Player} RESUME 대기 — 목적지 모드 미연결.");
             return;
         }
 
@@ -475,7 +461,6 @@ public sealed class MigrationCoordinator
                 });
         }
         // 고스트 추적 로깅 — 순차 마이그레이션에서 잔류자 없는데 고스트가 포함된 이상 케이스의 원인 특정용.
-        Console.WriteLine($"{tx.Player}: RESUME 전송 (epoch {tx.Epoch}, ghosts {ghostClientIds.Length}: [{string.Join(",", ghostClientIds)}]).");
     }
 
     public void OnResumeDone(PlayerKey player, int? epoch)
@@ -489,7 +474,6 @@ public sealed class MigrationCoordinator
         // 조기 로딩 트리거(10016)는 구 인스턴스가 LAYER_END 시점에 이미 수행했다 —
         // 여기서 재전송하면 클라이언트가 재생성을 취소/재시작해 파라미터를 재수신하지
         // 못하고 영구 대기(stuck)할 수 있으므로 전송하지 않는다. WORLDGEN_DONE만 대기.
-        Console.WriteLine($"{player}: RESUME 완료 — WORLDGEN_DONE 대기.");
     }
 
     public void OnWorldgenDone(PlayerKey player, int? epoch)
@@ -590,7 +574,6 @@ public sealed class MigrationCoordinator
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch });
         }
 
-        Console.WriteLine($"{tx.Player} 마이그레이션 중 이탈 — 데이터 확정 (레이어 {tx.ToDepth}).");
     }
 
     /// <summary>인스턴스 READY 통지 — WaitingReady 트랜잭션의 SWAP을 즉시 발행한다
@@ -623,7 +606,6 @@ public sealed class MigrationCoordinator
                         _instances.EnsureInstance(tx.ToDepth);
                         tx.TargetInstance = _instances.FindByDepth(tx.ToDepth)?.Key;
                         tx.SwapSent = false;
-                        Console.WriteLine($"{tx.Player} SWAP 인플라이트 중 목적지 사망 — 재스폰.");
                     }
                 }
                 else

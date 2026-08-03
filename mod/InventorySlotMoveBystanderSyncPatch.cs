@@ -96,7 +96,6 @@ internal static class Body_PickUpItem_ForceBystanderSlotSyncPatch
 
         // "새 슬롯 부착" 상태도 같은 이유로 즉시 플러시.
         FlushForcedSyncNow();
-        Plugin.Log.LogInfo($"[InvSync] {__instance.name} 슬롯 재배치 강제동기화 — '{item.name}' → 슬롯 {slot}.");
         return false;
     }
 

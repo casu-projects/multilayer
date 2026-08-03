@@ -94,7 +94,6 @@ public sealed class ControlHub
                 TcpClient tcp = await _listener.AcceptTcpClientAsync(_ct);
                 var conn = new ClientConnection { Id = Interlocked.Increment(ref _nextConnId), Tcp = tcp };
                 lock (_connections) { _connections.Add(conn); }
-                Console.WriteLine($"연결 수락 (conn {conn.Id})");
                 _ = ServeConnectionAsync(conn);
             }
             catch (OperationCanceledException) { break; }
@@ -120,7 +119,6 @@ public sealed class ControlHub
         try { await Task.WhenAll(readTask, writeTask); } catch { }
 
         _closedConnections.Enqueue(conn);
-        Console.WriteLine($"연결 종료 (conn {conn.Id}, kind={conn.Kind})");
     }
 
     private async Task ReadLoopAsync(ClientConnection conn, StreamReader reader, CancellationToken ct)
@@ -134,7 +132,6 @@ public sealed class ControlHub
             ControlMessage? msg = ControlMessage.Parse(line);
             if (msg == null)
             {
-                Console.WriteLine($"파싱 불가 라인 무시 (conn {conn.Id}, {line.Length}바이트)");
                 continue;
             }
 

@@ -144,7 +144,6 @@ public sealed class SteamLobby
                 if (!_authWaitLogged)
                 {
                     _authWaitLogged = true;
-                    Log.Info("Steam 로그인 완료 — AUTH_INFO 대기 중 (로비 생성 보류).");
                 }
             }
             else
@@ -175,8 +174,6 @@ public sealed class SteamLobby
     {
         if (!_lobbyCreated || _lobbyId == null || _matchmaking == null)
         {
-            Log.Info($"SendKickChatMessage 무시됨 (lobbyCreated={_lobbyCreated}) — "
-                + $"대상 {targetSteamId}, 사유 \"{reason}\" 전달 안 됨.");
             return;
         }
 
@@ -211,7 +208,6 @@ public sealed class SteamLobby
     private void CreateLobbyNow()
     {
         if (_lobbyCreated) return;
-        Log.Info($"AUTH_INFO 수신 — 로비 생성 (인원 {_core.MaxPlayers}).");
         _matchmaking!.CreateLobby(AppId, ELobbyType.Public, _core.MaxPlayers,
             metadata: BuildBaseMetadata());
     }

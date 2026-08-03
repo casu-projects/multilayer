@@ -132,7 +132,6 @@ public sealed class PlayerSessionStore
         }
         if (pushed > 0)
         {
-            Console.WriteLine($"{instanceKey} READY — 대기 세션 {pushed}명 라우팅 (ROUTE-ON-READY).");
         }
     }
 
@@ -161,7 +160,6 @@ public sealed class PlayerSessionStore
         foreach (PlayerState state in _players.Values.Where(p =>
             p.InstanceId == instanceKey && p.Session == PlayerSessionState.Connecting))
         {
-            Console.WriteLine($"{state.Key} 인스턴스 {instanceKey} 종료 — 재배정.");
             OnSessionConnected(state.Key);
         }
     }
@@ -217,10 +215,8 @@ public sealed class PlayerSessionStore
         }
         state.IsReturning = false;
         SaveOne(state);
-        Console.WriteLine($"{key} 리스폰 — 완전 신규 상태로 리셋 (레이어 1).");
     }
 
-    /// <summary>게이트웨이 연결 시 전체 테이블 스냅샷 전송 (R4).
     /// ROUTE-ON-READY: READY/IDLE 인스턴스의 라우트만 미러한다 — 부팅/월드젠 중인
     /// 인스턴스는 라우팅 대상이 아니므로 스냅샷에서 제외 (게이트웨이가 월드젠 거절
     /// 폴링을 하지 않도록).</summary>
@@ -246,7 +242,6 @@ public sealed class PlayerSessionStore
             .Where(e => e.backendAddr.Length > 0)
             .ToArray();
         _hub.SendNoAck(_hub.GatewayConnection, "TABLE_SNAPSHOT", new { entries });
-        Console.WriteLine($"게이트웨이에 테이블 스냅샷 전송 ({entries.Length}명).");
     }
 
     // ── 영속화 ──

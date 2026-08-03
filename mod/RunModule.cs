@@ -46,7 +46,6 @@ public static class RunModule
         // 이미 세계가 생성된 인스턴스는 런 시작 불필요 (재접속/재수용 방어)
         if (KrokoshaCasualtiesUtils.Util.IsWorldGenerated())
         {
-            Plugin.Log.LogInfo("[Run] START_RUN 무시 — 이미 세계가 생성됨.");
             return;
         }
 
@@ -59,7 +58,6 @@ public static class RunModule
         {
             _pendingStartRun = true;
             _startRunRetryDeadline = Time.unscaledTime + 90f;
-            Plugin.Log.LogInfo($"[Run] START_RUN 대기 — {(pre == null ? "PreRunScript 로드" : "전용 서버 가동")} (프리웜 재시도).");
             return;
         }
         DoStartRun(pre);
@@ -152,7 +150,6 @@ public static class RunModule
             if (WorldGeneration.world != null && WorldGeneration.world.totalTraveled <= 0)
             {
                 WorldGeneration.world.totalTraveled = 1;
-                Plugin.Log.LogInfo("[Run] 세계 생성 완료 — 시작 보급품 소진 (totalTraveled=1).");
             }
         }
     }
@@ -214,7 +211,6 @@ public static class RunModule
 
             reject_reason = "Server is generating world, please try again.";
             __result = false;
-            Plugin.Log.LogInfo("[Run] 프리웜 월드젠 중 접속 거절 (READY 대기).");
             return false;
         }
     }

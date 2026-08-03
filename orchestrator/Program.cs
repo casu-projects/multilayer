@@ -227,12 +227,10 @@ internal static class Program
         if (online > 0 && !_runActive)
         {
             _runActive = true;
-            Console.WriteLine("런 ACTIVE (첫 플레이어 접속).");
         }
         else if (online == 0 && _runActive)
         {
             _runActive = false;
-            Console.WriteLine("런 DORMANT (전원 이탈 — 인스턴스 유휴 정지 대기).");
         }
     }
 
@@ -287,7 +285,6 @@ internal static class Program
 
         if (conn.Kind == ClientKind.Unknown)
         {
-            Console.WriteLine($"HELLO 전 메시지 무시 (conn {conn.Id}): {msg.Type}");
             return;
         }
 
@@ -382,7 +379,6 @@ internal static class Program
                     migrations.OnSwapFailed(sf, sfPayload.Reason ?? "unknown");
                 break;
             default:
-                Console.WriteLine($"게이트웨이 알 수 없는 메시지: {msg.Type}");
                 break;
         }
     }
@@ -401,7 +397,6 @@ internal static class Program
                 }
                 break;
             default:
-                Console.WriteLine($"에이전트 알 수 없는 메시지: {msg.Type}");
                 break;
         }
     }
@@ -483,7 +478,6 @@ internal static class Program
                     }
                     if (forwarded > 0)
                     {
-                        Console.WriteLine($"{chat.Speaker} → {forwarded}개 인스턴스 릴레이 (L{conn.InstanceDepth}).");
                     }
 
                     // D1 — 게임 채팅 → Discord (시스템 공지 "*" 제외 — 플레이어 메시지만).
@@ -524,7 +518,6 @@ internal static class Program
                 {
                     string[] lines = BuildPlayerListLines(sessions);
                     hub.SendNoAck(conn, "LIST_RESULT", new { playerKey = listReq.PlayerKey, lines });
-                    Console.WriteLine($"!list 요청 — {listReq.PlayerKey} ({lines.Length}줄).");
                 }
                 break;
             case "CURRENT_REQUEST":
@@ -533,14 +526,11 @@ internal static class Program
                 {
                     string text = BuildRunSettingsText(runRules, curReq.Key);
                     hub.SendNoAck(conn, "CURRENT_RESULT", new { playerKey = curReq.PlayerKey, text });
-                    Console.WriteLine($"!currentrun 요청 — {curReq.PlayerKey} (key={curReq.Key}).");
                 }
                 break;
             case "CALLADMIN":
                 if (msg.PayloadAs<CallAdminPayload>() is { } callAdmin)
                 {
-                    Console.WriteLine($"{callAdmin.Username} ({callAdmin.PlayerKey}) — 관리자 호출.");
-
                     // D1 — Discord 관리자 호출 알림 (+ 멘션).
                     bool callOk = TryPlayerKey(callAdmin.PlayerKey, out var callKey);
                     _ = discordBot.SendCallAdminAsync(callAdmin.Username ?? callKey.Value ?? "?",
@@ -577,7 +567,6 @@ internal static class Program
                 }
                 break;
             default:
-                Console.WriteLine($"모드 알 수 없는 메시지: {msg.Type}");
                 break;
         }
     }
@@ -642,7 +631,6 @@ internal static class Program
         }
 
         _ = discordBot.SendVoteStartAsync(marker.Kind, marker.Title, marker.PromptBody, marker.TimeoutSeconds);
-        Console.WriteLine($"[Vote] 투표 {marker.VoteId}({marker.Kind}) 시작 — {expected.Count}개 인스턴스 전파.");
     }
 
     private static void RejectVote(ControlHub hub, DiscordBot discordBot, ControlHub.ClientConnection conn,
@@ -653,7 +641,6 @@ internal static class Program
             hub.SendNoAck(conn, "VOTE_REJECTED", new { callerClientId, reason });
         }
         _ = discordBot.SendVoteRejectedAsync(marker.Kind, marker.Title, reason);
-        Console.WriteLine($"[Vote] 투표 {marker.VoteId}({marker.Kind}) 거부: {reason}");
     }
 
     /// <summary>온라인 세션에서 대상 해석 — 이름(대소문자 무시) 또는 PlayerKey 일치.</summary>

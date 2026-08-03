@@ -27,11 +27,9 @@ public sealed class PlayerDataStore
         if (migration)
         {
             _pending[key] = payload.Clone();
-            Console.WriteLine($"{key} 제출 (마이그레이션 — 인메모리 보류 + WAL).");
         }
         else
         {
-            Console.WriteLine($"{key} 제출 (퇴장 — 디스크 기록).");
         }
     }
 
@@ -43,7 +41,6 @@ public sealed class PlayerDataStore
         {
             hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = pending });
             _pending.Remove(key);
-            Console.WriteLine($"{key} 로드 — 인메모리 보류분 제공.");
             return;
         }
 
@@ -54,7 +51,6 @@ public sealed class PlayerDataStore
             {
                 var doc = JsonDocument.Parse(File.ReadAllBytes(path));
                 hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = doc.RootElement });
-                Console.WriteLine($"{key} 로드 — 디스크 제공.");
                 return;
             }
             catch (Exception ex)
@@ -64,7 +60,6 @@ public sealed class PlayerDataStore
         }
 
         hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = (JsonElement?)null });
-        Console.WriteLine($"{key} 데이터 없음 — 기본 상태.");
     }
 
     /// <summary>마이그레이션 RESUME용 보류분 (없으면 디스크).</summary>
@@ -95,7 +90,6 @@ public sealed class PlayerDataStore
             if (File.Exists(PathFor(key))) File.Delete(PathFor(key));
             if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
                 Directory.Delete(dir);
-            Console.WriteLine($"{key} 세이브 폐기.");
         }
         catch (Exception ex)
         {

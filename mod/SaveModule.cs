@@ -59,7 +59,6 @@ public static class SaveModule
             JObject data = SerializePlayer(plr);
             OrchestratorClient.Instance?.SendEvent("PLAYER_DATA_SUBMIT",
                 new { playerKey = plr.GetPersistentId(), payload = data });
-            Plugin.Log.LogInfo($"[Save] {plr.playername} 데이터 제출.");
         }
         catch (System.Exception ex)
         {
@@ -101,7 +100,6 @@ public static class SaveModule
             RestoreCharIdentity(root["charIdentity"]);
             RestoreMisc(root);
             QueuePosition(body, plr, root["position"]);
-            Plugin.Log.LogInfo($"[Save] {plr.playername} 세이브 복원 완료.");
         }
         catch (System.Exception ex)
         {
@@ -406,7 +404,6 @@ public static class SaveModule
         if (token is not JObject id) return;
         if (WoundView.view == null)
         {
-            Plugin.Log.LogWarning("[Save] WoundView.view 없음 — charIdentity 복원 불가.");
             return;
         }
         try
@@ -416,7 +413,6 @@ public static class SaveModule
             int cid = id.Value<int?>("id") ?? 0;
             int ver = id.Value<int?>("ver") ?? 0;
             WoundView.view.SetCharDetails(h, a, cid, ver);
-            Plugin.Log.LogInfo($"[Save] charIdentity 복원 (h={h}, a={a}, id={cid}, ver={ver}).");
         }
         catch { }
     }
@@ -473,7 +469,6 @@ public static class SaveModule
         pb.body.transform.position = safe.Value;
         // 바닐라 스폰 플로우가 저장 위치를 덮어쓰지 않도록 플래그 설정 (PlayerSavedState.Apply와 동일 규약).
         plr.server_plrstate.did_give_spawn_location_from_a_save = true;
-        Plugin.Log.LogInfo($"[Save] {plr.playername} 위치 적용 ({safe.Value.x:F1}, {safe.Value.y:F1}).");
         return true;
     }
 
@@ -501,7 +496,6 @@ public static class SaveModule
     {
         if (IsWalkable(pos)) return pos;
 
-        Plugin.Log.LogInfo($"[Save] 저장 위치 ({pos.x:F1}, {pos.y:F1}) 막힘 — 근처 안전 위치 탐색.");
         for (int radius = 1; radius <= 8; radius++)
         {
             for (int dx = -radius; dx <= radius; dx++)
@@ -512,14 +506,12 @@ public static class SaveModule
                     Vector2 candidate = pos + new Vector2(dx, dy);
                     if (IsWalkable(candidate))
                     {
-                        Plugin.Log.LogInfo($"[Save] 안전 위치 발견: ({candidate.x:F1}, {candidate.y:F1}).");
                         return candidate;
                     }
                 }
             }
         }
 
-        Plugin.Log.LogWarning($"[Save] 저장 위치 ({pos.x:F1}, {pos.y:F1}) 주변 안전 위치 없음 — 기본 스폰 폴백.");
         return null;
     }
 
@@ -604,7 +596,6 @@ public static class SaveModule
             || (int)WorldGeneration.world.biomeOverride != 0
             || SaveSystem.loadedRun)
         {
-            Plugin.Log.LogInfo($"[Save] {plr.playername} 기본 상태 — 보급품 조건 불일치로 미지급.");
             return;
         }
 
@@ -621,11 +612,9 @@ public static class SaveModule
                 body.PickUpItem(Utils.Create("trashbag", pos, 0f).GetComponent<Item>(), 1, true);
                 break;
             default:
-                Plugin.Log.LogInfo($"[Save] {plr.playername} 기본 상태 — startingsupplies={WorldGeneration.GetRunSettingInt("startingsupplies")} 미지급.");
                 return;
         }
 
-        Plugin.Log.LogInfo($"[Save] {plr.playername} 신규 플레이어 — 시작 보급품 지급.");
     }
 
     /// <summary>퇴장 저장 (S9-5) — 마이그레이션 중(FREEZE 후)이면 건너뜀.</summary>

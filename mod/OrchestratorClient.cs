@@ -76,7 +76,6 @@ public sealed class OrchestratorClient : MonoBehaviour
         if (!KrokoshaCasualtiesUtils.Util.IsWorldGenerated()) return;
         _readyReportedOnConnection = true;
         SendEvent("INSTANCE_READY", new { instanceKey = InstanceKey });
-        Plugin.Log.LogInfo($"[Orch] READY 재보고 (연결 재수립 — {InstanceKey}).");
     }
 
     /// <summary>인바운드 큐 처리 (메인 스레드 전용). Update에서 호출되며, Body.Start의

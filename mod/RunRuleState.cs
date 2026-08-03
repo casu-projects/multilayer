@@ -17,17 +17,12 @@ public static class RunRuleState
             _runSettings = new Dictionary<string, string>(payload?.RunSettings ?? new());
             _rules = new Dictionary<string, string>(payload?.Rules ?? new());
         }
-        Plugin.Log.LogInfo($"[Rule] RUN_RULES_STATE 수신 (run {_runSettings.Count}건, rule {_rules.Count}건).");
 
         // R3 — 실시간 반영: 오케스트레이터 `rule`/`run` 명령 푸시가 즉시 적용된다.
         // 월드 생성 전 수신(WorldGeneration.runSettings null 등)은 가드로 no-op —
         // 기존 StartRun 부트스트랩(RuleBootstrap/RunSettingsBootstrap)이 담당한다.
-        int appliedRules = RuleApplier.ApplyRulesNow();
-        int appliedRuns = RuleApplier.ApplyRunSettingsNow();
-        if (appliedRules > 0 || appliedRuns > 0)
-        {
-            Plugin.Log.LogInfo($"[Rule] 실시간 재적용 — 규칙 {appliedRules}건, 런 설정 {appliedRuns}건.");
-        }
+        RuleApplier.ApplyRulesNow();
+        RuleApplier.ApplyRunSettingsNow();
     }
 
     public static Dictionary<string, string> RunSettingsSnapshot()

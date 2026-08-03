@@ -196,7 +196,6 @@ public sealed class GatewayCore
             // 정지된 인스턴스)로 오접속된다. 웜 인스턴스는 SESSION_CONNECTED 직후
             // 오케스트레이터의 ROUTE_UPDATE가 즉시 도착하므로 대기 비용이 없다.
             session.EnterRoutingWait();
-            Log.Info($"{session.Username} 라우팅 대기 (오케스트레이터 결정).");
         }
     }
 
@@ -287,7 +286,6 @@ public sealed class GatewayCore
                 _routes[PlayerKey.FromString(entry.PlayerKey)] = entry;
             }
         }
-        Log.Info($"라우팅 테이블 스냅샷 적용: {entries.Entries.Length}개");
     }
 
     private void ApplyRouteUpdate(ControlMessage msg)
@@ -334,7 +332,6 @@ public sealed class GatewayCore
             if (!_sessions.TryGetValue(key, out session))
             {
                 // 활성 세션 없음 — 마이그레이션 대상이 이미 접속 종료. 오케스트레이터가 상태 정리.
-                Log.Info($"{payload.PlayerKey} SWAP 명령 — 활성 세션 없음.");
                 return;
             }
         }
@@ -345,7 +342,6 @@ public sealed class GatewayCore
         if (session.BackendAddr == payload.BackendAddr
             && session.State is SessionState.Active or SessionState.Connecting or SessionState.Swapping)
         {
-            Log.Info($"{session.Username} 이미 {payload.BackendAddr} 대상 — SWAP 스킵 (멱등).");
             return;
         }
         session.SwapBackend(payload.BackendAddr, payload.InstanceId);
@@ -406,7 +402,6 @@ public sealed class GatewayCore
             }
             AuthInfoReceived = true;
         }
-        Log.Info($"인증 정보 수신 (밴 {_banned.Count}명, 비밀번호 {(string.IsNullOrEmpty(_serverPassword) ? "미설정" : "설정")}, 최대 {_maxPlayers}명).");
     }
 
     private void ApplyMaintenance(ControlMessage msg)

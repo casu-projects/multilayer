@@ -341,8 +341,6 @@ internal sealed class DiscordBot
             var ch = await _client.GetChannelAsync(_channelId);
             if (ch == null)
                 Log($"경고: 채팅 채널 {_channelId}을(를) 찾을 수 없습니다.");
-            else
-                Log($"채팅 채널 {_channelId} 확인됨: {ch.Name}");
         }
 
         if (_consoleChannelId != 0)
@@ -350,8 +348,6 @@ internal sealed class DiscordBot
             var ch3 = await _client.GetChannelAsync(_consoleChannelId);
             if (ch3 == null)
                 Log($"경고: 콘솔 채널 {_consoleChannelId}을(를) 찾을 수 없습니다.");
-            else
-                Log($"콘솔 채널 {_consoleChannelId} 확인됨: {ch3.Name}");
         }
 
         // Delete all previously registered guild slash commands (legacy cleanup).
@@ -370,7 +366,6 @@ internal sealed class DiscordBot
                 {
                     foreach (var cmd in existing)
                         await cmd.DeleteAsync();
-                    Log($"기존 슬래시 명령어 {existing.Count}개 정리 완료");
                 }
             }
         }

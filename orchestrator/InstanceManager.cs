@@ -188,7 +188,6 @@ public sealed class InstanceManager
     {
         if (!_runNeeded.Remove(key)) return;
         _hub.Send(_hub.ModConnection(key), "START_RUN", new { instanceKey = key });
-        Console.WriteLine($"{key} START_RUN 전송 (프리웜).");
     }
 
     // ── 모드/에이전트 이벤트 ──
@@ -232,7 +231,6 @@ public sealed class InstanceManager
         if (info.Status != InstanceStatus.Booting && info.Status != InstanceStatus.Starting)
             return false;
         info.Status = InstanceStatus.Ready;
-        Console.WriteLine($"{key} READY.");
         return true;
     }
 

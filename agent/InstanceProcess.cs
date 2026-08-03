@@ -146,7 +146,6 @@ public sealed class InstanceProcess
                     string? gameDir = Path.GetDirectoryName(_config.GameExecutablePath);
                     if (string.IsNullOrEmpty(gameDir))
                     {
-                        AgentLog.Info($"{Key} unity.log 보존 스킵 — GameExecutablePath 미설정.");
                     }
                     else
                     {
@@ -154,7 +153,6 @@ public sealed class InstanceProcess
                         Directory.CreateDirectory(logsDir);
                         string preservedPath = Path.Combine(logsDir, $"{Sanitize(Key)}-unity.log");
                         File.Copy(unityLog, preservedPath, overwrite: true);
-                        AgentLog.Info($"{Key} unity.log 보존: {preservedPath}");
                     }
                 }
             }

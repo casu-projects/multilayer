@@ -76,7 +76,6 @@ public sealed class ControlChannel
             ControlMessage? msg = ControlMessage.Parse(line);
             if (msg == null)
             {
-                Log.Info($"파싱 불가 라인 (길이 {line.Length}) — 무시.");
                 continue;
             }
             _core.EnqueueCommand(msg);

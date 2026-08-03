@@ -20,7 +20,6 @@ public static class ChatRelay
         if (_subscribed) return;
         _subscribed = true;
         Chat.OnPlayerChatMessage += OnPlayerChat;
-        Plugin.Log.LogInfo("[Chat] OnPlayerChatMessage 구독 — 크로스 인스턴스 채팅 릴레이 활성.");
     }
 
     /// <summary>플레이어 채팅 (10099 수신기 내부 발화) → 오케스트레이터 중계.
@@ -37,7 +36,6 @@ public static class ChatRelay
 
         OrchestratorClient.Instance.SendEvent("CHAT",
             new { speaker = plr.playername, message = message, color = color });
-        Plugin.Log.LogInfo($"[Chat] {plr.playername} → 릴레이 ({color}).");
     }
 
     /// <summary>오케스트레이터로부터 수신한 다른 인스턴스의 플레이어 채팅 표시.

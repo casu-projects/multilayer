@@ -478,7 +478,12 @@ public sealed class MigrationModule : MonoBehaviour
     /// 잔존하고, 같은 clientId(같은 netId)로 재접속/마이그레이션 시 재동기화가 파괴된
     /// 바디에 Apply → Client_CoolSyncReceiver(10174) NRE 스팸의 근본 원인.
     /// Server_DeleteObject는 서버 객체 제거 + result4=0 삭제 패킷으로 모든 클라이언트의
-    /// 항목을 깨끗이 제거하므로, 재접속 시 생성 분기로 클린 등록된다.</summary>
+    /// 항목을 깨끗이 제거하므로, 재접속 시 생성 분기로 클린 등록된다.
+    /// S5 정리는 Postfix에서 수행한다 (2026-08-03 수정): vanilla OnDestroy가 플레이어를
+    /// 클라이언트 목록에서 제거한 뒤 실행되므로 Server_DeleteObject 브로드캐스트가
+    /// 퇴장/마이그레이션 플레이어 본인을 자연히 제외한다. Prefix에서 실행하면 본인에게도
+    /// DELETE가 도달해 — 마이그레이션 목적지 월드젠 완료 직후 본인 바디가 파괴되고
+    /// PlayerCamera/Observer NRE 폭풍 + 로딩 화면 프리즈가 발생한다 (2026-08-03 실측).</summary>
     [HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.OnDestroy))]
     internal static class NetPlayer_OnDestroy_ReportLeftPatch
     {
@@ -492,6 +497,12 @@ public sealed class MigrationModule : MonoBehaviour
                 OrchestratorClient.Instance?.SendEvent("PLAYER_LEFT",
                     new { playerKey = pid, epoch = FrozenEpoch(pid) });
             }
+        }
+
+        private static void Postfix(NetPlayer __instance)
+        {
+            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
+            if (__instance == null || __instance.is_local) return;
 
             // S5 — CharSync 바디 고아화 방지 (일반 퇴장 포함 전 케이스).
             // ① 서버측 객체 제거 (고아 동기화 중단 — 삭제-재생성 창의 NPC 재생성 방지).

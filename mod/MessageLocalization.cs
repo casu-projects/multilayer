@@ -76,6 +76,11 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
         if (!KrokoshaScavMultiplayer.is_dedicated_server)
             return true;
 
+        // 마이그레이션/재접속 도착 — 접속 공지 대체: 마이그레이션 "L1→L2 이동" 공지가
+        // 대체 표시하므로 join 공지를 억제한다 (2026-08-03).
+        if (IsMigrationArrivalJoin(message))
+            return false;
+
         if (MessageLocalization.TryTranslateAnnouncement(message, out string? translated, out bool suppress))
         {
             if (suppress)
@@ -83,13 +88,33 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
 
             if (!string.IsNullOrEmpty(translated))
             {
-                // 데디 콘솔 에코 (바닐라의 LogMessage("*SERVER*", ...) 대응).
-                Chat.LogMessage("*SERVER*", translated, false);
+                // [*] 시스템 메시지 통일 — 10098 type 2 (name="*") 단일 전송.
+                // LogMessage("*SERVER*") 에코 제거 — 클라이언트 [*SERVER*] 접두사 통일 (2026-08-03).
                 AnnounceRelay.SendChatAnnouncementTo(translated, new List<knetid>(ServerMain.AllClientIds));
             }
             return false;
         }
         return true;
+    }
+
+    /// <summary>join 공지가 마이그레이션/재접속 도착인지 판정 — ReturningTracker(마이그레이션
+    /// ∪ 재접속 — IdentityPatch에서 도착 시 등록) 또는 FREEZE 상태면 억제 대상.
+    /// 신규 서버 접속(게이트웨이 첫 진입)은 접속 공지가 표시된다.</summary>
+    private static bool IsMigrationArrivalJoin(string message)
+    {
+        const string joinSuffix = " just joined the game!";
+        int idx = message.IndexOf(joinSuffix, System.StringComparison.Ordinal);
+        if (idx < 0) return false;
+        string name = message.Substring(0, idx);
+        if (string.IsNullOrEmpty(name)) return false;
+
+        foreach (NetPlayer plr in NetPlayer.ClientIdToPlayerDict.Values)
+        {
+            if (plr.playername != name) continue;
+            return MigrationModule.IsFrozen(plr.GetPersistentId())
+                || ReturningTracker.ClientIds.Contains(plr.clientId);
+        }
+        return false;
     }
 }
 
@@ -108,12 +133,13 @@ internal static class ServerMain_OnPlayerDeath_LocalizedPatch
             return true;
 
 
-        // 개인 — 팝업 (10006, important).
-        plr.Server_DoAlertSingle("사망하였습니다.\n!respawn 명령어를 사용하여 부활하세요.",
+        // 개인 — 팝업 (10006, important) — 볼드(<b>) + 별표 감싸기 강조.
+        plr.Server_DoAlertSingle("<b>*사망하였습니다.*</b>\n!respawn 명령어를 사용하여 부활하세요.",
             important: true, reliable: true);
-        // 개인 — 채팅 (10098 타겟 — 사망자 본인).
-        AnnounceRelay.SendChatAnnouncementTo("사망하였습니다. !respawn 명령어를 사용하여 부활하세요.",
-            plr.clientId);
+        // 개인 — 채팅 (10098 타겟 — 사망자 본인) — 볼드 + 별표 감싸기 (TMP 리치 텍스트 확인됨).
+        // 줄넘김은 \n이 아니라 메시지 2회 전송으로 표현 (채팅 패널 라인 렌더링 안전).
+        AnnounceRelay.SendChatAnnouncementTo("<b>*사망하였습니다.*</b>", plr.clientId);
+        AnnounceRelay.SendChatAnnouncementTo("!respawn 명령어를 사용하여 부활하세요.", plr.clientId);
 
         // 전체 — 모든 레이어 (오케스트레이터 ANNOUNCE 릴레이).
         AnnounceRelay.SendDeath(plr);

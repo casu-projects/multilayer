@@ -74,18 +74,14 @@ public static class ChatCommands
     }
 
     /// <summary>10098 패킷 type 2 (name="*", tag="") — 특정 플레이어에게만 보이는 개인 채팅.
-    /// 표시: "[*]: 메시지" (ChatMsgContainer.Compile이 이름을 대괄호로 감쌈).</summary>
+    /// 표시: "[*]: 메시지" (ChatMsgContainer.Compile이 이름을 대괄호로 감쌈).
+    /// AnnounceRelay.SendChatAnnouncementTo와 동일 포맷 — 위임 (2026-08-03 통일).</summary>
     internal static class ChatPrivateReply
     {
         internal static void SendToPlayer(NetPlayer plr, string message)
         {
             if (plr == null) return;
-            NetDataWriter writer = Net.CreateWriter(10098);
-            writer.Put((byte)2);
-            writer.Put("*");
-            writer.Put("");
-            writer.Put(message);
-            Net.Server_SendToClients(DeliveryMethod.ReliableOrdered, in writer, plr.clientId);
+            AnnounceRelay.SendChatAnnouncementTo(message, plr.clientId);
         }
     }
 

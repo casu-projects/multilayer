@@ -38,7 +38,10 @@ public static class AnnounceRelay
         switch (payload.Kind)
         {
             case KindDeath:
-                Chat.Server_ChatAnnouncement($"{payload.Name}님이 사망하였습니다.");
+                // [*] 시스템 메시지 통일 — 1-arg Server_ChatAnnouncement(바닐라 [*SERVER*] 경로)
+                // 대신 type 2 name="*" 전송 (2026-08-03).
+                SendChatAnnouncementTo($"{payload.Name}님이 사망하였습니다.",
+                    new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
                 break;
             case KindMigration:
                 string text = $"{payload.Name}님이 L{payload.FromDepth}에서 L{payload.ToDepth}로 이동합니다";
@@ -59,13 +62,17 @@ public static class AnnounceRelay
         SendChatAnnouncementTo(message, new List<knetid> { clientId });
     }
 
-    /// <summary>10098 채팅 공지 타겟 전송 — Chat.Server_ChatAnnouncement의 와이어 미러
-    /// ([type 1B][message] → 지정 수신자).</summary>
+    /// <summary>10098 채팅 공지 타겟 전송 — [*] 시스템 메시지 통일 (type 2, name="*").
+    /// type 1(이름 없음)은 클라이언트가 [*SERVER*]로 렌더링하므로, 시스템 메시지는 전부
+    /// type 2 name="*" — "[*]: 메시지" (ChatMsgContainer.Compile이 이름을 대괄호로 감쌈).
+    /// !list/!currentrun 개인 회신(ChatPrivateReply)과 동일 포맷 (2026-08-03 통일).</summary>
     internal static void SendChatAnnouncementTo(string message, List<knetid> targets)
     {
         if (targets.Count == 0) return;
         var writer = Net.CreateWriter(10098);
-        writer.Put((byte)1);
+        writer.Put((byte)2);
+        writer.Put("*");
+        writer.Put("");
         writer.Put(message);
         Net.Server_SendToClients(DeliveryMethod.ReliableOrdered, in writer, targets);
     }

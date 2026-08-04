@@ -14,11 +14,14 @@ namespace CasuMod;
 public static class MessageLocalization
 {
     /// <summary>채팅 공지 패턴 번역 — "[이름] just joined the game!" / "Kicked [이름]" /
-    /// "Host is starting game." 처리 후 false 반환(원본 스킵), 그 외 true.</summary>
-    internal static bool TryTranslateAnnouncement(string message, out string? translated, out bool suppress)
+    /// "Host is starting game." 처리 후 false 반환(원본 스킵), 그 외 true.
+    /// subjectName: 접속 공지의 플레이어 이름 (크로스 레이어 ANNOUNCE 발신용), 그 외 null.</summary>
+    internal static bool TryTranslateAnnouncement(string message, out string? translated,
+        out bool suppress, out string? subjectName)
     {
         translated = null;
         suppress = false;
+        subjectName = null;
 
         // A-3: 게임 시작 공지 비활성화.
         if (message == "Host is starting game.")
@@ -36,6 +39,7 @@ public static class MessageLocalization
             if (!string.IsNullOrEmpty(name))
             {
                 translated = $"{name}님이 접속하였습니다.";
+                subjectName = name;
                 return true;
             }
         }
@@ -81,25 +85,36 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
         if (IsMigrationArrivalJoin(message))
             return false;
 
-        if (MessageLocalization.TryTranslateAnnouncement(message, out string? translated, out bool suppress))
+        if (MessageLocalization.TryTranslateAnnouncement(message, out string? translated, out bool suppress,
+                out string? subjectName))
         {
             if (suppress)
                 return false;
 
             if (!string.IsNullOrEmpty(translated))
             {
-                // [*] 시스템 메시지 통일 — 10098 type 2 (name="*") 단일 전송.
-                // LogMessage("*SERVER*") 에코 제거 — 클라이언트 [*SERVER*] 접두사 통일 (2026-08-03).
-                AnnounceRelay.SendChatAnnouncementTo(translated, new List<knetid>(ServerMain.AllClientIds));
+                if (subjectName != null)
+                {
+                    // 신규 접속 — 전 레이어 공지 (ANNOUNCE 에코가 발신 레이어 포함 표시).
+                    // 마이그레이션/재접속 도착은 위 IsMigrationArrivalJoin에서 억제됐다.
+                    AnnounceRelay.SendJoin(subjectName);
+                }
+                else
+                {
+                    // [*] 시스템 메시지 통일 — 10098 type 2 (name="*") 단일 전송.
+                    // LogMessage("*SERVER*") 에코 제거 — 클라이언트 [*SERVER*] 접두사 통일 (2026-08-03).
+                    AnnounceRelay.SendChatAnnouncementTo(translated, new List<knetid>(ServerMain.AllClientIds));
+                }
             }
             return false;
         }
         return true;
     }
 
-    /// <summary>join 공지가 마이그레이션/재접속 도착인지 판정 — ReturningTracker(마이그레이션
-    /// ∪ 재접속 — IdentityPatch에서 도착 시 등록) 또는 FREEZE 상태면 억제 대상.
-    /// 신규 서버 접속(게이트웨이 첫 진입)은 접속 공지가 표시된다.</summary>
+    /// <summary>join 공지가 마이그레이션 도착인지 판정 — MigrationArrivalTracker(마이그레이션
+    /// 도착 — isMigratingArrival=true) 또는 FREEZE 상태면 억제 대상.
+    /// 퇴장 후 재접속(일반 isReturning)은 접속 공지를 표시한다 — 마이그레이션 시에만
+    /// 접속/퇴장 메시지를 띄우지 않는 것이 목표 (2026-08-04).</summary>
     private static bool IsMigrationArrivalJoin(string message)
     {
         const string joinSuffix = " just joined the game!";
@@ -112,7 +127,7 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
         {
             if (plr.playername != name) continue;
             return MigrationModule.IsFrozen(plr.GetPersistentId())
-                || ReturningTracker.ClientIds.Contains(plr.clientId);
+                || MigrationArrivalTracker.ClientIds.Contains(plr.clientId);
         }
         return false;
     }

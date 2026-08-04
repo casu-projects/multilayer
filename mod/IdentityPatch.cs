@@ -86,6 +86,14 @@ internal static class ReturningTracker
     internal static readonly System.Collections.Generic.HashSet<knetid> ClientIds = new();
 }
 
+/// <summary>마이그레이션 도착 플레이어 clientId 집합 — 접속 공지 억제 전용
+/// (isMigratingArrival=true — 게이트웨이 SwapBackend만 true, 일반 재접속은 미등록).
+/// 마이그레이션 도착만 억제하고 퇴장 후 재접속은 접속 공지를 표시하기 위한 구분 (2026-08-04).</summary>
+internal static class MigrationArrivalTracker
+{
+    internal static readonly System.Collections.Generic.HashSet<knetid> ClientIds = new();
+}
+
 /// <summary>신원 적용: SteamID64 + 접속 시 PLAYER_DATA_REQUEST 전송.</summary>
 [HarmonyPatch(typeof(TransportLiteNetLib), nameof(TransportLiteNetLib.CreateNetPlayerWithPeer))]
 internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
@@ -101,6 +109,10 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
         if (isReturning || isMigrating)
         {
             ReturningTracker.ClientIds.Add(__result.clientId);
+        }
+        if (isMigrating)
+        {
+            MigrationArrivalTracker.ClientIds.Add(__result.clientId);
         }
 
         if (steamId.HasValue && steamId.Value != 0)

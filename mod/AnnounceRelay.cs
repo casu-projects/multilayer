@@ -16,6 +16,8 @@ public static class AnnounceRelay
 {
     public const string KindDeath = "death";
     public const string KindMigration = "migration";
+    public const string KindLeave = "leave";
+    public const string KindJoin = "join";
 
     /// <summary>사망 공지 발신 (ServerMain.OnPlayerDeath 대체 패치에서 호출) —
     /// 오케스트레이터가 전 인스턴스에 에코한다.</summary>
@@ -26,6 +28,31 @@ public static class AnnounceRelay
             kind = KindDeath,
             playerKey = plr.GetPersistentId(),
             name = plr.playername,
+        });
+    }
+
+    /// <summary>완전 퇴장 공지 발신 (NetPlayer_OnDestroy — 비동결 퇴장 시) —
+    /// 오케스트레이터가 전 인스턴스에 에코한다. 마이그레이션(동결)은 이 경로를 타지 않는다.</summary>
+    internal static void SendLeave(NetPlayer plr)
+    {
+        OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
+        {
+            kind = KindLeave,
+            playerKey = plr.GetPersistentId(),
+            name = plr.playername,
+        });
+    }
+
+    /// <summary>신규 접속 공지 발신 (Server_ChatAnnouncement 접속 번역 시) —
+    /// 오케스트레이터가 전 인스턴스에 에코한다 (발신 레이어 포함).
+    /// 마이그레이션/재접속 도착은 IsMigrationArrivalJoin 억제로 이 경로를 타지 않는다.</summary>
+    internal static void SendJoin(string playerName)
+    {
+        OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
+        {
+            kind = KindJoin,
+            playerKey = "",
+            name = playerName,
         });
     }
 
@@ -41,6 +68,16 @@ public static class AnnounceRelay
                 // [*] 시스템 메시지 통일 — 1-arg Server_ChatAnnouncement(바닐라 [*SERVER*] 경로)
                 // 대신 type 2 name="*" 전송 (2026-08-03).
                 SendChatAnnouncementTo($"{payload.Name}님이 사망하였습니다.",
+                    new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
+                break;
+            case KindLeave:
+                // 완전 퇴장 — 전 클라이언트 공지 (발신 레이어 포함 — 바닐라는 퇴장 공지가 없다).
+                SendChatAnnouncementTo($"{payload.Name}님이 퇴장하였습니다.",
+                    new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
+                break;
+            case KindJoin:
+                // 신규 접속 — 전 클라이언트 공지 (발신 레이어 포함 — 에코로 표시).
+                SendChatAnnouncementTo($"{payload.Name}님이 접속하였습니다.",
                     new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
                 break;
             case KindMigration:

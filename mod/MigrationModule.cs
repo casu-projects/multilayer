@@ -434,11 +434,12 @@ public sealed class MigrationModule : MonoBehaviour
     /// Apply → NRE + 바디 미표시 영구 스턱이 발생한다 (2026-08-03 실측). 신원(10023)은
     /// 바디 CharSync와 별개 채널이므로 삭제 없이도 안전하게 교환된다.
     ///
-    /// 복귀 플레이어(재접속/마이그레이션) 전용: 재동기화가 10023 처리 전에 도착하면
-    /// 관찰자가 NPC 바디를 만들고, 클라이언트 수리 경로는 BodyToPlayerDict를 갱신하지
-    /// 않아 shift에 누락된다. 신원 교환 후 해당 netId의 신뢰성 DELETE를 전송해 NPC/
-    /// 스테일 항목을 제거하면, 다음 동기화가 10023 처리 후(plr.body == null) 도착해
-    /// 플레이어 바디로 클린 재생성된다 (신규 접속은 delete 미전송 — 동일-프레임 레이스 없음).</summary>
+    /// 복귀 DELETE 제거 (2026-08-03): 재접속/마이그레이션 도착 시 관찰자들의 도착자 바디
+    /// 항목에 신뢰성 DELETE를 발신했으나, 실제 바디(기존바디 경로)까지 파괴하고 재생성
+    /// (다음 동기화)이 실패해 — 바디 미표시 + shift 누락이 양쪽 클라이언트에 대칭 발생
+    /// (실측: 마이그레이션 후 서로 보이지 않음). 신원 교환(10023)만으로 관찰자 바디는
+    /// 자연 동기화가 실제 플레이어 바디로 생성·매핑되므로, DELETE 없이도 shift가 정상
+    /// 동작한다 (dev 최초 재접속 정상 케이스로 검증).</summary>
     private static void RosterBarrier(NetPlayer plr)
     {
         List<knetid> others = NetPlayer.ClientIdToPlayerDict.Keys
@@ -453,22 +454,6 @@ public sealed class MigrationModule : MonoBehaviour
             try { other.Server__ResponsePlayerName(new List<knetid> { plr.clientId }); }
             catch { }
         }
-
-        // 복귀 플레이어 전용 — 관찰자들의 NPC/스테일 항목 정리 (신원 처리 이후).
-        string pid = plr.GetPersistentId();
-        bool isReturning = IsFrozen(pid) || ReturningTracker.ClientIds.Contains(plr.clientId);
-        if (isReturning)
-        {
-            try
-            {
-                SendReliableCharSyncDelete(plr.clientId);
-            }
-            catch (System.Exception ex)
-            {
-                Plugin.Log.LogWarning($"[Roster] 복귀 DELETE 실패: {ex.Message}");
-            }
-        }
-
     }
 
     /// <summary>동결(FREEZE)된 플레이어의 퇴장 → PLAYER_LEFT (오케스트레이터가 데이터 확정).

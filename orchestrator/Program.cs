@@ -62,7 +62,7 @@ internal static class Program
 
         hub.Start();
 
-        var console = new OperatorConsole(sessions, instances, migrations,
+        var console = new OperatorConsole(hub, sessions, instances, migrations,
             (key, unban) =>
             {
                 bool banned = unban != "unban";
@@ -166,6 +166,7 @@ internal static class Program
             // 유휴 정리 계수 (2026-08-02): 마이그레이션 중인 플레이어(Migrating, InstanceId=출발지)와
             // 도착 대기 중인 목적지(tx.TargetInstance)도 인원으로 계산 — FREEZE/READY 대기 중
             // 출발지·목적지가 유휴 오판정으로 강제 정지되는 것을 방지한다.
+            instances.TickPrewarm();
             instances.TickIdle(DateTime.UtcNow, key =>
                 sessions.All.Count(s => s.InstanceId == key && s.Session != PlayerSessionState.Offline)
                 + migrations.CountTargeting(key));
@@ -265,6 +266,9 @@ internal static class Program
                 conn.AgentCapacity = agent.Capacity;
                 conn.AgentAddress = agent.Address;
                 instances.RegisterAgent(agent.MachineId, agent.Capacity, agent.Address);
+                // 프리웜 — PrewarmLayer 스폰 (수용량 내 최대한, 기존 인스턴스 재사용).
+                // 에이전트가 추가될 때마다 재실행되어 누락 레이어가 자동 보충된다.
+                instances.PrewarmLayers();
                 hub.SendNoAck(conn, "AGENT_HELLO_ACK", new { ok = true });
                 return;
 

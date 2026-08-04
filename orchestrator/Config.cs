@@ -43,8 +43,20 @@ public sealed class OrchestratorConfig
     /// READY 전에는 SWAP을 발행하지 않는다 (프리웜 + READY 게이트).</summary>
     public double MigrationReadyWaitTimeoutSeconds { get; set; } = 300;
 
-    /// <summary>인스턴스 유휴 정지 유예(초).</summary>
+    /// <summary>인스턴스 유휴 정지 유예(초) — 일반 인스턴스는 경과 후 종료(용량 회수),
+    /// Prewarm 인스턴스(PrewarmLayer 소속)는 경과 후 레이어 초기화(RESET — 재월드젠) 후
+    /// 유휴 대기한다 (프로세스 생존 — 부팅 대기 원천 제거).</summary>
     public int IdleTeardownGraceSeconds { get; set; } = 30;
+
+    /// <summary>게임 레이어 수 — 수동 마이그레이션(`migrate`)의 "다음 레이어" 계산과
+    /// 목적지 유효 범위 검증에 사용 (모드가 LAYER_END로 보고하는 값과 일치해야 한다).</summary>
+    public int MaxLayers { get; set; } = 5;
+
+    /// <summary>프리웜 레이어 목록 — 에이전트 연결 시 이 레이어들을 수용량 내 최대한
+    /// 미리 스폰한다 (기본 [] — 수요 기반 스폰만). Prewarm 인스턴스는 유휴 시 종료되지
+    /// 않고 레이어 초기화 후 유휴 대기하므로, 용량은 |PrewarmLayer| + 동시 발생 가능한
+    /// 수요 레이어 수를 커버해야 한다 (2026-08-03).</summary>
+    public int[] PrewarmLayer { get; set; } = Array.Empty<int>();
 
     /// <summary>밴 목록 파일 — pwd 기준 고정 이름 (config 미노출).</summary>
     [JsonIgnore]

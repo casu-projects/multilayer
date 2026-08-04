@@ -211,7 +211,7 @@ public sealed class MigrationCoordinator
         _ => "Freezing",
     };
 
-    // ── 진입: LAYER_END (모드 A) ──
+    // ── 진입: LAYER_END (모드 A) / 수동 마이그레이션 (콘솔) ──
 
     public void OnLayerEnd(PlayerKey player, int fromDepth, int maxLayers)
     {
@@ -231,6 +231,51 @@ public sealed class MigrationCoordinator
         }
 
         int toDepth = fromDepth < maxLayers ? fromDepth + 1 : 1;
+        BeginMigration(player, fromDepth, toDepth);
+    }
+
+    /// <summary>다음 레이어 계산 — MaxLayers 초과 시 1로 래핑 (LAYER_END와 동일 규칙,
+    /// 수동 마이그레이션의 목적지 생략 시 사용).</summary>
+    public int NextLayerDepth(int fromDepth) =>
+        fromDepth < _config.MaxLayers ? fromDepth + 1 : 1;
+
+    /// <summary>수동 마이그레이션 (운영자 콘솔 `migrate <player> [targetLayer]`) —
+    /// LAYER_END와 동일한 전체 트랜잭션 (FREEZE → 목적지 월드젠 → SWAP → RESUME → COMMIT).
+    /// 실패 시 콘솔 피드백용 사유 문자열을 반환한다 (null = 성공).</summary>
+    public string? ManualMigrate(PlayerKey player, int toDepth)
+    {
+        PlayerState? state = _sessions.Get(player);
+        if (state == null || state.Session == PlayerSessionState.Offline)
+        {
+            return "플레이어가 접속 중이 아닙니다.";
+        }
+        if (_transactions.ContainsKey(player))
+        {
+            return "이미 마이그레이션 중입니다.";
+        }
+        if (state.Depth == toDepth)
+        {
+            return $"이미 L{toDepth}에 있습니다.";
+        }
+        if (toDepth < 1 || toDepth > _config.MaxLayers)
+        {
+            return $"유효하지 않은 목적지 레이어 — 1~{_config.MaxLayers} 범위여야 합니다.";
+        }
+        InstanceInfo? fromInstance = _instances.FindByDepth(state.Depth);
+        if (fromInstance == null
+            || fromInstance.Status is not (InstanceStatus.Ready or InstanceStatus.Idle))
+        {
+            return $"출발 인스턴스(depth-{state.Depth})가 준비되지 않았습니다.";
+        }
+
+        BeginMigration(player, state.Depth, toDepth);
+        return null;
+    }
+
+    /// <summary>마이그레이션 트랜잭션 공통 시작부 — FREEZE 발신 + WAL 기록.
+    /// 호출부가 fromDepth/toDepth를 결정한다 (LAYER_END / 수동 migrate).</summary>
+    private void BeginMigration(PlayerKey player, int fromDepth, int toDepth)
+    {
         InstanceInfo? fromInstance = _instances.FindByDepth(fromDepth);
         if (fromInstance == null)
         {
@@ -256,7 +301,7 @@ public sealed class MigrationCoordinator
         };
         tx.StepDeadline = DateTime.UtcNow + StepTimeout();
         _transactions[player] = tx;
-        state.Session = PlayerSessionState.Migrating;
+        _sessions.Get(player)!.Session = PlayerSessionState.Migrating;
         WriteWal(tx);
 
         _hub.Send(fromInstance.ModConnection, "FREEZE",

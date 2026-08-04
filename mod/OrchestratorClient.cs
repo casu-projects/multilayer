@@ -125,6 +125,10 @@ public sealed class OrchestratorClient : MonoBehaviour
                 RunModule.HandleShutdown();
                 Ack(msg, true);
                 break;
+            case "RESET":
+                RunModule.HandleReset();
+                Ack(msg, true);
+                break;
             case "FREEZE":
                 MigrationModule.HandleFreeze(msg);
                 Ack(msg, true);

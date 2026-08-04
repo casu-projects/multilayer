@@ -40,6 +40,11 @@ public sealed class SteamLobby
     private SteamMatchmaking? _matchmaking;
     private SteamID? _lobbyId;
     private bool _lobbyCreated;
+    /// <summary>로비 생성 요청 발신 후 콜백 대기 중 — Tick 재발화 방지 (2026-08-03 실측:
+    /// CreateLobby는 비동기라 콜백 도착 전에 매 틱 재생성 → 로비 무한 생성 21+개).</summary>
+    private bool _lobbyCreationPending;
+    /// <summary>생성 실패 시 재시도 최소 간격 (실패 시 틱마다 요청 폭주 방지).</summary>
+    private DateTime _lobbyRetryAfterUtc;
     private bool _loggedOn;
     private bool _authWaitLogged;
 
@@ -122,6 +127,7 @@ public sealed class SteamLobby
         {
             Log.Info("CM 연결 끊김 - 재접속 시도.");
             _lobbyCreated = false;
+            _lobbyCreationPending = false;
             _steamClient?.Connect();
         });
         _callbackManager.Subscribe<SteamMatchmaking.CreateLobbyCallback>(OnLobbyCreated);
@@ -137,7 +143,8 @@ public sealed class SteamLobby
         // 로비 생성 게이트 (2026-08-03): SteamKit2 로그인 + 오케스트레이터 AUTH_INFO가 모두
         // 도착해야 생성한다 — AUTH_INFO 이전에는 서버명/인원/비밀번호 여부가 확정되지 않으므로
         // 로비를 만들지 않는다 (코어 기본값 레이스 원천 제거).
-        if (_loggedOn && !_lobbyCreated)
+        if (_loggedOn && !_lobbyCreated && !_lobbyCreationPending
+            && DateTime.UtcNow >= _lobbyRetryAfterUtc)
         {
             if (!_core.AuthInfoReceived)
             {
@@ -207,16 +214,19 @@ public sealed class SteamLobby
 
     private void CreateLobbyNow()
     {
-        if (_lobbyCreated) return;
+        if (_lobbyCreated || _lobbyCreationPending) return;
+        _lobbyCreationPending = true;
         _matchmaking!.CreateLobby(AppId, ELobbyType.Public, _core.MaxPlayers,
             metadata: BuildBaseMetadata());
     }
 
     private void OnLobbyCreated(SteamMatchmaking.CreateLobbyCallback callback)
     {
+        _lobbyCreationPending = false;
         if (callback.Result != EResult.OK)
         {
-            Log.Info($"로비 생성 실패: {callback.Result}");
+            Log.Info($"로비 생성 실패: {callback.Result} — 10초 후 재시도.");
+            _lobbyRetryAfterUtc = DateTime.UtcNow.AddSeconds(10);
             return;
         }
 

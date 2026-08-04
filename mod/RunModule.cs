@@ -14,6 +14,10 @@ public static class RunModule
     private static bool _readyReported;
     private static bool _pendingStartRun;
     private static float _startRunRetryDeadline;
+    /// <summary>Prewarm 인스턴스 레이어 초기화(RESET) 대기 — ToMainMenu → 월드젠 재시작.
+    /// 오케스트레이터가 유휴 Prewarm 인스턴스에 발신 (2026-08-03 — 프로세스 생존 유휴 대기).</summary>
+    private static bool _pendingReset;
+    private static float _resetDeadline;
 
     /// <summary>프리웜 월드젠 페이즈 플래그: StartRun 호출 ~ 월드젠 완료까지 true.
     /// 이 구간의 접속을 "Server is generating world"로 거절해, startserver ~ 씬 로드 창에
@@ -25,18 +29,39 @@ public static class RunModule
     /// 조건: PreRunScript 존재 + 전송 계층(전용 서버) 가동 — 순서 보장 (startserver 먼저).</summary>
     internal static void Tick()
     {
-        if (!_pendingStartRun) return;
-        if (Time.unscaledTime > _startRunRetryDeadline)
+        if (_pendingStartRun)
         {
+            if (Time.unscaledTime > _startRunRetryDeadline)
+            {
+                _pendingStartRun = false;
+                Plugin.Log.LogWarning("[Run] START_RUN — 준비 대기 타임아웃 (90초).");
+                return;
+            }
+            PreRunScript pre = UnityEngine.Object.FindObjectOfType<PreRunScript>();
+            if (pre == null) return;
+            if (!Net.running) return;
             _pendingStartRun = false;
-            Plugin.Log.LogWarning("[Run] START_RUN — 준비 대기 타임아웃 (90초).");
+            DoStartRun(pre);
             return;
         }
-        PreRunScript pre = UnityEngine.Object.FindObjectOfType<PreRunScript>();
-        if (pre == null) return;
-        if (!Net.running) return;
-        _pendingStartRun = false;
-        DoStartRun(pre);
+
+        if (_pendingReset)
+        {
+            if (Time.unscaledTime > _resetDeadline)
+            {
+                _pendingReset = false;
+                PreWarmGenerating = false;
+                Plugin.Log.LogWarning("[Run] RESET — 준비 대기 타임아웃 (90초) — 재스폰 폴백.");
+                return;
+            }
+            // ToMainMenu 완료(월드 언로드) + 전용 서버 가동 확인 후 월드젠 재시작.
+            if (KrokoshaCasualtiesUtils.Util.IsWorldGenerated()) return;
+            PreRunScript pre = UnityEngine.Object.FindObjectOfType<PreRunScript>();
+            if (pre == null) return;
+            if (!Net.running) return;
+            _pendingReset = false;
+            DoStartRun(pre);
+        }
     }
 
     /// <summary>START_RUN — 월드 생성 트리거 (구 "map run" → PreRunScript.StartRun).
@@ -79,6 +104,25 @@ public static class RunModule
         {
             Plugin.Log.LogWarning($"[Run] START_RUN 실행 실패: {ex.Message}");
         }
+    }
+
+    /// <summary>RESET — Prewarm 인스턴스 레이어 초기화 (오케스트레이터 유휴 발신).
+    /// 프로세스 생존 상태에서 ToMainMenu(월드 폐기) → 메인 메뉴 대기 → 월드젠 재시작 →
+    /// INSTANCE_READY 재보고 → 유휴 대기. _readyReported를 리셋해 두 번째 월드젠의
+    /// READY 보고를 허용하고, PreWarmGenerating으로 재생성 중 접속을 거절한다.
+    /// 실패(90초 타임아웃) 시 PreWarmGenerating을 해제하고 오케스트레이터가
+    /// 크래시 처리 → 재스폰 폴백한다.</summary>
+    internal static void HandleReset()
+    {
+        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
+
+        _pendingReset = true;
+        _resetDeadline = Time.unscaledTime + 90f;
+        _readyReported = false;
+        PreWarmGenerating = true;
+
+        Plugin.Log.LogInfo("[Run] RESET — 레이어 초기화 시작 (ToMainMenu → 재월드젠).");
+        HandleConsole("ToMainMenu");
     }
 
     /// <summary>SHUTDOWN — 전 플레이어 데이터 제출 후 종료 (오케스트레이터 종료 캐스케이드).

@@ -459,7 +459,7 @@ internal static class Program
                 break;
             case "PLAYER_DATA_REQUEST":
                 if (TryPlayerKey(msg, out var pr))
-                    dataStore.OnRequest(pr, conn, hub);
+                    dataStore.OnRequest(pr, conn, hub, migrations.IsMigrating(pr));
                 break;
             case "CHAT":
                 if (msg.PayloadAs<ChatPayload>() is { } chat && !string.IsNullOrEmpty(chat.Speaker))

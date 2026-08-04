@@ -22,6 +22,80 @@ public static class SaveModule
 
     private static readonly ConcurrentDictionary<string, (float X, float Y, int Layer)> PendingPositions = new();
 
+    // ── 데이터 수명주기 (스테일 잔존물 방지 — 도착 epoch 스탬프 게이트) ──
+    // 모든 푸시(PLAYER_DATA_RESPONSE/RESUME)와 위치 큐 쓰기는 로컬 단조 시퀀스(_seq)를
+    // 스탬프한다. 플레이어 접속(CreateNetPlayerWithPeer) 시 OnPlayerArrival이 도착 시퀀스를
+    // 기록하므로, 직전 방문의 잔존물(seq <= 도착)은 소비 게이트에서 스킵·제거되고
+    // 이번 방문의 신선 푸시(seq > 도착)만 Body.Start/위치 적용이 소비한다.
+    // 늦게 도착한 푸시는 폐기하지 않고 저장만 되며, 다음 방문의 도착 시퀀스보다
+    // 작아져 자동 무력화된다 (데이터 유실 없음 — 오케스트레이터 디스크가 정본).
+    private static long _seq;
+    private static readonly ConcurrentDictionary<string, long> PendingSeq = new();
+    private static readonly ConcurrentDictionary<string, long> PositionSeq = new();
+    private static readonly ConcurrentDictionary<string, long> ArrivalSeq = new();
+
+    /// <summary>플레이어 접속/재접속 시 도착 epoch 기록 + 직전 방문 잔존물 정리.
+    /// CreateNetPlayerWithPeer(접속 처리)에서 바디 스폰보다 먼저 호출된다.</summary>
+    internal static void OnPlayerArrival(string persistentId)
+    {
+        ArrivalSeq[persistentId] = Interlocked.Increment(ref _seq);
+        PendingData.TryRemove(persistentId, out _);
+        PendingSeq.TryRemove(persistentId, out _);
+        PositionSeq.TryRemove(persistentId, out _);
+        PendingPositions.TryRemove(persistentId, out _);
+    }
+
+    /// <summary>푸시 저장 (도착 스탬프 포함). RESUME/RESPONSE 공용.</summary>
+    internal static void SetPending(string persistentId, JObject data)
+    {
+        PendingData[persistentId] = data;
+        PendingSeq[persistentId] = Interlocked.Increment(ref _seq);
+    }
+
+    internal static void RemovePending(string persistentId)
+    {
+        PendingData.TryRemove(persistentId, out _);
+        PendingSeq.TryRemove(persistentId, out _);
+    }
+
+    /// <summary>도착 epoch 게이트가 통과한 신선 푸시만 소비 (아니면 제거 후 false).
+    /// 직전 방문 잔존물/가비지가 이번 방문의 복원을 오염시키는 것을 차단한다.</summary>
+    private static bool TryTakePending(string persistentId, out JObject data)
+    {
+        if (!ArrivalSeq.TryGetValue(persistentId, out long arrival)) arrival = long.MinValue;
+        long seq = 0;
+        bool has = PendingData.TryGetValue(persistentId, out data);
+        bool fresh = has && PendingSeq.TryGetValue(persistentId, out seq) && seq > arrival;
+        if (fresh)
+        {
+            PendingData.TryRemove(persistentId, out _);
+            PendingSeq.TryRemove(persistentId, out _);
+            return true;
+        }
+        PendingData.TryRemove(persistentId, out _);
+        PendingSeq.TryRemove(persistentId, out _);
+        data = null;
+        return false;
+    }
+
+    /// <summary>위치 큐도 동일 게이트 — 직전 방문의 스테일 위치는 소비하지 않는다.</summary>
+    private static bool TryTakePendingPosition(string persistentId, out (float X, float Y, int Layer) pos)
+    {
+        if (!ArrivalSeq.TryGetValue(persistentId, out long arrival)) arrival = long.MinValue;
+        long seq = 0;
+        bool has = PendingPositions.TryGetValue(persistentId, out pos);
+        bool fresh = has && PositionSeq.TryGetValue(persistentId, out seq) && seq > arrival;
+        if (fresh)
+        {
+            PendingPositions.TryRemove(persistentId, out _);
+            PositionSeq.TryRemove(persistentId, out _);
+            return true;
+        }
+        PendingPositions.TryRemove(persistentId, out _);
+        PositionSeq.TryRemove(persistentId, out _);
+        return false;
+    }
+
     // ── 직렬화 (S9-3) ──
 
     public static JObject SerializePlayer(NetPlayer plr)
@@ -79,10 +153,10 @@ public static class SaveModule
         }
         if (payload == null || payload.Type != JTokenType.Object)
         {
-            PendingData.TryRemove(playerKey, out _); // 데이터 없음 — 이전 잔존 엔트리 정리
+            RemovePending(playerKey); // 데이터 없음 — 이전 잔존 엔트리 정리
             return;
         }
-        PendingData[playerKey] = (JObject)payload;
+        SetPending(playerKey, (JObject)payload);
     }
 
     // ── 복원 (S9-4 — Body.Start에서) ──
@@ -109,6 +183,20 @@ public static class SaveModule
 
     // ── 필드 직렬화 헬퍼 ──
 
+    /// <summary>직렬화 제외 필드 — 온도계통 transient 상태 (2026-08-04).
+    /// tempCheckTime: 게임 냉각의 1초 게이트 타임스탬프 — 마이그레이션 목적지(새 프로세스,
+    /// Time.time 0부터)에서 이전 프로세스의 경과 시간이 복원되면 게이트가 영구 스킵되어
+    /// 냉각만 정지·발열만 진행된다 (실측: 체온이 올라가기만 함). temperature: 체온 값 —
+    /// 플레이어별 퇴장 순간 상태가 전이되어 더움/추움 편차. wetness: 땀. clothingTemperature:
+    /// 단열 — 게임이 장착 아이템으로 주기 재계산 (GetTotalInsulation 입력 — 스테일 복원 방지).</summary>
+    private static readonly HashSet<string> TransientFieldBlacklist = new()
+    {
+        "tempCheckTime",
+        "temperature",
+        "wetness",
+        "clothingTemperature",
+    };
+
     private static bool IsSavableType(Type t) =>
         t == typeof(string) || t == typeof(float[]) || t == typeof(int[]) || t == typeof(bool[])
         || t == typeof(string[])
@@ -119,6 +207,8 @@ public static class SaveModule
         var result = new JObject();
         foreach (FieldInfo f in obj.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance))
         {
+            if (TransientFieldBlacklist.Contains(f.Name))
+                continue;
             if (IsSavableType(f.FieldType))
             {
                 try { result[f.Name] = JToken.FromObject(f.GetValue(obj)); }
@@ -144,6 +234,8 @@ public static class SaveModule
         Type type = target.GetType();
         foreach (JProperty prop in fields.Properties())
         {
+            if (TransientFieldBlacklist.Contains(prop.Name))
+                continue; // 구버전 저장 데이터(블랙리스트 적용 전) 방어 — 복원 스킵.
             FieldInfo f = type.GetField(prop.Name, BindingFlags.Public | BindingFlags.Instance);
             if (f == null) continue;
             if (IsSavableType(f.FieldType))
@@ -438,6 +530,7 @@ public static class SaveModule
             pos.Value<float?>("x") ?? 0f,
             pos.Value<float?>("y") ?? 0f,
             pos.Value<int?>("layer") ?? 0);
+        PositionSeq[plr.GetPersistentId()] = Interlocked.Increment(ref _seq);
     }
 
     /// <summary>저장 위치 적용 — 바닐라 스폰 위치 전송(LateSpawnLocation) 시점에 호출되어
@@ -447,7 +540,7 @@ public static class SaveModule
     internal static bool TryApplyPendingPosition(NetPlayer plr, NetBody pb)
     {
         if (plr == null || pb == null || WorldGeneration.world == null) return false;
-        if (!PendingPositions.TryRemove(plr.GetPersistentId(), out var p)) return false;
+        if (!TryTakePendingPosition(plr.GetPersistentId(), out var p)) return false;
 
         if (p.Layer != WorldGeneration.world.biomeDepth)
         {
@@ -555,7 +648,7 @@ public static class SaveModule
             if (!NetPlayer.BodyToPlayerDict.TryGetValue(__instance, out NetPlayer plr)) return;
             string pid = plr.GetPersistentId();
 
-            if (!PendingData.TryRemove(pid, out JObject data))
+            if (!TryTakePending(pid, out JObject data))
             {
                 DateTime deadline = DateTime.UtcNow.AddSeconds(2);
                 while (DateTime.UtcNow < deadline)
@@ -563,7 +656,7 @@ public static class SaveModule
                     // 응답 디스패치는 Update에서만 일어나는데, 여기서 메인 스레드를 블로킹하면
                     // Update가 실행될 수 없다 — 대기 중에도 큐를 직접 처리해 응답을 반영한다.
                     OrchestratorClient.Instance?.ProcessInbound();
-                    if (PendingData.TryRemove(pid, out data)) break;
+                    if (TryTakePending(pid, out data)) break;
                     System.Threading.Thread.Sleep(25);
                 }
             }

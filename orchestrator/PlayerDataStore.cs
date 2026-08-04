@@ -34,13 +34,17 @@ public sealed class PlayerDataStore
     }
 
     /// <summary>접속 로드 요청 (모드 → 오케스트레이터). 보류분 있으면 그것, 아니면 디스크.
-    /// 데이터 없으면 payload=null (모드가 기본 상태 사용 — S9-4).</summary>
-    public void OnRequest(PlayerKey key, ControlHub.ClientConnection modConn, ControlHub hub)
+    /// 데이터 없으면 payload=null (모드가 기본 상태 사용 — S9-4).
+    /// 마이그레이션 진행 중이면 보류분을 소비·제거하지 않고 유지한다 — 요청이 보류분을
+    /// 제거하면 이후 RESUME(GetForMigration)이 디스크로 폴백해 방금 제출된 최신 상태가
+    /// 아닌 스테일 데이터를 전달할 수 있다. 보류분은 마이그레이션 커밋(CommitPending)이
+    /// 제거하므로 잔여가 발생하지 않는다.</summary>
+    public void OnRequest(PlayerKey key, ControlHub.ClientConnection modConn, ControlHub hub, bool migrating)
     {
         if (_pending.TryGetValue(key, out JsonElement pending))
         {
             hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = pending });
-            _pending.Remove(key);
+            if (!migrating) _pending.Remove(key);
             return;
         }
 

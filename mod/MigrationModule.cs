@@ -323,12 +323,12 @@ public sealed class MigrationModule : MonoBehaviour
         {
             // S9-6: 데이터 보관 없음 — 목적지 Body.Start가 "데이터 없음" 경로로 프레시 생성 +
             // 시작 보급품 자동 지급. 잔존 엔트리가 있으면 정리 (중복/스테일 방어).
-            SaveModule.PendingData.TryRemove(playerKey, out _);
+            SaveModule.RemovePending(playerKey);
         }
         else
         {
             // S9-6: 데이터 보관 → 바디 생성 시(Body.Start) 복원 경로 사용
-            SaveModule.PendingData[playerKey] = (JObject)payload;
+            SaveModule.SetPending(playerKey, (JObject)payload);
         }
         // 이 인스턴스에서도 마이그레이션 대상으로 동결 — 10168(WORLDGEN_DONE) 보고와
         // 퇴장 보고/저장 스킵에 필요 (FREEZE는 구 인스턴스에만 도착하므로 RESUME 시점에 설정).

@@ -67,9 +67,6 @@ public sealed class ChatPayload
     /// <summary>발신 인스턴스 레이어 태그 (예: "L1") — 오케스트레이터가 부여.</summary>
     public string Layer { get; set; } = "";
 
-    /// <summary>어드민 여부 (살아있는 어드민만 true) — [*ADMIN*] 태그 표시용.</summary>
-    public bool IsAdmin { get; set; }
-
     public string Message { get; set; } = "";
 }
 

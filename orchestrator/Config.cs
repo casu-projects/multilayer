@@ -58,11 +58,7 @@ public sealed class OrchestratorConfig
     /// 수요 레이어 수를 커버해야 한다 (2026-08-03).</summary>
     public int[] PrewarmLayer { get; set; } = Array.Empty<int>();
 
-    /// <summary>어드민 SteamID 목록 — 채팅 [*ADMIN*] 태그 표시 대상 (콘솔 `admin add/remove`
-    /// 명령으로 수정·영속화 — orchestrator.json에 저장).</summary>
-    public string[] AdminSteamIds { get; set; } = Array.Empty<string>();
-
-    /// <summary>config 파일 저장 (콘솔 `admin add/remove` 영속화 — 전체 직렬화, 기존 값 보존).</summary>
+    /// <summary>config 파일 저장.</summary>
     public void Save(string path)
     {
         File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));

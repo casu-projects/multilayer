@@ -88,22 +88,7 @@ internal static class Program
                 {
                     hub.SendNoAck(conn, "CONSOLE", new { command });
                 }
-            },
-            (steamId, add) =>
-            {
-                // `admin add/remove <steamid>` — 목록 갱신 + config 영속화 + 전 모드 즉시 반영.
-                var list = config.AdminSteamIds.ToList();
-                bool changed = add
-                    ? AddIfMissing(list, steamId)
-                    : list.Remove(steamId);
-                if (changed)
-                {
-                    config.AdminSteamIds = list.ToArray();
-                    config.Save(configPath);
-                    PushAdminList(hub, config);
-                }
-            },
-            () => config.AdminSteamIds);
+            });
         // 대화형 Ctrl+C → graceful 종료 (ReadKey가 SIGINT를 소비하므로 키 감지로 연결)
         console.ShutdownRequested = () => shutdownCts.Cancel();
         console.Start();
@@ -299,7 +284,6 @@ internal static class Program
                 hub.SendNoAck(conn, "MOD_HELLO_ACK", new { ok = true });
                 hub.SendNoAck(conn, "RUN_RULES_STATE",
                     new { runSettings = runRules.RunSnapshot, rules = runRules.RuleSnapshot });
-                hub.SendNoAck(conn, "ADMIN_LIST", new { adminSteamIds = config.AdminSteamIds });
                 return;
         }
 
@@ -493,7 +477,6 @@ internal static class Program
                             message = chat.Message,
                             color = chat.Color,
                             layer = layerLabel,
-                            isAdmin = chat.IsAdmin,
                         });
                         forwarded++;
                     }
@@ -745,22 +728,6 @@ internal static class Program
         }
     }
 
-    /// <summary>어드민 목록 전 모드 푸시 (부팅/재수용 + `admin add/remove` 변경 시).</summary>
-    private static void PushAdminList(ControlHub hub, OrchestratorConfig config)
-    {
-        foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
-        {
-            hub.SendNoAck(conn, "ADMIN_LIST", new { adminSteamIds = config.AdminSteamIds });
-        }
-    }
-
-    private static bool AddIfMissing(List<string> list, string value)
-    {
-        if (list.Contains(value)) return false;
-        list.Add(value);
-        return true;
-    }
-
     private static bool TryPlayerKey(string? value, out PlayerKey key)
     {
         key = default;
@@ -837,7 +804,6 @@ internal static class Program
         public string Speaker { get; set; } = "";
         public string Message { get; set; } = "";
         public string Color { get; set; } = "";
-        public bool IsAdmin { get; set; }
     }
 
     /// <summary>!list 요청 (mod → orchestrator).</summary>

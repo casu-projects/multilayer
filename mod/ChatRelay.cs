@@ -35,13 +35,7 @@ public static class ChatRelay
         string color = $"#{c.r:X2}{c.g:X2}{c.b:X2}";
 
         OrchestratorClient.Instance.SendEvent("CHAT",
-            new
-            {
-                speaker = plr.playername,
-                message = message,
-                color = color,
-                isAdmin = AdminRegistry.IsAdmin(plr) && plr.IsAlive(),
-            });
+            new { speaker = plr.playername, message = message, color = color });
     }
 
     /// <summary>오케스트레이터로부터 수신한 다른 인스턴스의 플레이어 채팅 표시.
@@ -74,12 +68,10 @@ public static class ChatRelay
         // 뒤 ']'를 각각 하나씩 붙인다 ("L1] [<color>이름</color>" → "[L1] [이름]: ").
         // 레이어가 없으면(Discord 관리자 채팅 등) 내부 '['도 생략 — 클라이언트가 붙이는
         // 단일 '['만으로 "[관리자]: 메시지"가 완성된다 (이중 대괄호 방지).
-        // 어드민이면 "*ADMIN* " 프리픽스 (ADMIN 부분 연한 빨강 — "[L1] [*ADMIN* 이름]: ").
         string layerTag = string.IsNullOrEmpty(payload.Layer) ? "" : $"{payload.Layer}] ";
         string innerBracket = string.IsNullOrEmpty(payload.Layer) ? "" : "[";
-        string adminTag = payload.IsAdmin ? "*<color=#ff6b6b>ADMIN</color>* " : "";
         string colorTag = string.IsNullOrEmpty(payload.Color) ? "" : $"<color={payload.Color}>";
         string closeTag = string.IsNullOrEmpty(payload.Color) ? "" : "</color>";
-        return $"{layerTag}{innerBracket}{adminTag}{colorTag}{payload.Speaker}{closeTag}";
+        return $"{layerTag}{innerBracket}{colorTag}{payload.Speaker}{closeTag}";
     }
 }

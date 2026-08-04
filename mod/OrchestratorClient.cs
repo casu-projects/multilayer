@@ -159,6 +159,9 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "RUN_RULES_STATE":
                 RunRuleState.Apply(msg.PayloadAs<RunRulesPayload>());
                 break;
+            case "ADMIN_LIST":
+                AdminRegistry.SetAdminSteamIds(msg.PayloadAs<AdminListPayload>()?.AdminSteamIds);
+                break;
             case "CHAT":
                 ChatRelay.Receive(msg.PayloadAs<ChatPayload>());
                 break;

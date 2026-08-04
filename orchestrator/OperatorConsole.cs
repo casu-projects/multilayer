@@ -19,13 +19,16 @@ public sealed class OperatorConsole
     private readonly Action<string>? _consoleRelay;   // (game command) — 전 인스턴스 게임 콘솔 실행
     private readonly RunRuleStore _runRuleStore;      // rule.json/run.json 정본
     private readonly Action? _pushRulesAction;        // 변경 후 전 인스턴스 RUN_RULES_STATE 푸시
+    private readonly Action<string, bool>? _adminAction;      // (steamId, add) — 어드민 추가/제거
+    private readonly Func<IEnumerable<string>>? _adminListProvider;
 
     /// <summary>종료 신호 수신 시 호출 (Program.Main에서 cts.Cancel과 연결 — 대화형 Ctrl+C용).</summary>
     internal Action? ShutdownRequested;
 
     public OperatorConsole(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, Action<string, string?> banAction, Action<string, string?> kickAction,
-        RunRuleStore runRuleStore, Action? pushRulesAction = null, Action<string>? consoleRelay = null)
+        RunRuleStore runRuleStore, Action? pushRulesAction = null, Action<string>? consoleRelay = null,
+        Action<string, bool>? adminAction = null, Func<IEnumerable<string>>? adminListProvider = null)
     {
         _hub = hub;
         _sessions = sessions;
@@ -36,6 +39,8 @@ public sealed class OperatorConsole
         _runRuleStore = runRuleStore;
         _pushRulesAction = pushRulesAction;
         _consoleRelay = consoleRelay;
+        _adminAction = adminAction;
+        _adminListProvider = adminListProvider;
     }
 
     public void Start()
@@ -152,6 +157,7 @@ public sealed class OperatorConsole
                 Console.WriteLine("instance [reset|stop <key|depth> | spawn <depth>] - 인스턴스 상태/조작");
                 Console.WriteLine("connections - 연결된 게이트웨이/에이전트/인스턴스(모드) 목록");
                 Console.WriteLine("prewarm [set <agent>|reset] - Prewarm 선호 에이전트 지정/해제");
+                Console.WriteLine("admin [add|remove <steamid>] - 어드민 목록 관리");
                 Console.WriteLine("clear - 터미널 화면을 지웁니다");
                 Console.WriteLine("migrate <player> [targetLayer] - 특정 유저를 수동 마이그레이션합니다 (기본: 다음 레이어)");
                 Console.WriteLine("exec <command...> - 모든 인스턴스에 게임 콘솔 명령을 실행합니다");
@@ -300,6 +306,43 @@ public sealed class OperatorConsole
                         Console.WriteLine(pref != null
                             ? $"Prewarm 선호 에이전트: {pref}"
                             : "Prewarm 선호 에이전트: 없음 (알고리즘 배치).");
+                        break;
+                }
+                break;
+            case "admin":
+                string[] aargs = arg.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
+                string asub = aargs.Length > 0 ? aargs[0].ToLowerInvariant() : "";
+                switch (asub)
+                {
+                    case "add":
+                    case "remove":
+                        if (aargs.Length < 2 || !ulong.TryParse(aargs[1], out _))
+                        {
+                            Console.WriteLine($"사용법: admin {asub} <steamid>  (예: admin add 76561199093422113)");
+                            break;
+                        }
+                        if (_adminAction == null)
+                        {
+                            Console.WriteLine("어드민 관리가 배선되지 않았습니다.");
+                            break;
+                        }
+                        _adminAction(aargs[1], asub == "add");
+                        Console.WriteLine($"어드민 {(asub == "add" ? "추가" : "제거")}: {aargs[1]} (config 저장 + 전 모드 반영).");
+                        break;
+                    default:
+                        var admins = _adminListProvider?.Invoke().ToList() ?? new List<string>();
+                        if (admins.Count == 0)
+                        {
+                            Console.WriteLine("어드민: 없음");
+                        }
+                        else
+                        {
+                            Console.WriteLine("어드민 목록:");
+                            foreach (string id in admins)
+                            {
+                                Console.WriteLine($"  {id}");
+                            }
+                        }
                         break;
                 }
                 break;

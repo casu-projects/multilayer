@@ -67,6 +67,12 @@ public sealed class ChatPayload
     /// <summary>발신 인스턴스 레이어 태그 (예: "L1") — 오케스트레이터가 부여.</summary>
     public string Layer { get; set; } = "";
 
+    /// <summary>이름 앞 배지 라벨 (예: Discord 채팅의 "D") — 클라이언트 괄호 안 "[D]"로 표시.</summary>
+    public string Prefix { get; set; } = "";
+
+    /// <summary>배지 색상 (HTML hex — "#RRGGBB"). Discord 채팅은 블러플 #5865F2.</summary>
+    public string PrefixColor { get; set; } = "";
+
     public string Message { get; set; } = "";
 }
 
@@ -82,6 +88,13 @@ public sealed class CurrentResultPayload
 {
     public string PlayerKey { get; set; } = "";
     public string Text { get; set; } = "";
+}
+
+/// <summary>!discord 결과 (오케스트레이터 → 요청자 개인 회신용).</summary>
+public sealed class DiscordResultPayload
+{
+    public string PlayerKey { get; set; } = "";
+    public string Url { get; set; } = "";
 }
 
 public sealed class ConsolePayload

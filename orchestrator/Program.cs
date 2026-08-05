@@ -96,13 +96,13 @@ internal static class Program
         // Discord 관리 봇 (D1) — 토큰/채널 미설정 시 비활성.
         var discordBot = new DiscordBot(config.DiscordBotToken, config.DiscordChannelId,
             config.DiscordConsoleChannelId, config.SteamWebApiKey, config.DiscordAdminUserId,
-            text =>
+            (username, text) =>
             {
-                // Discord 채팅 → 게임 — 전 인스턴스에 "관리자" 스피커로 브로드캐스트.
+                // Discord 채팅 → 게임 — 전 인스턴스에 "[D] [유저명]" 스피커로 브로드캐스트.
                 // 모드 ChatRelay는 플레이어 채팅만 오케스트레이터로 올리므로 루프 없음.
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
-                    hub.SendNoAck(conn, "CHAT", new { speaker = "관리자", message = text, color = "", layer = "" });
+                    hub.SendNoAck(conn, "CHAT", new { speaker = username, message = text, color = "", layer = "", prefix = "D", prefixColor = "#5865F2" });
                 }
             },
             text =>
@@ -313,7 +313,7 @@ internal static class Program
                 DispatchAgent(instances, sessions, conn, msg);
                 break;
             case ClientKind.Mod:
-                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, votes, discordBot, conn, msg);
+                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, votes, discordBot, config.DiscordUrl, conn, msg);
                 break;
         }
     }
@@ -407,7 +407,7 @@ internal static class Program
 
     private static void DispatchMod(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, PlayerDataStore dataStore, RunRuleStore runRules, VoteCoordinator votes,
-        DiscordBot discordBot, ControlHub.ClientConnection conn, ControlMessage msg)
+        DiscordBot discordBot, string discordUrl, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -530,6 +530,13 @@ internal static class Program
                 {
                     string text = BuildRunSettingsText(runRules, curReq.Key);
                     hub.SendNoAck(conn, "CURRENT_RESULT", new { playerKey = curReq.PlayerKey, text });
+                }
+                break;
+            case "DISCORD_REQUEST":
+                // !discord — 설정된 디스코드 서버 초대 URL 회신 (모드가 개인 채팅 2줄로 표시).
+                if (msg.PayloadAs<DiscordRequestPayload>() is { } discReq)
+                {
+                    hub.SendNoAck(conn, "DISCORD_RESULT", new { playerKey = discReq.PlayerKey, url = discordUrl });
                 }
                 break;
             case "CALLADMIN":
@@ -817,6 +824,12 @@ internal static class Program
     {
         public string PlayerKey { get; set; } = "";
         public string Key { get; set; } = "";
+    }
+
+    /// <summary>!discord 요청 (mod → orchestrator).</summary>
+    private sealed class DiscordRequestPayload
+    {
+        public string PlayerKey { get; set; } = "";
     }
 
     /// <summary>!calladmin 보고 (mod → orchestrator — Discord는 후속).</summary>

@@ -18,7 +18,7 @@ internal sealed class DiscordBot
     private readonly string _token;
     private readonly string _steamApiKey;
     private readonly ulong _adminUserId;
-    private readonly Action<string>? _onDiscordChat;      // 채팅 채널 → 게임 (Program.cs가 브로드캐스트)
+    private readonly Action<string, string>? _onDiscordChat;   // 채팅 채널 → 게임 (유저명, 텍스트 — Program.cs가 브로드캐스트)
     private readonly Action<string>? _onConsoleCommand;   // 콘솔 채널 → 서버 콘솔 명령
     private readonly Dictionary<ulong, string> _avatarCache = new();
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
@@ -30,7 +30,7 @@ internal sealed class DiscordBot
     private int _consoleLogDropped;
 
     internal DiscordBot(string token, ulong channelId, ulong consoleChannelId, string steamApiKey, ulong adminUserId,
-        Action<string>? onDiscordChat = null, Action<string>? onConsoleCommand = null)
+        Action<string, string>? onDiscordChat = null, Action<string>? onConsoleCommand = null)
     {
         _token = token;
         _channelId = channelId;
@@ -392,7 +392,9 @@ internal sealed class DiscordBot
 
         if (_channelId != 0 && msg.Channel.Id == _channelId)
         {
-            _onDiscordChat?.Invoke(text);
+            // 서버 닉네임(Nickname) 설정 시 그걸, 없으면 글로벌 유저명을 인게임 표시용 이름으로 사용.
+            string name = (msg.Author as SocketGuildUser)?.Nickname ?? msg.Author.Username;
+            _onDiscordChat?.Invoke(name, text);
         }
         return Task.CompletedTask;
     }

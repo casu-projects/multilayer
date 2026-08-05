@@ -49,6 +49,7 @@ public static class ChatCommands
                     || PlayerListCommand.TryHandle(plr, argv)
                     || CurrentRunCommand.TryHandle(plr, argv)
                     || CallAdminCommand.TryHandle(plr, argv)
+                    || DiscordCommand.TryHandle(plr, argv)
                     || RespawnCommand.TryHandle(plr, argv)
                     || VoteCommands.TryHandle(plr, argv))
                 {
@@ -131,6 +132,7 @@ public static class ChatCommands
             ChatPrivateReply.SendToPlayer(caller, "!list - 접속 중인 플레이어 목록");
             ChatPrivateReply.SendToPlayer(caller, "!currentrun [key] - 현재 Run 설정 보기 (생략 시 전체 목록)");
             ChatPrivateReply.SendToPlayer(caller, "!calladmin - 관리자 호출");
+            ChatPrivateReply.SendToPlayer(caller, "!discord - 디스코드 서버 초대 링크");
             ChatPrivateReply.SendToPlayer(caller, "!respawn - 사망 시 레이어 1에서 새 캐릭터로 리스폰");
             ChatPrivateReply.SendToPlayer(caller, "!runvote <설정> <값> - Run 설정 변경 투표 (전체 레이어)");
             ChatPrivateReply.SendToPlayer(caller, "!banvote <이름> - 플레이어 영구 차단 투표 (전체 레이어)");
@@ -178,6 +180,22 @@ public static class ChatCommands
             OrchestratorClient.Instance?.SendEvent("CALLADMIN",
                 new { playerKey = caller.GetPersistentId(), username = caller.playername });
             ChatPrivateReply.SendToPlayer(caller, "관리자에게 호출이 전송되었습니다.");
+            return true;
+        }
+    }
+
+    /// <summary>!discord — 디스코드 서버 초대 URL 표시. URL은 오케스트레이터가 단일 소유자
+    /// (orchestrator.json DiscordUrl) — 요청 시점에 회신받아 개인 채팅 2줄로 표시한다.</summary>
+    internal static class DiscordCommand
+    {
+        private const string CommandName = "discord";
+
+        internal static bool TryHandle(NetPlayer caller, string[] argv)
+        {
+            if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
+
+            OrchestratorClient.Instance?.SendEvent("DISCORD_REQUEST",
+                new { playerKey = caller.GetPersistentId() });
             return true;
         }
     }
@@ -321,6 +339,21 @@ public static class ChatCommands
         if (payload == null) return;
         NetPlayer plr = FindByPersistentId(payload.PlayerKey);
         if (plr != null) ChatPrivateReply.SendToPlayer(plr, payload.Text);
+    }
+
+    internal static void HandleDiscordResult(ControlMessage msg)
+    {
+        var payload = msg.PayloadAs<DiscordResultPayload>();
+        if (payload == null) return;
+        NetPlayer plr = FindByPersistentId(payload.PlayerKey);
+        if (plr == null) return;
+        if (string.IsNullOrEmpty(payload.Url))
+        {
+            ChatPrivateReply.SendToPlayer(plr, "디스코드 서버 URL이 설정되어 있지 않습니다.");
+            return;
+        }
+        ChatPrivateReply.SendToPlayer(plr, "디스코드 서버 URL:");
+        ChatPrivateReply.SendToPlayer(plr, payload.Url);
     }
 
     private static NetPlayer FindByPersistentId(string persistentId) =>

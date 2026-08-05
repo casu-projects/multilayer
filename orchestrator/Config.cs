@@ -89,6 +89,9 @@ public sealed class OrchestratorConfig
     /// <summary>calladmin 알림 시 멘션할 관리자 Discord 사용자 ID — 0이면 멘션 없음.</summary>
     public ulong DiscordAdminUserId { get; set; } = 0;
 
+    /// <summary>!discord 명령으로 표시할 디스코드 서버 초대 URL — 빈 값이면 미설정 안내.</summary>
+    public string DiscordUrl { get; set; } = "";
+
     public static OrchestratorConfig Load(string path)
     {
         if (!File.Exists(path))

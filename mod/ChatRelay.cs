@@ -39,9 +39,9 @@ public static class ChatRelay
     }
 
     /// <summary>오케스트레이터로부터 수신한 다른 인스턴스의 플레이어 채팅 표시.
-    /// 형식: "[L1] [<color=#hex>닉네임</color>]: 메시지". 표시 경로(Server_ChatAnnouncement
-    /// 3-arg)는 OnPlayerChatMessage를 발화시키지 않으므로 루프가 구조적으로 불가능하며,
-    /// _suppress는 안전망으로만 유지한다.</summary>
+    /// 형식: "[L1] [<color=#hex>닉네임</color>]: 메시지", Discord 채팅은 "[D] [<color=#5865F2>유저명</color>]: 메시지".
+    /// 표시 경로(Server_ChatAnnouncement 3-arg)는 OnPlayerChatMessage를 발화시키지 않으므로
+    /// 루프가 구조적으로 불가능하며, _suppress는 안전망으로만 유지한다.</summary>
     internal static void Receive(ChatPayload payload)
     {
         if (payload == null || string.IsNullOrEmpty(payload.Message)) return;
@@ -66,12 +66,24 @@ public static class ChatRelay
         // 최종 표시 "[L1] [player2222]: message"를 만들기 위해 레이어 태그의 앞 '['는
         // 생략하고, 안쪽 '['는 포함하되 닫는 ']'는 넣지 않는다 — 클라이언트가 앞 '['와
         // 뒤 ']'를 각각 하나씩 붙인다 ("L1] [<color>이름</color>" → "[L1] [이름]: ").
-        // 레이어가 없으면(Discord 관리자 채팅 등) 내부 '['도 생략 — 클라이언트가 붙이는
-        // 단일 '['만으로 "[관리자]: 메시지"가 완성된다 (이중 대괄호 방지).
+        // Discord 배지도 동일 규칙 — "D] "를 만들면 클라이언트가 "[D] "로 완성하고,
+        // 뒤이어 내부 '[' + 유저명이 와서 "[D] [유저명]: 메시지"가 된다.
+        // 레이어/배지가 없으면 내부 '['도 생략 — 클라이언트가 붙이는 단일 '['만으로
+        // "[관리자]: 메시지"가 완성된다 (이중 대괄호 방지).
+        bool hasBadge = !string.IsNullOrEmpty(payload.Layer) || !string.IsNullOrEmpty(payload.Prefix);
+        string badgeTag = string.IsNullOrEmpty(payload.Prefix) ? "" : BadgeTag(payload);
         string layerTag = string.IsNullOrEmpty(payload.Layer) ? "" : $"{payload.Layer}] ";
-        string innerBracket = string.IsNullOrEmpty(payload.Layer) ? "" : "[";
+        string innerBracket = hasBadge ? "[" : "";
         string colorTag = string.IsNullOrEmpty(payload.Color) ? "" : $"<color={payload.Color}>";
         string closeTag = string.IsNullOrEmpty(payload.Color) ? "" : "</color>";
-        return $"{layerTag}{innerBracket}{colorTag}{payload.Speaker}{closeTag}";
+        return $"{badgeTag}{layerTag}{innerBracket}{colorTag}{payload.Speaker}{closeTag}";
+    }
+
+    /// <summary>배지 렌더 — "<color=#hex>D</color>] " (클라이언트가 앞 '['를 붙여 "[D] " 완성).</summary>
+    private static string BadgeTag(ChatPayload payload)
+    {
+        string colorTag = string.IsNullOrEmpty(payload.PrefixColor) ? "" : $"<color={payload.PrefixColor}>";
+        string closeTag = string.IsNullOrEmpty(payload.PrefixColor) ? "" : "</color>";
+        return $"{colorTag}{payload.Prefix}{closeTag}] ";
     }
 }

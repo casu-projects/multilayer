@@ -180,6 +180,9 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "CURRENT_RESULT":
                 ChatCommands.HandleCurrentResult(msg);
                 break;
+            case "DISCORD_RESULT":
+                ChatCommands.HandleDiscordResult(msg);
+                break;
             case "CONSOLE":
                 RunModule.HandleConsole(msg.PayloadAs<ConsolePayload>()?.Command ?? "");
                 Ack(msg, true);

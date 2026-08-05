@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Text.Json;
 using Discord;
 using Discord.WebSocket;
@@ -26,6 +27,11 @@ internal sealed class DiscordBot
     internal Action? OnReady { get; set; }
     private readonly Dictionary<ulong, string> _avatarCache = new();
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
+
+    // ── 서버 닉네임 캐시 — (guildId, userId) → 닉네임 + 조회시각 (REST 폴백 결과 재사용) ──
+    private const int NicknameCacheTtlSeconds = 300;
+    private const int NicknameCacheCap = 500;
+    private readonly Dictionary<(ulong GuildId, ulong UserId), (string? Nick, DateTime Fetched)> _nicknameCache = new();
 
     // ── 콘솔 로그 릴레이 (D1) — 전체 콘솔 로그를 콘솔 채널로 배치 전송 ──
     private const int ConsoleLogBatchChars = 1900;   // Discord 메시지 한도 여유
@@ -176,15 +182,25 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
-    /// <summary>관리자 호출 알림 — DiscordAdminUserId가 설정된 경우 멘션.</summary>
+    /// <summary>관리자 호출 알림 — DiscordAdminUserId가 설정된 경우 멘션.
+    /// 설정 ID가 길드 역할이면 역할 멘션(&lt;@&amp;id&gt;), 아니면 사용자 멘션(&lt;@id&gt;) — 자동 감지
+    /// (Discord ID는 전역 유일 네임스페이스라 모호성 없음, 역할은 인텐트와 무관하게 항상 캐시).</summary>
     internal async Task SendCallAdminAsync(string playerName, ulong steamId)
     {
         if (!IsConnected || _channelId == 0) return;
         var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
         if (channel == null) return;
 
-        string mention = _adminUserId != 0 ? $" <@{_adminUserId}>" : "";
+        string mention = BuildAdminMention();
         await channel.SendMessageAsync($"🚨 **{playerName}**의 호출!{mention}");
+    }
+
+    /// <summary>관리자 멘션 문자열 생성 — 역할 ID면 &lt;@&amp;id&gt;, 사용자 ID면 &lt;@id&gt;.</summary>
+    private string BuildAdminMention()
+    {
+        if (_adminUserId == 0) return "";
+        bool isRole = _client.Guilds.Any(g => g.GetRole(_adminUserId) != null);
+        return isRole ? $" <@&{_adminUserId}>" : $" <@{_adminUserId}>";
     }
 
     /// <summary>사망/리스폰 알림.</summary>
@@ -428,10 +444,59 @@ internal sealed class DiscordBot
 
         if (_channelId != 0 && msg.Channel.Id == _channelId)
         {
-            // 서버 닉네임(Nickname) 설정 시 그걸, 없으면 글로벌 유저명을 인게임 표시용 이름으로 사용.
-            string name = (msg.Author as SocketGuildUser)?.Nickname ?? msg.Author.Username;
-            _onDiscordChat?.Invoke(name, text);
+            _ = RelayDiscordChatAsync(msg);
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>Discord 채팅 → 게임 — 서버 닉네임 해석 후 릴레이 (닉네임 REST 폴백 포함).</summary>
+    private async Task RelayDiscordChatAsync(SocketMessage msg)
+    {
+        string name = await ResolveDisplayNameAsync(msg.Author, msg.Channel);
+        _onDiscordChat?.Invoke(name, msg.Content.Trim());
+    }
+
+    /// <summary>서버 닉네임 해석 — SocketGuildUser.Nickname 우선, 없으면 REST 조회 폴백.
+    /// 봇에 GUILD_MEMBERS 인텐트가 없어도 REST(GetUserAsync)는 닉네임을 반환한다.</summary>
+    private async Task<string> ResolveDisplayNameAsync(SocketUser author, ISocketMessageChannel channel)
+    {
+        string? nick = (author as SocketGuildUser)?.Nickname;
+        if (!string.IsNullOrEmpty(nick)) return nick;
+
+        if (channel is IGuildChannel gc)
+        {
+            try
+            {
+                string? cached = GetCachedNickname(gc.GuildId, author.Id);
+                if (cached != null) return cached;
+
+                var member = await gc.Guild.GetUserAsync(author.Id);
+                string? fetched = member?.Nickname;
+                SetCachedNickname(gc.GuildId, author.Id, fetched);
+                if (!string.IsNullOrEmpty(fetched)) return fetched;
+            }
+            catch
+            {
+                // 조회 실패 — 사용자명으로 폴백.
+            }
+        }
+        return author.Username;
+    }
+
+    private string? GetCachedNickname(ulong guildId, ulong userId)
+    {
+        if (_nicknameCache.TryGetValue((guildId, userId), out var entry)
+            && DateTime.UtcNow - entry.Fetched < TimeSpan.FromSeconds(NicknameCacheTtlSeconds))
+        {
+            return entry.Nick;
+        }
+        return null;
+    }
+
+    private void SetCachedNickname(ulong guildId, ulong userId, string? nick)
+    {
+        if (_nicknameCache.Count > NicknameCacheCap)
+            _nicknameCache.Clear();
+        _nicknameCache[(guildId, userId)] = (nick, DateTime.UtcNow);
     }
 }

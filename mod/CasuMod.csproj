@@ -45,6 +45,10 @@
       <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.Physics2DModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.TilemapModule">
+      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.TilemapModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Newtonsoft.Json">
       <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/Newtonsoft.Json.dll</HintPath>
       <Private>false</Private>

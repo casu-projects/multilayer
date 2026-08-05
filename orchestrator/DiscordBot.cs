@@ -20,6 +20,10 @@ internal sealed class DiscordBot
     private readonly ulong _adminUserId;
     private readonly Action<string, string>? _onDiscordChat;   // 채팅 채널 → 게임 (유저명, 텍스트 — Program.cs가 브로드캐스트)
     private readonly Action<string>? _onConsoleCommand;   // 콘솔 채널 → 서버 콘솔 명령
+
+    /// <summary>Ready 전이 시 콜백 (채널 주제 초기 동기화 등). 생성 후 설정 — Ready는
+    /// StartAsync 이후 비동기로 발화하므로 생성 전 참조 문제가 없다.</summary>
+    internal Action? OnReady { get; set; }
     private readonly Dictionary<ulong, string> _avatarCache = new();
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
 
@@ -192,7 +196,7 @@ internal sealed class DiscordBot
 
         string? avatarUrl = steamId != 0 ? await FetchAvatarAsync(steamId) : null;
         var embed = new EmbedBuilder()
-            .WithAuthor(name: $"{playerName}님이 {(died ? "사망하였습니다." : "리스폰하였습니다.")}",
+            .WithAuthor(name: $"{playerName}님이 {(died ? "사망했습니다." : "리스폰했습니다.")}",
                 iconUrl: avatarUrl,
                 url: steamId != 0 ? $"https://steamcommunity.com/profiles/{steamId}" : null)
             .WithDescription(died && !string.IsNullOrEmpty(layer) ? $"(L{layer})" : "")
@@ -212,6 +216,25 @@ internal sealed class DiscordBot
         if (channel == null) return;
 
         await channel.SendMessageAsync(text: $"[{layer}] **{playerName}**: {message}");
+    }
+
+    /// <summary>채널 주제(description) 갱신 — 접속 인원 실시간 표시.
+    /// 중복 방지: 현재 주제와 같으면 스킵 (수동 수정은 1회 유지).</summary>
+    internal async Task UpdatePlayerCountTopicAsync(string text)
+    {
+        if (!IsConnected || _channelId == 0) return;
+        try
+        {
+            var ch = await _client.GetChannelAsync(_channelId) as ITextChannel;
+            if (ch == null) return;
+            if (ch.Topic == text) return;
+            await ch.ModifyAsync(p => p.Topic = text);
+        }
+        catch (Exception ex)
+        {
+            if (TimestampedConsoleWriter.Instance != null)
+                TimestampedConsoleWriter.Instance.PrintRelayed("orch:bot", $"채널 주제 갱신 실패: {ex.Message}");
+        }
     }
 
     /// <summary>투표 시작 알림.</summary>
@@ -350,28 +373,41 @@ internal sealed class DiscordBot
                 Log($"경고: 콘솔 채널 {_consoleChannelId}을(를) 찾을 수 없습니다.");
         }
 
-        // Delete all previously registered guild slash commands (legacy cleanup).
+        // 이전에 등록된 슬래시 명령 정리 (legacy cleanup) — 글로벌 + 봇이 속한 모든 길드.
+        // 길드 명령만 지우던 구 코드는 글로벌 명령을 영구히 남겨 과거 슬래시 명령이 서버에
+        // 잔존하는 문제를 유발했다 (사용 시 "응답 없음" — 상호작용 핸들러가 없으므로).
         try
         {
-            ulong guildId = 0;
-            var ch2 = await _client.GetChannelAsync(_channelId);
-            if (ch2 is IGuildChannel guildCh)
-                guildId = guildCh.GuildId;
-
-            if (guildId != 0)
+            int deleted = 0;
+            foreach (var cmd in await _client.GetGlobalApplicationCommandsAsync())
             {
-                var guild = await _client.Rest.GetGuildAsync(guildId);
-                var existing = await guild.GetApplicationCommandsAsync();
-                if (existing.Count > 0)
+                await cmd.DeleteAsync();
+                deleted++;
+            }
+            foreach (var guild in _client.Guilds)
+            {
+                foreach (var cmd in await guild.GetApplicationCommandsAsync())
                 {
-                    foreach (var cmd in existing)
-                        await cmd.DeleteAsync();
+                    await cmd.DeleteAsync();
+                    deleted++;
                 }
             }
+            if (deleted > 0)
+                Log($"슬래시 명령어 {deleted}개 정리 완료 (글로벌 + 길드).");
         }
         catch (Exception ex)
         {
             Log($"슬래시 명령어 정리 실패: {ex.Message}");
+        }
+
+        // 채널 주제 초기 동기화 (접속 인원 표시 등 — Program.cs가 세션 데이터로 갱신).
+        try
+        {
+            OnReady?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            Log($"Ready 콜백 실패: {ex.Message}");
         }
     }
 

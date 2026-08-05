@@ -66,22 +66,23 @@ public static class AnnounceRelay
         {
             case KindDeath:
                 // [*] 시스템 메시지 통일 — 1-arg Server_ChatAnnouncement(바닐라 [*SERVER*] 경로)
-                // 대신 type 2 name="*" 전송 (2026-08-03).
-                SendChatAnnouncementTo($"{payload.Name}님이 사망하였습니다.",
+                // 대신 type 2 name="*" 전송 (2026-08-03). 사망 — 연한 빨강 (#FF8080).
+                SendChatAnnouncementTo($"<color=#FF8080>{payload.Name}님이 사망했습니다.</color>",
                     new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
                 break;
             case KindLeave:
-                // 완전 퇴장 — 전 클라이언트 공지 (발신 레이어 포함 — 바닐라는 퇴장 공지가 없다).
-                SendChatAnnouncementTo($"{payload.Name}님이 퇴장하였습니다.",
+                // 완전 퇴장 — 전 클라이언트 공지 (발신 레이어 포함 — 바닐라는 퇴장 공지가 없다). 노랑 (#FFFF00).
+                SendChatAnnouncementTo($"<color=#FFFF00>{payload.Name}님이 퇴장했습니다.</color>",
                     new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
                 break;
             case KindJoin:
-                // 신규 접속 — 전 클라이언트 공지 (발신 레이어 포함 — 에코로 표시).
-                SendChatAnnouncementTo($"{payload.Name}님이 접속하였습니다.",
+                // 신규 접속 — 전 클라이언트 공지 (발신 레이어 포함 — 에코로 표시). 노랑 (#FFFF00).
+                SendChatAnnouncementTo($"<color=#FFFF00>{payload.Name}님이 접속했습니다.</color>",
                     new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
                 break;
             case KindMigration:
-                string text = $"{payload.Name}님이 L{payload.FromDepth}에서 L{payload.ToDepth}로 이동합니다";
+                // 레이어 이동 — 하늘색 (#87CEEB).
+                string text = $"<color=#87CEEB>{payload.Name}님이 L{payload.FromDepth}에서 L{payload.ToDepth}로 이동합니다</color>";
                 // 본인 제외 — 바닐라 Server_ChatAnnouncement는 전체 고정이라 와이어 미러로 타겟 지정.
                 knetid? exclude = FindClientId(payload.PlayerKey);
                 List<knetid> targets = NetPlayer.ClientIdToPlayerDict.Keys

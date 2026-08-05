@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Text.Json;
 
 namespace CasuMpOrchestrator;
@@ -159,7 +160,8 @@ public sealed class OperatorConsole
                 Console.WriteLine("run <설정> <값> - run.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)");
                 break;
             case "list":
-                // 온라인 플레이어만, 레이어별 그룹 (한 줄 = 한 명, SteamID 있으면 "(id)" 표기).
+                // 온라인 플레이어만 — 레이어 오름차순, 같은 레이어는 닉네임 오름차순.
+                // 한 줄 = 한 명: "{닉네임} (L{레이어}, {STEAM_키})".
                 var online = _sessions.All
                     .Where(p => p.Session != PlayerSessionState.Offline)
                     .OrderBy(p => p.Depth)
@@ -167,21 +169,14 @@ public sealed class OperatorConsole
                     .ToList();
                 if (online.Count == 0)
                 {
-                    Console.WriteLine("접속 중인 플레이어가 없습니다.");
+                    Console.WriteLine("현재 총 0명 접속 중 :");
                     break;
                 }
-                int? prevDepth = null;
+                Console.WriteLine($"현재 총 {online.Count}명 접속 중 :");
                 foreach (PlayerState p in online)
                 {
-                    if (p.Depth != prevDepth)
-                    {
-                        if (prevDepth != null) Console.WriteLine();
-                        Console.WriteLine($"[L{p.Depth}]");
-                        prevDepth = p.Depth;
-                    }
                     string name = p.Username ?? p.Key.Value;
-                    string steamId = p.Key.Value.StartsWith("STEAM_") ? p.Key.Value[6..] : "";
-                    Console.WriteLine(steamId.Length > 0 ? $"{name} ({steamId})" : name);
+                    Console.WriteLine($"{name} (L{p.Depth}, {p.Key.Value})");
                 }
                 break;
             case "kick":
@@ -199,10 +194,16 @@ public sealed class OperatorConsole
                 string subArg = sub.Length > 1 ? sub[1] : "";
                 if (subCmd.Length == 0)
                 {
-                    foreach (InstanceInfo i in _instances.All)
+                    // 실행 중(Ready/Idle) 인스턴스만 표시 — 정지/크래시 기록은 제외. depth 순 정렬.
+                    var running = _instances.All
+                        .Where(s => s.Status is InstanceStatus.Ready or InstanceStatus.Idle)
+                        .OrderBy(s => s.Depth)
+                        .ToList();
+                    Console.WriteLine($"총 인스턴스 {running.Count}개 :");
+                    foreach (InstanceInfo i in running)
                     {
                         string addr = _instances.BackendAddrFor(i) ?? "-";
-                        Console.WriteLine($"  {i.Key} — depth {i.Depth}, 포트 {i.Port}, 머신 {i.MachineId ?? "-"}, {i.Status}, 주소 {addr}");
+                        Console.WriteLine($"{i.Key} — depth {i.Depth}, 포트 {i.Port}, 머신 {i.MachineId ?? "-"}, {i.Status}, 주소 {addr}");
                     }
                     break;
                 }

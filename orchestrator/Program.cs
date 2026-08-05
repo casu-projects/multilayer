@@ -94,6 +94,7 @@ internal static class Program
         console.Start();
 
         // Discord 관리 봇 (D1) — 토큰/채널 미설정 시 비활성.
+        // 채널 주제에 접속 인원을 실시간 표시 (Ready 초기 동기화 + 접속/퇴장/마이그레이션 갱신).
         var discordBot = new DiscordBot(config.DiscordBotToken, config.DiscordChannelId,
             config.DiscordConsoleChannelId, config.SteamWebApiKey, config.DiscordAdminUserId,
             (username, text) =>
@@ -110,6 +111,8 @@ internal static class Program
                 // Discord 콘솔 채널 → 서버 콘솔 명령 — 터미널 입력과 동일 경로 (SubmitLine).
                 console.SubmitLine(text);
             });
+        // Ready 시 채널 주제 초기 동기화 (Ready는 StartAsync 이후 비동기 발화 — 안전).
+        discordBot.OnReady = () => RefreshPlayerCountTopic(discordBot, sessions);
         // 전체 콘솔 로그 → Discord 콘솔 채널 (접두사 포함 — 오케스트레이터 + 릴레이 전부).
         TimestampedConsoleWriter.Instance!.OnConsoleLine = line => discordBot.EnqueueConsoleLog(line);
 
@@ -134,6 +137,9 @@ internal static class Program
                     toDepth,
                 });
             }
+
+            // D1 — 레이어 이동으로 인한 레이어별 인원 변동 — 채널 주제 갱신.
+            RefreshPlayerCountTopic(discordBot, sessions);
         };
 
         // D1 — Discord 봇 시작 (토큰/채널 미설정 시 내부 no-op).
@@ -345,6 +351,7 @@ internal static class Program
                     // D1 — Discord 접속 알림.
                     _ = discordBot.SendJoinLeaveAsync(GetUsername(msg) ?? connected.Value,
                         SteamIdOf(connected), joined: true);
+                    RefreshPlayerCountTopic(discordBot, sessions);
                 }
                 break;
             case "SESSION_DISCONNECTED":
@@ -369,6 +376,9 @@ internal static class Program
                         _ = discordBot.SendJoinLeaveAsync(discState?.Username ?? disc.Value,
                             SteamIdOf(disc), joined: false);
                     }
+
+                    // D1 — 접속 인원 변동 (마이그레이션 중 퇴장 분기 포함) — 채널 주제 갱신.
+                    RefreshPlayerCountTopic(discordBot, sessions);
                 }
                 break;
             case "BACKEND_CONNECTED":
@@ -772,6 +782,25 @@ internal static class Program
 
         return byDepth.Select(g =>
             $"[L{g.Key}] {string.Join(", ", g.Select(s => s.Username ?? s.Key.Value))}").ToArray();
+    }
+
+    /// <summary>Discord 채널 주제용 접속 인원 문자열 — "현재 n명 접속중 / [L1] 2명 / [L3] 1명".
+    /// 온라인 정의(MaxPlayers 검사와 동일): Session != Offline. 플레이어가 없는 레이어는 생략.</summary>
+    private static string BuildPlayerCountText(PlayerSessionStore sessions)
+    {
+        var online = sessions.All.Where(s => s.Session != PlayerSessionState.Offline).ToList();
+        var parts = new List<string> { $"현재 {online.Count}명 접속중" };
+        foreach (var g in online.GroupBy(s => s.Depth).OrderBy(g => g.Key))
+        {
+            parts.Add($"[L{g.Key}] {g.Count()}명");
+        }
+        return string.Join(" / ", parts);
+    }
+
+    /// <summary>접속 인원 채널 주제 갱신 (fire-and-forget — 미연결 시 내부 no-op).</summary>
+    private static void RefreshPlayerCountTopic(DiscordBot discordBot, PlayerSessionStore sessions)
+    {
+        _ = discordBot.UpdatePlayerCountTopicAsync(BuildPlayerCountText(sessions));
     }
 
     /// <summary>!currentrun 응답 텍스트 — 키 조회 또는 전체 목록 (RunRuleStore가 정본).</summary>

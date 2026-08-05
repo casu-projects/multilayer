@@ -38,7 +38,7 @@ public static class MessageLocalization
             string name = message.Substring(0, joinIdx);
             if (!string.IsNullOrEmpty(name))
             {
-                translated = $"{name}님이 접속하였습니다.";
+                translated = $"{name}님이 접속했습니다.";
                 subjectName = name;
                 return true;
             }
@@ -148,12 +148,12 @@ internal static class ServerMain_OnPlayerDeath_LocalizedPatch
             return true;
 
 
-        // 개인 — 팝업 (10006, important) — 볼드(<b>) + 별표 감싸기 강조.
-        plr.Server_DoAlertSingle("<b>*사망하였습니다.*</b>\n!respawn 명령어를 사용하여 부활하세요.",
+        // 개인 — 팝업 (10006, important) — 볼드 + 별표 감싸기 강조. 사망 — 연한 빨강 (#FF8080).
+        plr.Server_DoAlertSingle("<color=#FF8080><b>*사망했습니다.*</b></color>\n!respawn 명령어를 사용하여 부활하세요.",
             important: true, reliable: true);
         // 개인 — 채팅 (10098 타겟 — 사망자 본인) — 볼드 + 별표 감싸기 (TMP 리치 텍스트 확인됨).
         // 줄넘김은 \n이 아니라 메시지 2회 전송으로 표현 (채팅 패널 라인 렌더링 안전).
-        AnnounceRelay.SendChatAnnouncementTo("<b>*사망하였습니다.*</b>", plr.clientId);
+        AnnounceRelay.SendChatAnnouncementTo("<color=#FF8080><b>*사망했습니다.*</b></color>", plr.clientId);
         AnnounceRelay.SendChatAnnouncementTo("!respawn 명령어를 사용하여 부활하세요.", plr.clientId);
 
         // 전체 — 모든 레이어 (오케스트레이터 ANNOUNCE 릴레이).

@@ -45,19 +45,21 @@ public static class AnnounceRelay
 
     /// <summary>신규 접속 공지 발신 (Server_ChatAnnouncement 접속 번역 시) —
     /// 오케스트레이터가 전 인스턴스에 에코한다 (발신 레이어 포함).
-    /// 마이그레이션/재접속 도착은 IsMigrationArrivalJoin 억제로 이 경로를 타지 않는다.</summary>
-    internal static void SendJoin(string playerName)
+    /// 마이그레이션/재접속 도착은 IsMigrationArrivalJoin 억제로 이 경로를 타지 않는다.
+    /// playerKey — 접속자 본인 제외용 (이름 해석 불가 시 빈 값 — 본인에게도 표시되는 폴백).</summary>
+    internal static void SendJoin(string playerName, string playerKey)
     {
         OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
         {
             kind = KindJoin,
-            playerKey = "",
+            playerKey = playerKey,
             name = playerName,
         });
     }
 
     /// <summary>오케스트레이터로부터 수신한 ANNOUNCE 처리 (메인 스레드 — OrchestratorClient
-    /// 인바운드 큐). death: 전 클라이언트 채팅 공지 / migration: 본인 제외 타겟 공지.</summary>
+    /// 인바운드 큐). death/leave/join: 본인 제외 전 클라이언트 채팅 공지 /
+    /// migration: 본인 제외 타겟 공지.</summary>
     internal static void Handle(AnnouncePayload payload)
     {
         if (payload == null || string.IsNullOrEmpty(payload.Name)) return;
@@ -67,31 +69,41 @@ public static class AnnounceRelay
             case KindDeath:
                 // [*] 시스템 메시지 통일 — 1-arg Server_ChatAnnouncement(바닐라 [*SERVER*] 경로)
                 // 대신 type 2 name="*" 전송 (2026-08-03). 사망 — 연한 빨강 (#FF8080).
-                SendChatAnnouncementTo($"<color=#FF8080>{payload.Name}님이 사망했습니다.</color>",
-                    new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
+                // 본인 제외 — 개인 사망 안내("*사망했습니다*")는 별도 전송됨 (2026-08-06).
+                SendAnnouncementExcluding(payload.PlayerKey,
+                    $"<color=#FF8080>{payload.Name}님이 사망했습니다.</color>");
                 break;
             case KindLeave:
-                // 완전 퇴장 — 전 클라이언트 공지 (발신 레이어 포함 — 바닐라는 퇴장 공지가 없다). 노랑 (#FFFF00).
-                SendChatAnnouncementTo($"<color=#FFFF00>{payload.Name}님이 퇴장했습니다.</color>",
-                    new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
+                // 완전 퇴장 — 본인 제외 전 클라이언트 공지 (발신 레이어 포함 — 바닐라는 퇴장 공지가 없다).
+                // 노랑 (#FFFF00). (2026-08-06 — 사망과 동일한 본인 제외 패턴 적용)
+                SendAnnouncementExcluding(payload.PlayerKey,
+                    $"<color=#FFFF00>{payload.Name}님이 퇴장했습니다.</color>");
                 break;
             case KindJoin:
-                // 신규 접속 — 전 클라이언트 공지 (발신 레이어 포함 — 에코로 표시). 노랑 (#FFFF00).
-                SendChatAnnouncementTo($"<color=#FFFF00>{payload.Name}님이 접속했습니다.</color>",
-                    new List<knetid>(NetPlayer.ClientIdToPlayerDict.Keys));
+                // 신규 접속 — 본인 제외 전 클라이언트 공지 (발신 레이어 포함 — 에코로 표시).
+                // 노랑 (#FFFF00). (2026-08-06 — 본인 제외 패턴 적용)
+                SendAnnouncementExcluding(payload.PlayerKey,
+                    $"<color=#FFFF00>{payload.Name}님이 접속했습니다.</color>");
                 break;
             case KindMigration:
                 // 레이어 이동 — 하늘색 (#87CEEB).
-                string text = $"<color=#87CEEB>{payload.Name}님이 L{payload.FromDepth}에서 L{payload.ToDepth}로 이동합니다</color>";
-                // 본인 제외 — 바닐라 Server_ChatAnnouncement는 전체 고정이라 와이어 미러로 타겟 지정.
-                knetid? exclude = FindClientId(payload.PlayerKey);
-                List<knetid> targets = NetPlayer.ClientIdToPlayerDict.Keys
-                    .Where(id => id != exclude)
-                    .ToList();
-                if (targets.Count == 0) break;
-                SendChatAnnouncementTo(text, targets);
+                SendAnnouncementExcluding(payload.PlayerKey,
+                    $"<color=#87CEEB>{payload.Name}님이 L{payload.FromDepth}에서 L{payload.ToDepth}로 이동합니다</color>");
                 break;
         }
+    }
+
+    /// <summary>playerKey 대상(본인)을 제외한 타겟 목록으로 공지 전송 —
+    /// 바닐라 Server_ChatAnnouncement는 전체 고정이라 와이어 미러로 타겟 지정 (2026-08-06
+    /// 사망/퇴장/접속/마이그레이션 공통).</summary>
+    private static void SendAnnouncementExcluding(string? playerKey, string message)
+    {
+        knetid? exclude = FindClientId(playerKey);
+        List<knetid> targets = NetPlayer.ClientIdToPlayerDict.Keys
+            .Where(id => id != exclude)
+            .ToList();
+        if (targets.Count == 0) return;
+        SendChatAnnouncementTo(message, targets);
     }
 
     /// <summary>개인 채팅 공지 (사망 안내 등 — 특정 클라이언트 1명).</summary>

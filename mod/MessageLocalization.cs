@@ -97,7 +97,17 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
                 {
                     // 신규 접속 — 전 레이어 공지 (ANNOUNCE 에코가 발신 레이어 포함 표시).
                     // 마이그레이션/재접속 도착은 위 IsMigrationArrivalJoin에서 억제됐다.
-                    AnnounceRelay.SendJoin(subjectName);
+                    // playerKey — 접속자 본인 제외용 (이름 매칭 실패 시 빈 값 — 본인 표시 폴백).
+                    string joinPid = "";
+                    foreach (NetPlayer p in NetPlayer.ClientIdToPlayerDict.Values)
+                    {
+                        if (p.playername == subjectName)
+                        {
+                            joinPid = p.GetPersistentId();
+                            break;
+                        }
+                    }
+                    AnnounceRelay.SendJoin(subjectName, joinPid);
                 }
                 else
                 {

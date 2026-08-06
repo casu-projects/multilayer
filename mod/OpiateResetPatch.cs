@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
+using KrokoshaCasualtiesUtils;
 using LiteNetLib;
 
 namespace CasuMod;
@@ -27,5 +28,31 @@ internal static class NetPlayer_Server_RespawnCharacter_OpiateResetPatch
         MyLiteNetLibExtensions.Put(writer, default(CharacterHealthPainkillerStateSyncPacket));
         writer.Put(false);
         Net.Server_SendToClients(DeliveryMethod.ReliableOrdered, in writer, (IEnumerable<knetid>)ServerMain.AllClientIdsExceptHost);
+    }
+}
+
+/// <summary>리스폰/리바이브 시 usedNeuralBooster 초기화 (2026-08-06).
+/// 배경: MP 리스폰(Server_RespawnCharacter)이 바디를 재사용하는데 MP 자체 ResetHealth
+/// (Util_BodyExtensions:128-234)가 usedNeuralBooster를 초기화하지 않는다 — 사망 전 1회 사용
+/// 플래그가 TRUE로 잔존하고, 10127 헬스 싱크(L417/L518)가 이를 클라에도 유지시킨다. 리스폰 후
+/// neuralbooster를 재투약하면 바닐라의 "2회차 치명 부작용"(Item.cs:1133 — sickness+100/뇌-30/
+/// 내출혈+100/양안 제거/전 림브 근육 20%)이 즉시 발동해 사망한다.
+/// 수정: ResetHealth Postfix에서 플래그를 false로 — Server_ReviveCharacter가 ResetHealth(L1121)
+/// 이후 10127을 발신(L1124)하므로 패킷에 false가 실려 클라 로컬 값도 자동 보정된다 (클라 배포
+/// 불필요). 리스폰·CPR/제세동 등 모든 ResetHealth 경로에 일괄 적용 — "완전 리셋" 의미와 일치.</summary>
+[HarmonyPatch]
+internal static class Body_ResetHealth_NeuralBoosterResetPatch
+{
+    private static System.Reflection.MethodBase TargetMethod()
+    {
+        return AccessTools.Method(typeof(Util_BodyExtensions), "ResetHealth",
+            new[] { typeof(Body), typeof(bool) });
+    }
+
+    private static void Postfix(Body body)
+    {
+        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
+        if (body == null) return;
+        body.usedNeuralBooster = false;
     }
 }

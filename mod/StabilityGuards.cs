@@ -8,10 +8,9 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>바닐라/베이스 모드 안정성 가드 이식 (P3 — 구 모드 project/mod 이식):
-/// ① NetPlayer.GetDistanceToNearestLivingPlayer NRE — 퇴장 후 sync 목록에 잔존하는
-///    null-body 항목으로 인한 폭풍을 차단 (퇴장 직후 NRE 폭풍의 원인).
-/// ② CoolSync 스냅샷 큐 백로그 — "TOO MUCH SNAPSHOTS" 폭주/델타 기준선 손실 방지.
+/// <summary>바닐라/베이스 모드 안정성 가드 이식 (P3 — 구 모드 project/mod 이식).
+/// NetPlayer.GetDistanceToNearestLivingPlayer NRE — 퇴장 후 sync 목록에 잔존하는
+/// null-body 항목으로 인한 폭풍을 차단 (퇴장 직후 NRE 폭풍의 원인).</summary>
 /// <summary>AllLivingPlayers에 Unity 지연 Destroy~OnDestroy 사이 잔존하는 null-body 항목이
 /// 있을 때 폭발하는 NRE를 차단한다. 메서드를 대체해 null/destroyed 항목을 건너뛴다.</summary>
 [HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.GetDistanceToNearestLivingPlayer))]
@@ -42,17 +41,12 @@ internal static class NetPlayer_GetDistanceToNearestLivingPlayer_NullGuardPatch
     }
 }
 
-/// <summary>스냅샷 큐 백로그 가드: ① 2000 초과 시 50% 정리 (베이스와 동일 규칙, 강제 실행),
-/// ② real_obj가 사라진 스테일 server_objects 제거 + 강제 삭제 큐잉 — ACK 유실로
-/// 백로그가 쌓여 "TOO MUCH SNAPSHOTS"가 터지고 델타 기준선이 손실되는 경로를 차단.</summary>
+/// <summary>real_obj가 사라진 스테일 server_objects를 정리하고 클라이언트에 삭제를 알림
+/// 스냅샷은 여기서 직접 지우지 않음. ACK 기준선까지 지웠기 때문에 안정성 가드 부분을 지울 수 없기 때문이에요.</summary>
 [HarmonyPatch]
-internal static class CoolSyncSnapshotGuardPatch
+internal static class CoolSyncStaleObjectGuardPatch
 {
-    private const int MaxSnapshotsPerPlayer = 2000;
-
     private static FieldInfo _statesField;
-    private static FieldInfo _snapshotsField;
-    private static FieldInfo _queueField;
     private static FieldInfo _objstatesField;
     private static FieldInfo _serverObjectsField;
     private static FieldInfo _realObjField;
@@ -69,45 +63,9 @@ internal static class CoolSyncSnapshotGuardPatch
         var states = _statesField?.GetValue(__instance) as IDictionary;
         if (states == null) return;
 
-        var snapshotsField = _snapshotsField;
-        var queueField = _queueField;
         var objstatesField = _objstatesField;
-        if (snapshotsField == null || queueField == null) return;
 
-        // ── 1. Snapshot queue overflow guard (trim 50%, matching KrokoshaMP) ──
-        List<object> toTrim = null;
-        foreach (DictionaryEntry kv in states)
-        {
-            var snapshots = snapshotsField.GetValue(kv.Value) as IDictionary;
-            if (snapshots != null && snapshots.Count > MaxSnapshotsPerPlayer)
-            {
-                (toTrim ??= new List<object>()).Add(kv.Key);
-            }
-        }
-
-        if (toTrim != null)
-        {
-            foreach (var id in toTrim)
-            {
-                if (!states.Contains(id)) continue;
-                var state = states[id];
-                var snapshots = snapshotsField.GetValue(state) as IDictionary;
-                var queue = queueField.GetValue(state) as IEnumerable;
-                if (snapshots == null || queue == null) continue;
-
-                var dequeueMethod = queue.GetType().GetMethod("Dequeue");
-                if (dequeueMethod == null) continue;
-
-                int removeCount = Mathf.CeilToInt(MaxSnapshotsPerPlayer * 0.5f);
-                for (int i = 0; i < removeCount; i++)
-                {
-                    var key = dequeueMethod.Invoke(queue, null);
-                    snapshots.Remove(key);
-                }
-            }
-        }
-
-        // ── 2. server_objects: remove stale objects ──
+        // server_objects에서 실체가 사라진 항목만 정리하게 만들고, 스냅샷 큐는 KrokMP의 정상 경로에 맡기게 함.
         var serverObjs = _serverObjectsField?.GetValue(__instance) as IDictionary;
         if (serverObjs == null || _realObjField == null) return;
 
@@ -133,7 +91,7 @@ internal static class CoolSyncSnapshotGuardPatch
 
         foreach (var netId in staleNetIds)
         {
-            // 1. Remove from server_objects + objstates (like Server_Internal_DeallocateObject).
+            // 1. 정상 할당 해제 흐름과 비슷하게 서버 객체 목록과 플레이어별 객체 상태에서 제거하게 만듬.
             serverObjs.Remove(netId);
             foreach (DictionaryEntry kv in states)
             {
@@ -141,7 +99,7 @@ internal static class CoolSyncSnapshotGuardPatch
                 objstates?.Remove(netId);
             }
 
-            // 2. Clean up NetIdToSyncInfoDict + SyncRegistry.
+            // 2. 이미 사라진 객체가 검색되지 않도록 네트워크 ID와 동기화 레지스트리도 정리.
             var netIdDict = AccessTools.Field(typeof(NetObjectRegistry),
                 "NetIdToSyncInfoDict")?.GetValue(null) as IDictionary;
             if (netIdDict?.Contains(netId) == true)
@@ -158,7 +116,7 @@ internal static class CoolSyncSnapshotGuardPatch
                 netIdDict.Remove(netId);
             }
 
-            // 3. Queue force-sync to all players (tells clients this object is gone).
+            // 3. 모든 플레이어의 강제 동기화 큐에 넣어 각각의 클라이언트에도 객체가 사라졌음을 알림.
             foreach (DictionaryEntry kv in states)
             {
                 var state = kv.Value;
@@ -183,8 +141,6 @@ internal static class CoolSyncSnapshotGuardPatch
 
         _statesField = AccessTools.Field(ownerType, "server_perplrstates");
         var plrStateType = AccessTools.Inner(ownerType, "Server_PerPlrState");
-        _snapshotsField = AccessTools.Field(plrStateType, "snapshots");
-        _queueField = AccessTools.Field(plrStateType, "snapshot_queue");
         _objstatesField = AccessTools.Field(plrStateType, "objstates");
         _serverObjectsField = AccessTools.Field(ownerType, "server_objects");
         _realObjField = AccessTools.Field(

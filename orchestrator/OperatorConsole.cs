@@ -36,6 +36,9 @@ public sealed class OperatorConsole
     /// <summary>종료 신호 수신 시 호출 (Program.Main에서 cts.Cancel과 연결 — 대화형 Ctrl+C용).</summary>
     internal Action? ShutdownRequested;
 
+    /// <summary>락다운 시작/종료 알림 (Program이 DiscordBot.SendLockdownAsync로 연결 — true=시작).</summary>
+    internal Action<bool>? LockdownNotify;
+
     public OperatorConsole(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, Action<string, string?> banAction, Action<string, string?> kickAction,
         RunRuleStore runRuleStore, Action? pushRulesAction = null, Action<string>? consoleRelay = null,
@@ -484,6 +487,7 @@ public sealed class OperatorConsole
             });
             PushAuthInfo(gateway, " (MAINTENANCE)");
             Console.WriteLine($"락다운 켬 — 전 세션 추방, bypass {bypass.Length}명, 타이틀 접미 적용.");
+            LockdownNotify?.Invoke(true);
         }
         else
         {
@@ -492,6 +496,7 @@ public sealed class OperatorConsole
             _hub.SendNoAck(gateway, "MAINTENANCE", new { On = false, KickAll = false });
             PushAuthInfo(gateway, "");
             Console.WriteLine("락다운 끔 — 접속 허용 + 타이틀 복원.");
+            LockdownNotify?.Invoke(false);
         }
     }
 

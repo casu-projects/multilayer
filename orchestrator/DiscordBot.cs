@@ -161,6 +161,36 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
+    /// <summary>서버 시작/종료 알림 (메시지 채널) — "서버가 켜졌습니다."/"서버가 꺼졌습니다.".</summary>
+    internal async Task SendServerStatusAsync(bool started)
+    {
+        if (!IsConnected || _channelId == 0) return;
+        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
+        if (channel == null) return;
+
+        var embed = new EmbedBuilder()
+            .WithTitle(started ? "서버가 켜졌습니다." : "서버가 꺼졌습니다.")
+            .WithColor(started ? Color.Green : Color.Red)
+            .WithCurrentTimestamp()
+            .Build();
+        await channel.SendMessageAsync(embed: embed);
+    }
+
+    /// <summary>락다운(점검 모드) 시작/종료 알림 (메시지 채널).</summary>
+    internal async Task SendLockdownAsync(bool started)
+    {
+        if (!IsConnected || _channelId == 0) return;
+        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
+        if (channel == null) return;
+
+        var embed = new EmbedBuilder()
+            .WithTitle(started ? "점검 모드가 시작되었습니다." : "점검 모드가 종료되었습니다.")
+            .WithColor(started ? Color.Orange : Color.Green)
+            .WithCurrentTimestamp()
+            .Build();
+        await channel.SendMessageAsync(embed: embed);
+    }
+
     /// <summary>레이어 이동(마이그레이션 커밋) 알림 — L{from} > L{to}.</summary>
     internal async Task SendMigrationAsync(string playerName, ulong steamId, int fromDepth, int toDepth)
     {

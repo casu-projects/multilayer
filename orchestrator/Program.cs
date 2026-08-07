@@ -111,7 +111,15 @@ internal static class Program
                 console.SubmitLine(text);
             });
         // Ready 시 채널 주제 초기 동기화 (Ready는 StartAsync 이후 비동기 발화 — 안전).
-        discordBot.OnReady = () => RefreshPlayerCountTopic(discordBot, sessions);
+        discordBot.OnReady = () =>
+        {
+            RefreshPlayerCountTopic(discordBot, sessions);
+            // 서버 시작 알림 (메시지 채널).
+            _ = discordBot.SendServerStatusAsync(started: true);
+        };
+        // 락다운 시작/종료 → Discord 알림 (메시지 채널).
+        console.LockdownNotify = on =>
+            _ = on ? discordBot.SendLockdownAsync(started: true) : discordBot.SendLockdownAsync(started: false);
         // 전체 콘솔 로그 → Discord 콘솔 채널 (접두사 포함 — 오케스트레이터 + 릴레이 전부).
         TimestampedConsoleWriter.Instance!.OnConsoleLine = line => discordBot.EnqueueConsoleLog(line);
 
@@ -220,6 +228,9 @@ internal static class Program
 
         // ③ 세션 전부 Offline 영속화 — 재시작 시 클린 상태 (스테일 온라인 복원 방지).
         sessions.PersistAllOffline();
+
+        // 서버 종료 알림 (메시지 채널) — 프로세스 종료 전 전송 완료 대기.
+        try { discordBot.SendServerStatusAsync(started: false).GetAwaiter().GetResult(); } catch { }
 
         Console.WriteLine("종료 완료.");
         try { discordBot.StopAsync().GetAwaiter().GetResult(); } catch { }

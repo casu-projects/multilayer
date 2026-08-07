@@ -22,6 +22,11 @@ public sealed class AgentConfig
     /// <summary>인스턴스 실행 파일/스크립트 경로 (기존 run_bepinex.sh 방식).</summary>
     public string GameExecutablePath { get; set; } = "";
 
+    /// <summary>헤드리스 실행 여부 — true면 -batchmode -nographics (기본).
+    /// false면 그래픽 모드 (GPU 지원 환경에서만 — 미지원 GPU에서는 셰이더/네이티브
+    /// 호출 불안정으로 인스턴스 크래시 유발 실측 2026-08-08).</summary>
+    public bool HeadlessMode { get; set; } = true;
+
     /// <summary>인스턴스 홈 디렉토리 루트 (인스턴스당 {instancesDir}/{key}/home) — 실행 위치(pwd)
     /// 기준: 게임 폴더와 분리해 에이전트가 실행되는 디렉토리 아래 {pwd}/instances에 유지한다.
     /// [JsonIgnore] — 파생 값이라 config에 노출하지 않는다.</summary>

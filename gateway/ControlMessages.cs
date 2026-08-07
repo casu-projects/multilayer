@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CasuMpGateway;
 
@@ -6,9 +7,12 @@ namespace CasuMpGateway;
 /// 대소문자 무시 파싱 — 양쪽 구현체의 키 케이스 불일치로 인한 조용한 실패 방지.</summary>
 public sealed class ControlMessage
 {
+    /// <summary>직렬화 하드닝 (2026-08-08): AllowNamedFloatingPointLiterals — NaN/Infinity
+    /// 포함 페이로드도 예외 없이 왕복 (연결 끊김/루프 방지 — 오케스트레이터와 동일 규약).</summary>
     private static readonly JsonSerializerOptions ParseOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
     };
 
     public long Seq { get; set; }
@@ -17,7 +21,7 @@ public sealed class ControlMessage
 
     public JsonElement? Payload { get; set; }
 
-    public string Serialize() => JsonSerializer.Serialize(this);
+    public string Serialize() => JsonSerializer.Serialize(this, ParseOptions);
 
     public static ControlMessage? Parse(string line)
     {
@@ -37,7 +41,7 @@ public sealed class ControlMessage
         {
             Seq = seq,
             Type = type,
-            Payload = payload == null ? null : JsonSerializer.SerializeToElement(payload),
+            Payload = payload == null ? null : JsonSerializer.SerializeToElement(payload, ParseOptions),
         };
     }
 
@@ -47,7 +51,7 @@ public sealed class ControlMessage
         {
             Seq = seq,
             Type = "ACK",
-            Payload = JsonSerializer.SerializeToElement(new { ok, reason }),
+            Payload = JsonSerializer.SerializeToElement(new { ok, reason }, ParseOptions),
         };
     }
 

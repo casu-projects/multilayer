@@ -48,6 +48,7 @@ public sealed class InstanceProcess
             + $"--ksmulti-setpass \"{payload.ServerPassword}\" "
             + $"--ksmulti-runcommand \"startserver {payload.Port}\" "
             + $"--ksmulti-runcommand \"maxplayers 200\" "
+            + (config.HeadlessMode ? "-batchmode -nographics " : "")
             + $"-logFile \"{unityLogPath}\"";
 
         var psi = new ProcessStartInfo

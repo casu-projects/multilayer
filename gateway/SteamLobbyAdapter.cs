@@ -206,7 +206,8 @@ public sealed class SteamLobbyAdapter
                     new SteamClientSink(this, conn, steamId64),
                     payload,
                     PlayerKey.FromSteamId(steamId64),
-                    username: "", steamId: steamId64, _core);
+                    username: "", steamId: steamId64, _core,
+                    transport: "Steam");
                 _core.AcceptSession(newSession);
                 if (newSession.Disposed)
                 {

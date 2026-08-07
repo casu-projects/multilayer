@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using LiteNetLib;
 using LiteNetLib.Utils;
 
@@ -8,6 +9,9 @@ namespace CasuMpGateway;
 /// 모든 NetManager 접근은 메인 루프 스레드에서만 일어난다.</summary>
 public sealed class ClientSession : INetEventListener
 {
+    private static long _nextSessionId;
+    private const int MaxPendingReliablePackets = 256;
+
     private readonly IClientSink _clientSink;
     private readonly byte[] _intro;
     private readonly GatewayCore _core;
@@ -22,6 +26,8 @@ public sealed class ClientSession : INetEventListener
 
     private readonly List<(byte[] Data, byte Channel, DeliveryMethod Method)> _pendingFromClient = new();
 
+    public long SessionId { get; } = Interlocked.Increment(ref _nextSessionId);
+    public string Transport { get; }
     public PlayerKey Player { get; }
     public string Username { get; }
     public ulong? SteamId { get; }
@@ -45,7 +51,7 @@ public sealed class ClientSession : INetEventListener
     public DateTime? RoutingWaitStartedAt { get; set; }
 
     internal ClientSession(IClientSink clientSink, byte[] intro, PlayerKey player,
-        string username, ulong? steamId, GatewayCore core)
+        string username, ulong? steamId, GatewayCore core, string transport)
     {
         _clientSink = clientSink;
         _intro = intro;
@@ -58,8 +64,10 @@ public sealed class ClientSession : INetEventListener
         Username = !string.IsNullOrEmpty(username) ? username : introUsername;
         Password = pw;
         SteamId = steamId;
+        Transport = transport;
         State = SessionState.Accepted;
         _backendManager = new NetManager(this) { UnconnectedMessagesEnabled = false };
+        Log.Info($"세션 생성: id={SessionId}, transport={Transport}, player={Player.Value}");
     }
 
     /// <summary>라우팅 대기 진입 (모르는 유저 — G12-R2).</summary>
@@ -85,6 +93,7 @@ public sealed class ClientSession : INetEventListener
     /// 스왑 중 클라이언트 패킷은 드랍한다 (G1-6).</summary>
     public void SwapBackend(string backendAddr, string? instanceId)
     {
+        string previousBackend = BackendAddr;
         IsReturningPlayer = true;
         IsMigratingArrival = true;
         InstanceId = instanceId;
@@ -101,6 +110,8 @@ public sealed class ClientSession : INetEventListener
         _connectRetryCount = 0;
         _nextRetryAtUtc = null;
         State = SessionState.Swapping;
+        Log.Info($"세션 백엔드 교체: id={SessionId}, transport={Transport}, "
+            + $"{previousBackend} -> {backendAddr}, instance={instanceId ?? "-"}");
         ConnectToBackend(backendAddr);
         _swapping = false;
     }
@@ -112,8 +123,17 @@ public sealed class ClientSession : INetEventListener
         {
             _backendPeer.Send(data, channel, method);
         }
-        else
+        else if (method is DeliveryMethod.ReliableOrdered
+            or DeliveryMethod.ReliableUnordered
+            or DeliveryMethod.ReliableSequenced)
         {
+            // 연결이 없는 동안 발생한 이동, 조준, 사격 같은 이상한 입력을 나중에 내보내면 더 큰 문제가 생김.
+            // 그러니 신뢰성 메시지만 잠깐 보관하고, 대기열도 무한정 키우지 않게 만든다.
+            if (_pendingFromClient.Count >= MaxPendingReliablePackets)
+            {
+                _pendingFromClient.RemoveAt(0);
+                Log.Info($"신뢰성 대기열 초과: id={SessionId}, 가장 오래된 패킷 1개 폐기.");
+            }
             _pendingFromClient.Add((data, channel, method));
         }
     }
@@ -130,6 +150,7 @@ public sealed class ClientSession : INetEventListener
         if (Disposed) return;
         Disposed = true;
         State = SessionState.Closed;
+        Log.Info($"세션 종료: id={SessionId}, transport={Transport}, player={Player.Value}");
         _backendManager.Stop();
     }
 
@@ -197,7 +218,8 @@ public sealed class ClientSession : INetEventListener
     {
         _hasEverConnectedToBackend = true;
         _connectRetryCount = 0;
-        Log.Info($"{Username} - 백엔드 {BackendAddr} 연결 성공.");
+        Log.Info($"{Username} - 백엔드 {BackendAddr} 연결 성공 "
+            + $"(session={SessionId}, transport={Transport}, instance={InstanceId ?? "-"}).");
         State = SessionState.Active;
         foreach ((byte[] data, byte channel, DeliveryMethod method) in _pendingFromClient)
         {

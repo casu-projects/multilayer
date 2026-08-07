@@ -73,7 +73,8 @@ public sealed class DirectIpAdapter : INetEventListener
         NetPeer peer = request.Accept();
 
         var session = new ClientSession(
-            new LiteNetLibClientSink(peer), raw, player, username, steamId: null, _core);
+            new LiteNetLibClientSink(peer), raw, player, username, steamId: null, _core,
+            transport: "Direct");
         _sessionsByPeer[peer] = session;
         _core.AcceptSession(session);
     }

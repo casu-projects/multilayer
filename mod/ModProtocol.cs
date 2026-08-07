@@ -110,6 +110,14 @@ public sealed class RespawnPayload
     public int FromDepth { get; set; }
 }
 
+/// <summary>마이그레이션 실패 추방 (orchestrator → mod) — Abort 시 플레이어가 연결된
+/// 인스턴스로 전송. 전송 레벨 킥으로 강제 재접속 → 세이브 캡처 복구 경로 보장.</summary>
+public sealed class KickPlayerPayload
+{
+    public string PlayerKey { get; set; } = "";
+    public string Reason { get; set; } = "";
+}
+
 public static class KeyUtil
 {
     public static string Steam(ulong steamId) => $"STEAM_{steamId}";

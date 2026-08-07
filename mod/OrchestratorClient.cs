@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Text;
+using KrokoshaCasualtiesMP;
 using UnityEngine;
 
 namespace CasuMod;
@@ -187,10 +188,37 @@ public sealed class OrchestratorClient : MonoBehaviour
                 RunModule.HandleConsole(msg.PayloadAs<ConsolePayload>()?.Command ?? "");
                 Ack(msg, true);
                 break;
+            case "KICK_PLAYER":
+                HandleKickPlayer(msg);
+                break;
             default:
                 Plugin.Log.LogWarning($"[Orch] 알 수 없는 명령: {msg.Type}");
                 Ack(msg, false, "unknown");
                 break;
+        }
+    }
+
+    /// <summary>마이그레이션 실패 추방 — 오케스트레이터가 Abort 시 KICK_PLAYER를 전송한다.
+    /// 전송 레벨 Net.Server_Kick 사용 (NetPlayer.Server_Kick은 아이템 드랍 부작용 — 동결 중
+    /// 바디에 위험). 재접속 시 세이브 캡처로 데이터가 복구된다.</summary>
+    private static void HandleKickPlayer(ControlMessage msg)
+    {
+        var payload = msg.PayloadAs<KickPlayerPayload>();
+        if (payload == null || string.IsNullOrEmpty(payload.PlayerKey)) return;
+        try
+        {
+            NetPlayer plr = ChatCommands.FindByPersistentId(payload.PlayerKey);
+            if (plr == null)
+            {
+                Plugin.Log.LogWarning($"[Orch] KICK_PLAYER 대상 없음: {payload.PlayerKey}");
+                return;
+            }
+            Net.Server_Kick(plr.clientId, payload.Reason ?? "Migration Failed. Please reconnect.");
+            Plugin.Log.LogWarning($"[Orch] {plr.playername} 마이그레이션 실패 추방: {payload.Reason}");
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[Orch] KICK_PLAYER 처리 실패: {ex.Message}");
         }
     }
 

@@ -356,6 +356,6 @@ public static class ChatCommands
         ChatPrivateReply.SendToPlayer(plr, payload.Url);
     }
 
-    private static NetPlayer FindByPersistentId(string persistentId) =>
+    internal static NetPlayer FindByPersistentId(string persistentId) =>
         NetPlayer.ClientIdToPlayerDict.Values.FirstOrDefault(p => p.GetPersistentId() == persistentId);
 }

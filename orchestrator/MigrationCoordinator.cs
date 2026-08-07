@@ -735,6 +735,17 @@ public sealed class MigrationCoordinator
             _hub.Send(targetInstance.ModConnection, "UNFREEZE",
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch });
         }
+
+        // 실패 추방 — 유저가 수동으로 나갔다 들어오지 않아도 복구되도록 강제 재접속.
+        // 모든 실패(단계 타임아웃 포함)에 적용: FREEZE로 파괴된 인벤토리는 재접속 시
+        // 세이브 캡처로 복구되므로, 킥이 항상 깨끗한 재접속 복구 경로를 보장한다.
+        // post-swap(월드젠 타임아웃 등 — 유저가 목적지 로딩에 갇힘) → 목적지, 그 외 → 출발지.
+        string? kickInstance = postSwap ? tx.TargetInstance : tx.FromInstance;
+        if (kickInstance != null)
+        {
+            _hub.Send(_hub.ModConnection(kickInstance), "KICK_PLAYER",
+                new { playerKey = tx.Player.Value, reason = "Migration Failed. Please reconnect." });
+        }
     }
 
     /// <summary>epoch 검증 — 메시지의 epoch가 현재 트랜잭션과 일치하는지. epoch 부재 시

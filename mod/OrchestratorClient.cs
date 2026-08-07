@@ -193,6 +193,7 @@ public sealed class OrchestratorClient : MonoBehaviour
                 break;
             case "VERBOSE":
                 Plugin.VerboseLogging = msg.PayloadAs<VerbosePayload>()?.On ?? false;
+                Plugin.Log.LogInfo($"[Orch] verbose {(Plugin.VerboseLogging ? "켬" : "끔")} (오케스트레이터).");
                 break;
             default:
                 if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Orch] 알 수 없는 명령: {msg.Type}");

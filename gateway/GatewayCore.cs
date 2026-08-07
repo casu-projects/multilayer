@@ -422,6 +422,7 @@ public sealed class GatewayCore
     {
         var payload = msg.PayloadAs<VerbosePayload>();
         Log.Verbose = payload?.On ?? false;
+        Log.Info($"verbose {(Log.Verbose ? "켬" : "끔")} (오케스트레이터).");
     }
 
     private void ApplyMaintenance(ControlMessage msg)    {

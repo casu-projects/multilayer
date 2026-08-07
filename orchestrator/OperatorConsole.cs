@@ -183,7 +183,7 @@ public sealed class OperatorConsole
                 Console.WriteLine("ban <player> - 특정 유저를 차단합니다");
                 Console.WriteLine("unban <player> - 특정 유저의 차단을 해제합니다");
                 Console.WriteLine("lockdown - 점검 모드 토글 (전원 추방 + LockdownBypass만 접속 허용 + 타이틀 접미)");
-                Console.WriteLine("verbose [on|off] - 디버그 로그 표시 토글 (orchestrator.json 영속 반영)");
+                Console.WriteLine("verbose - 디버그 로그 표시 토글 (orchestrator.json 영속 반영)");
                 Console.WriteLine("instance [reset|stop <key|depth> | spawn <depth>] - 인스턴스 상태/조작");
                 Console.WriteLine("connections - 연결된 게이트웨이/에이전트/인스턴스(모드) 목록");
                 Console.WriteLine("prewarm [set <agent>|reset] - Prewarm 선호 에이전트 지정/해제");
@@ -220,7 +220,7 @@ public sealed class OperatorConsole
                 ToggleLockdown();
                 break;
             case "verbose":
-                ToggleVerbose(arg);
+                ToggleVerbose();
                 break;
             case "ban":
                 if (TryResolvePlayer(arg, out PlayerKey ban)) _banAction(ban.Value, null);
@@ -531,35 +531,19 @@ public sealed class OperatorConsole
         });
     }
 
-    /// <summary>verbose 토글 — `verbose`(현재 상태 표시) / `verbose on|off`(전환).
-    /// orchestrator.json에도 영속 반영 + 게이트웨이/에이전트/모드 전 컴포넌트에 VERBOSE 재푸시
-    /// (재시작 없이 즉시 적용).</summary>
-    private void ToggleVerbose(string arg)
+    /// <summary>verbose 토글 — `verbose`만 입력하면 현재 상태에 따라 켬/끔 전환
+    /// (lockdown과 동일한 토글 형태). orchestrator.json에도 영속 반영 +
+    /// 게이트웨이/에이전트/모드 전 컴포넌트에 VERBOSE 재푸시 (재시작 없이 즉시 적용).</summary>
+    private void ToggleVerbose()
     {
-        bool? want = arg switch
-        {
-            "on" => true,
-            "off" => false,
-            _ => null,
-        };
-        if (want == null)
-        {
-            Console.WriteLine($"verbose: {(VerboseState.Active ? "켬" : "끔")} (on/off로 전환).");
-            return;
-        }
-        if (want.Value == VerboseState.Active)
-        {
-            Console.WriteLine($"verbose 이미 {(VerboseState.Active ? "켬" : "끔")} 상태.");
-            return;
-        }
-
-        VerboseState.Active = want.Value;
-        PersistVerbose(want.Value);
+        bool next = !VerboseState.Active;
+        VerboseState.Active = next;
+        PersistVerbose(next);
         foreach (var conn in _hub.Connections.Where(c => !c.Closed))
         {
-            _hub.SendNoAck(conn, "VERBOSE", new { on = want.Value });
+            _hub.SendNoAck(conn, "VERBOSE", new { on = next });
         }
-        Console.WriteLine($"verbose {(want.Value ? "켬" : "끔")} — orchestrator.json 반영 + 전 컴포넌트 전파.");
+        Console.WriteLine($"verbose {(next ? "켬" : "끔")} — orchestrator.json 반영 + 전 컴포넌트 전파.");
     }
 
     /// <summary>orchestrator.json의 Verbose 필드 영속 반영 (JsonNode로 최소 수정 — 주석/포맷 유지).</summary>

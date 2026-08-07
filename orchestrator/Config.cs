@@ -36,6 +36,10 @@ public sealed class OrchestratorConfig
     /// (AUTH_INFO로 게이트웨이에 전달, 오케스트레이터도 SESSION_CONNECTED에서 2차 검증).</summary>
     public int MaxPlayers { get; set; } = 32;
 
+    /// <summary>디버그 로그 표시 여부 — false면 게이트웨이/오케스트레이터/에이전트/모드의
+    /// 디버그급 로그가 숨겨진다. `verbose on/off` 명령으로 런타임 토글 + json 영속 반영.</summary>
+    public bool Verbose { get; set; } = false;
+
     /// <summary>락다운(lockdown) 중에도 접속 허용할 SteamID64 목록 (orchestrator.json —
     /// 운영자가 편집한 뒤 lockdown 명령 실행 시 재로드된다).</summary>
     public List<ulong> LockdownBypass { get; set; } = new();

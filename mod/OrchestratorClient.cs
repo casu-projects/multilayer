@@ -191,8 +191,11 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "KICK_PLAYER":
                 HandleKickPlayer(msg);
                 break;
+            case "VERBOSE":
+                Plugin.VerboseLogging = msg.PayloadAs<VerbosePayload>()?.On ?? false;
+                break;
             default:
-                Plugin.Log.LogWarning($"[Orch] 알 수 없는 명령: {msg.Type}");
+                if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Orch] 알 수 없는 명령: {msg.Type}");
                 Ack(msg, false, "unknown");
                 break;
         }
@@ -210,7 +213,7 @@ public sealed class OrchestratorClient : MonoBehaviour
             NetPlayer plr = ChatCommands.FindByPersistentId(payload.PlayerKey);
             if (plr == null)
             {
-                Plugin.Log.LogWarning($"[Orch] KICK_PLAYER 대상 없음: {payload.PlayerKey}");
+                if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Orch] KICK_PLAYER 대상 없음: {payload.PlayerKey}");
                 return;
             }
             Net.Server_Kick(plr.clientId, payload.Reason ?? "Migration Failed. Please reconnect.");

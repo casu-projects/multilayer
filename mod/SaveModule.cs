@@ -681,7 +681,7 @@ public static class SaveModule
             }
             else
             {
-                Plugin.Log.LogWarning($"[Save] {plr.playername} 데이터 없음 — 기본 상태로 시작.");
+                if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Save] {plr.playername} 데이터 없음 — 기본 상태로 시작.");
                 GrantStartingSupplies(__instance, plr);
             }
         }

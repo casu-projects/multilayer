@@ -26,6 +26,16 @@ public static class AgentLog
         Enqueue(message, source);
     }
 
+    /// <summary>디버그 로그 표시 여부 — 오케스트레이터 VERBOSE 메시지로 설정된다.
+    /// 게임 stdout 릴레이(인스턴스 로그)는 이와 무관하게 항상 전달된다.</summary>
+    public static bool Verbose;
+
+    /// <summary>디버그급 로그 — verbose=false면 숨김 (게임 릴레이 제외).</summary>
+    public static void Debug(string message, string? sourceSuffix = null)
+    {
+        if (Verbose) Info(message, sourceSuffix);
+    }
+
     private static void Enqueue(string message, string source)
     {
         if (Interlocked.Increment(ref _queued) > MaxQueued)

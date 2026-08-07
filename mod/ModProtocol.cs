@@ -118,6 +118,12 @@ public sealed class KickPlayerPayload
     public string Reason { get; set; } = "";
 }
 
+/// <summary>디버그 로그 표시 상태 (orchestrator → mod — `verbose on/off` 명령).</summary>
+public sealed class VerbosePayload
+{
+    public bool On { get; set; }
+}
+
 public static class KeyUtil
 {
     public static string Steam(ulong steamId) => $"STEAM_{steamId}";

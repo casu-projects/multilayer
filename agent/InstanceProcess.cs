@@ -75,7 +75,7 @@ public sealed class InstanceProcess
         {
             Process process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Process.Start 반환 null");
-            AgentLog.Info($"{payload.InstanceKey} 스폰 (포트 {payload.Port}, HOME {homeDir})");
+            AgentLog.Debug($"{payload.InstanceKey} 스폰 (포트 {payload.Port}, HOME {homeDir})");
 
             // stdout은 진단 로그로만 (D3 — 프로토콜은 소켓)
             _ = DrainAsync(process, payload.InstanceKey);
@@ -123,7 +123,7 @@ public sealed class InstanceProcess
             if (!_process.HasExited)
             {
                 _process.Kill(entireProcessTree: true);
-                AgentLog.Info($"{Key} 강제 종료.");
+                AgentLog.Debug($"{Key} 강제 종료.");
             }
         }
         catch (InvalidOperationException) { }
@@ -159,7 +159,7 @@ public sealed class InstanceProcess
             }
             catch (Exception ex)
             {
-                AgentLog.Info($"{Key} unity.log 보존 실패: {ex.Message}");
+                AgentLog.Debug($"{Key} unity.log 보존 실패: {ex.Message}");
             }
 
             if (parent != null && Directory.Exists(parent))
@@ -169,7 +169,7 @@ public sealed class InstanceProcess
         }
         catch (Exception ex)
         {
-            AgentLog.Info($"{Key} 홈 정리 실패: {ex.Message}");
+            AgentLog.Debug($"{Key} 홈 정리 실패: {ex.Message}");
         }
     }
 
@@ -204,4 +204,10 @@ public sealed class SpawnPayload
     public int Port { get; set; }
     public string? ServerName { get; set; }
     public string? ServerPassword { get; set; }
+}
+
+/// <summary>디버그 로그 표시 상태 (오케스트레이터 VERBOSE 메시지).</summary>
+public sealed class VerbosePayload
+{
+    public bool On { get; set; }
 }

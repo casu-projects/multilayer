@@ -551,7 +551,7 @@ public sealed class MigrationCoordinator
                 new { playerKey = player.Value, epoch = tx.Epoch });
         }
 
-        Console.WriteLine($"{player}: COMMIT — 레이어 {tx.ToDepth} 완료 (epoch {tx.Epoch}).");
+        VerboseState.Line($"{player}: COMMIT — 레이어 {tx.ToDepth} 완료 (epoch {tx.Epoch}).");
         MigrationCommitted?.Invoke(player, tx.FromDepth, tx.ToDepth);
     }
 

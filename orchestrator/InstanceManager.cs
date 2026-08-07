@@ -59,7 +59,7 @@ public sealed class InstanceManager
     public void RegisterAgent(string machineId, int capacity, string address)
     {
         _agents[machineId] = (0, capacity, address);
-        Console.WriteLine($"에이전트 등록: {machineId} (수용 {capacity}, 주소 {address})");
+        VerboseState.Line($"에이전트 등록: {machineId} (수용 {capacity}, 주소 {address})");
     }
 
     public void UnregisterAgent(string machineId)
@@ -70,7 +70,7 @@ public sealed class InstanceManager
             info.Status = InstanceStatus.Crashed;
             Console.WriteLine($"에이전트 {machineId} 이탈 — 인스턴스 {info.Key} 크래시 처리");
         }
-        Console.WriteLine($"에이전트 등록 해제: {machineId}");
+        VerboseState.Line($"에이전트 등록 해제: {machineId}");
     }
 
     public string? BackendAddrFor(InstanceInfo info)
@@ -99,7 +99,7 @@ public sealed class InstanceManager
         {
             if (info != null)
             {
-                Console.WriteLine($"{info.Key} 재스폰 (상태 {info.Status}).");
+                VerboseState.Line($"{info.Key} 재스폰 (상태 {info.Status}).");
             }
             info = Spawn(depth, preferredMachine);
             if (info == null) return null;
@@ -149,7 +149,7 @@ public sealed class InstanceManager
             }
         });
 
-        Console.WriteLine($"depth-{depth} 스폰 요청 → {machineId} (포트 {port})");
+        VerboseState.Line($"depth-{depth} 스폰 요청 → {machineId} (포트 {port})");
         return info;
     }
 
@@ -230,7 +230,7 @@ public sealed class InstanceManager
         if (info == null) return;
         info.Status = InstanceStatus.Stopping;
         _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), "STOP", new { instanceKey = key });
-        Console.WriteLine($"{key} 정지 요청.");
+        VerboseState.Line($"{key} 정지 요청.");
     }
 
     /// <summary>Prewarm 인스턴스 레이어 초기화 — 프로세스 생존 상태에서 모드에 RESET을
@@ -255,7 +255,7 @@ public sealed class InstanceManager
                 info.Status = InstanceStatus.Crashed;
             }
         });
-        Console.WriteLine($"{key} 레이어 초기화 요청 (RESET).");
+        VerboseState.Line($"{key} 레이어 초기화 요청 (RESET).");
     }
 
     /// <summary>프리웜 — PrewarmLayer의 레이어를 수용량 내 최대한 스폰 (에이전트 등록마다
@@ -398,7 +398,7 @@ public sealed class InstanceManager
             info = new InstanceInfo { Key = key, Depth = payload.Depth, Port = payload.Port, Status = InstanceStatus.Booting };
             _instances[key] = info;
             _usedPorts.Add(payload.Port);
-            Console.WriteLine($"{key} 재수용 (기존 인스턴스).");
+            VerboseState.Line($"{key} 재수용 (기존 인스턴스).");
         }
         info.Port = payload.Port;
         info.ModConnection = conn;
@@ -406,7 +406,7 @@ public sealed class InstanceManager
         {
             info.Status = InstanceStatus.Booting;
         }
-        Console.WriteLine($"{key} 모드 연결 (포트 {payload.Port}).");
+        VerboseState.Line($"{key} 모드 연결 (포트 {payload.Port}).");
 
         // 프리웜 (G-1 개정): START_RUN은 첫 플레이어 백엔드 연결이 아니라 모드 연결 시점에 발신.
         // 월드젠이 플레이어 없이 진행되어, 접속/마이그레이션이 목적지 READY 이후에만 이뤄진다
@@ -473,13 +473,13 @@ public sealed class InstanceManager
         }
         info.Status = InstanceStatus.Stopped;
         info.ModConnection = null;
-        Console.WriteLine($"{key} 종료 (code {code}).");
+        VerboseState.Line($"{key} 종료 (code {code}).");
 
         // Prewarm 인스턴스 수동 정지 → 실제 종료 시점부터 유예 후 자동 재시작 예약.
         if (_prewarmRestartRequested.Remove(key, out TimeSpan delay))
         {
             _prewarmRestartAt[key] = DateTime.UtcNow + delay;
-            Console.WriteLine($"{key} Prewarm 자동 재시작 예약 ({delay.TotalSeconds:F0}초 후).");
+            VerboseState.Line($"{key} Prewarm 자동 재시작 예약 ({delay.TotalSeconds:F0}초 후).");
         }
     }
 

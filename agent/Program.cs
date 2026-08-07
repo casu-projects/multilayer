@@ -81,6 +81,14 @@ internal static class Program
     {
         switch (msg.Type)
         {
+            case "VERBOSE":
+            {
+                var payload = msg.PayloadAs<VerbosePayload>();
+                AgentLog.Verbose = payload?.On ?? false;
+                AgentLog.Info($"verbose {(AgentLog.Verbose ? "켬" : "끔")} (오케스트레이터).");
+                ack(ControlMessage.Create(msg.Seq, "ACK", new { ok = true }));
+                return;
+            }
             case "SPAWN":
             {
                 var payload = msg.PayloadAs<SpawnPayload>();
@@ -96,7 +104,7 @@ internal static class Program
                 }
                 if (!IsPortFreeOnOs(payload.Port))
                 {
-                    AgentLog.Info($"{payload.InstanceKey} 포트 {payload.Port} 점유 중 — SPAWN 거부.");
+                    AgentLog.Debug($"{payload.InstanceKey} 포트 {payload.Port} 점유 중 — SPAWN 거부.");
                     ack(ControlMessage.Create(msg.Seq, "ACK", new { ok = false, reason = "port in use" }));
                     return;
                 }

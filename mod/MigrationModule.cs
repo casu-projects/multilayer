@@ -87,7 +87,7 @@ public sealed class MigrationModule : MonoBehaviour
         NetPlayer plr = FindByPersistentId(playerKey);
         if (plr == null || plr.body == null)
         {
-            Plugin.Log.LogWarning($"[Migration] FREEZE: {playerKey} 바디 없음.");
+            if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Migration] FREEZE: {playerKey} 바디 없음.");
             OrchestratorClient.Instance?.SendEvent("FREEZE_DONE", new { playerKey, epoch });
             return;
         }

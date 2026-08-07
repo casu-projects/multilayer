@@ -125,7 +125,7 @@ public sealed class SteamLobby
         _callbackManager.Subscribe<SteamUser.LoggedOnCallback>(OnLoggedOn);
         _callbackManager.Subscribe<SteamClient.DisconnectedCallback>(_ =>
         {
-            Log.Info("CM 연결 끊김 - 재접속 시도.");
+            Log.Debug("CM 연결 끊김 - 재접속 시도.");
             _lobbyCreated = false;
             _lobbyCreationPending = false;
             _steamClient?.Connect();
@@ -185,7 +185,7 @@ public sealed class SteamLobby
         }
 
         string text = $"KICK:{targetSteamId}:{reason}";
-        Log.Info($"KICK 로비 채팅 메시지 전송: 내용=\"{text}\".");
+        Log.Debug($"KICK 로비 채팅 메시지 전송: 내용=\"{text}\".");
         var msg = new ClientMsgProtobuf<CMsgClientMMSSendLobbyChatMsg>(EMsg.ClientMMSSendLobbyChatMsg)
         {
             Body =
@@ -207,7 +207,7 @@ public sealed class SteamLobby
             return;
         }
 
-        Log.Info($"로그인 성공 (SteamID {_steamClient!.SteamID}).");
+        Log.Debug($"로그인 성공 (SteamID {_steamClient!.SteamID}).");
         _loggedOn = true;
         // 로비 생성은 Tick의 게이트에서 (AUTH_INFO 수신 후) 수행한다.
     }
@@ -232,7 +232,7 @@ public sealed class SteamLobby
 
         _lobbyId = callback.LobbySteamID;
         _lobbyCreated = true;
-        Log.Info($"로비 생성 성공: {_lobbyId} (AppID {callback.AppID})");
+        Log.Debug($"로비 생성 성공: {_lobbyId} (AppID {callback.AppID})");
         RefreshDynamicMetadata();
     }
 

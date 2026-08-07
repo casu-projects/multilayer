@@ -12,6 +12,19 @@ public static class LockdownState
     public static ulong[] Bypass = Array.Empty<ulong>();
 }
 
+/// <summary>디버그 로그 표시 상태 — `verbose on/off` 명령이 설정 + orchestrator.json 영속화.
+/// 게이트웨이/에이전트/모드에 VERBOSE 메시지로 전파된다 (오케스트레이터 자체도 게이트).</summary>
+public static class VerboseState
+{
+    public static bool Active;
+
+    /// <summary>디버그급 콘솔 출력 — verbose=false면 숨김.</summary>
+    public static void Line(string message)
+    {
+        if (Active) Console.WriteLine(message);
+    }
+}
+
 /// <summary>운영자 콘솔 — stdin 명령 (G-7 확장).
 /// `exec <command...>` — 매개변수 전체를 게임 콘솔 명령으로 전 인스턴스에 릴레이
 /// (구 시스템 의미 복원 — 설정 변경이 아니라 게임 명령 실행).
@@ -203,6 +216,9 @@ public sealed class OperatorConsole
                 break;
             case "lockdown":
                 ToggleLockdown();
+                break;
+            case "verbose":
+                ToggleVerbose(arg);
                 break;
             case "ban":
                 if (TryResolvePlayer(arg, out PlayerKey ban)) _banAction(ban.Value, null);
@@ -511,6 +527,55 @@ public sealed class OperatorConsole
             bannedKeys = _banList.All,
             maxPlayers = _config.MaxPlayers,
         });
+    }
+
+    /// <summary>verbose 토글 — `verbose`(현재 상태 표시) / `verbose on|off`(전환).
+    /// orchestrator.json에도 영속 반영 + 게이트웨이/에이전트/모드 전 컴포넌트에 VERBOSE 재푸시
+    /// (재시작 없이 즉시 적용).</summary>
+    private void ToggleVerbose(string arg)
+    {
+        bool? want = arg switch
+        {
+            "on" => true,
+            "off" => false,
+            _ => null,
+        };
+        if (want == null)
+        {
+            Console.WriteLine($"verbose: {(VerboseState.Active ? "켬" : "끔")} (on/off로 전환).");
+            return;
+        }
+        if (want.Value == VerboseState.Active)
+        {
+            Console.WriteLine($"verbose 이미 {(VerboseState.Active ? "켬" : "끔")} 상태.");
+            return;
+        }
+
+        VerboseState.Active = want.Value;
+        PersistVerbose(want.Value);
+        foreach (var conn in _hub.Connections.Where(c => !c.Closed))
+        {
+            _hub.SendNoAck(conn, "VERBOSE", new { on = want.Value });
+        }
+        Console.WriteLine($"verbose {(want.Value ? "켬" : "끔")} — orchestrator.json 반영 + 전 컴포넌트 전파.");
+    }
+
+    /// <summary>orchestrator.json의 Verbose 필드 영속 반영 (JsonNode로 최소 수정 — 주석/포맷 유지).</summary>
+    private void PersistVerbose(bool on)
+    {
+        try
+        {
+            if (_configPath.Length == 0 || !File.Exists(_configPath)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(_configPath));
+            var node = System.Text.Json.Nodes.JsonNode.Parse(doc.RootElement.GetRawText());
+            node!["Verbose"] = on;
+            File.WriteAllText(_configPath,
+                node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"verbose json 반영 실패: {ex.Message}");
+        }
     }
 
     private bool TryResolvePlayer(string input, out PlayerKey key)

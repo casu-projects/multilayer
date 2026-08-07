@@ -146,7 +146,7 @@ public sealed class GatewayCore
         {
             if (_sessions.TryGetValue(session.Player, out ClientSession? old))
             {
-                Log.Info($"{session.Username} 중복 세션 — 기존 세션 폐기 (G13).");
+                Log.Debug($"{session.Username} 중복 세션 — 기존 세션 폐기 (G13).");
                 _sessions.Remove(session.Player);
                 old.Kick("Reconnected from a new session.");
             }
@@ -255,6 +255,9 @@ public sealed class GatewayCore
                 case "MAINTENANCE":
                     ApplyMaintenance(msg);
                     break;
+                case "VERBOSE":
+                    ApplyVerbose(msg);
+                    break;
                 case "SHUTDOWN":
                     ApplyShutdown();
                     break;
@@ -337,7 +340,7 @@ public sealed class GatewayCore
                 return;
             }
         }
-        Log.Info($"{session.Username} 세션을 {payload.BackendAddr}(으)로 전환 (클라 연결 유지).");
+        Log.Debug($"{session.Username} 세션을 {payload.BackendAddr}(으)로 전환 (클라 연결 유지).");
         // SWAP 멱등성 (2026-08-02): 이미 같은 목적지로 Active/Connecting/Swapping이면
         // 재연결하지 않는다 — 중복 SWAP(오케스트레이터 재전송/재시도)으로 백엔드를 이중
         // 연결하면 인스턴스의 "Player with this name already exists" 추방이 발생한다.
@@ -414,8 +417,14 @@ public sealed class GatewayCore
         }
     }
 
-    private void ApplyMaintenance(ControlMessage msg)
+    /// <summary>디버그 로그 표시 상태 (오케스트레이터 VERBOSE 메시지).</summary>
+    private void ApplyVerbose(ControlMessage msg)
     {
+        var payload = msg.PayloadAs<VerbosePayload>();
+        Log.Verbose = payload?.On ?? false;
+    }
+
+    private void ApplyMaintenance(ControlMessage msg)    {
         var payload = msg.PayloadAs<MaintenancePayload>() ?? throw new InvalidDataException("payload 없음");
         _maintenance = payload.On;
         _maintenanceMessage = payload.Message ?? "";
@@ -509,6 +518,12 @@ public sealed class GatewayCore
         public string? ServerName { get; set; }
         public string[] BannedKeys { get; set; } = [];
         public int MaxPlayers { get; set; }
+    }
+
+    /// <summary>디버그 로그 표시 상태 (VERBOSE 메시지 — `verbose on/off` 명령).</summary>
+    public sealed class VerbosePayload
+    {
+        public bool On { get; set; }
     }
 
     public sealed class MaintenancePayload

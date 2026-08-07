@@ -7,6 +7,10 @@ public static class Log
 {
     public static GatewayCore? Core { get; set; }
 
+    /// <summary>디버그 로그 표시 여부 — 오케스트레이터 VERBOSE 메시지로 설정된다.
+    /// false면 디버그급 트레이스(P2P 품질/세션 등)가 출력되지 않는다.</summary>
+    public static bool Verbose;
+
     public static void Info(string message)
     {
         if (Core != null)
@@ -15,5 +19,11 @@ public static class Log
             return;
         }
         System.Console.WriteLine(message);
+    }
+
+    /// <summary>디버그급 로그 — verbose=false면 숨김.</summary>
+    public static void Debug(string message)
+    {
+        if (Verbose) Info(message);
     }
 }

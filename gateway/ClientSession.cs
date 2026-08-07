@@ -67,7 +67,7 @@ public sealed class ClientSession : INetEventListener
         Transport = transport;
         State = SessionState.Accepted;
         _backendManager = new NetManager(this) { UnconnectedMessagesEnabled = false };
-        Log.Info($"세션 생성: id={SessionId}, transport={Transport}, player={Player.Value}");
+        Log.Debug($"세션 생성: id={SessionId}, transport={Transport}, player={Player.Value}");
     }
 
     /// <summary>라우팅 대기 진입 (모르는 유저 — G12-R2).</summary>
@@ -110,7 +110,7 @@ public sealed class ClientSession : INetEventListener
         _connectRetryCount = 0;
         _nextRetryAtUtc = null;
         State = SessionState.Swapping;
-        Log.Info($"세션 백엔드 교체: id={SessionId}, transport={Transport}, "
+        Log.Debug($"세션 백엔드 교체: id={SessionId}, transport={Transport}, "
             + $"{previousBackend} -> {backendAddr}, instance={instanceId ?? "-"}");
         ConnectToBackend(backendAddr);
         _swapping = false;
@@ -132,7 +132,7 @@ public sealed class ClientSession : INetEventListener
             if (_pendingFromClient.Count >= MaxPendingReliablePackets)
             {
                 _pendingFromClient.RemoveAt(0);
-                Log.Info($"신뢰성 대기열 초과: id={SessionId}, 가장 오래된 패킷 1개 폐기.");
+                Log.Debug($"신뢰성 대기열 초과: id={SessionId}, 가장 오래된 패킷 1개 폐기.");
             }
             _pendingFromClient.Add((data, channel, method));
         }
@@ -150,7 +150,7 @@ public sealed class ClientSession : INetEventListener
         if (Disposed) return;
         Disposed = true;
         State = SessionState.Closed;
-        Log.Info($"세션 종료: id={SessionId}, transport={Transport}, player={Player.Value}");
+        Log.Debug($"세션 종료: id={SessionId}, transport={Transport}, player={Player.Value}");
         _backendManager.Stop();
     }
 
@@ -218,7 +218,7 @@ public sealed class ClientSession : INetEventListener
     {
         _hasEverConnectedToBackend = true;
         _connectRetryCount = 0;
-        Log.Info($"{Username} - 백엔드 {BackendAddr} 연결 성공 "
+        Log.Debug($"{Username} - 백엔드 {BackendAddr} 연결 성공 "
             + $"(session={SessionId}, transport={Transport}, instance={InstanceId ?? "-"}).");
         State = SessionState.Active;
         foreach ((byte[] data, byte channel, DeliveryMethod method) in _pendingFromClient)

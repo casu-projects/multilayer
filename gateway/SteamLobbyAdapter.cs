@@ -157,7 +157,7 @@ public sealed class SteamLobbyAdapter
                     continue;
                 }
                 ulong sid = _connectionSteamIds.TryGetValue(conn, out ulong s) ? s : 0;
-                Log.Info($"P2P 품질 steam={sid} ping={rt.m_nPing}ms "
+                Log.Debug($"P2P 품질 steam={sid} ping={rt.m_nPing}ms "
                     + $"qual(L/R)={(int)Math.Round(rt.m_flConnectionQualityLocal * 100.0)}%"
                     + $"/{(int)Math.Round(rt.m_flConnectionQualityRemote * 100.0)}% "
                     + $"pps(out/in)={rt.m_flOutPacketsPerSec:F0}/{rt.m_flInPacketsPerSec:F0} "
@@ -166,7 +166,7 @@ public sealed class SteamLobbyAdapter
             }
             catch (Exception ex)
             {
-                Log.Info($"P2P 품질 조회 실패: {ex.Message}");
+                Log.Debug($"P2P 품질 조회 실패: {ex.Message}");
             }
         }
     }
@@ -178,12 +178,12 @@ public sealed class SteamLobbyAdapter
             int len = SteamNetworkingSockets.GetDetailedConnectionStatus(conn, out string detail, 2048);
             if (len > 0 && !string.IsNullOrEmpty(detail))
             {
-                Log.Info($"P2P 상세 steam={steamId}:\n{detail}");
+                Log.Debug($"P2P 상세 steam={steamId}:\n{detail}");
             }
         }
         catch (Exception ex)
         {
-            Log.Info($"P2P 상세 조회 실패: {ex.Message}");
+            Log.Debug($"P2P 상세 조회 실패: {ex.Message}");
         }
     }
 
@@ -208,7 +208,7 @@ public sealed class SteamLobbyAdapter
                 {
                     _activeConnections.Add(callback.m_hConn);
                     _connectionSteamIds[callback.m_hConn] = callback.m_info.m_identityRemote.GetSteamID64();
-                    Log.Info($"P2P 연결 수락: {callback.m_info.m_identityRemote.GetSteamID64()}");
+                    Log.Debug($"P2P 연결 수락: {callback.m_info.m_identityRemote.GetSteamID64()}");
                 }
                 else
                 {
@@ -219,7 +219,7 @@ public sealed class SteamLobbyAdapter
             case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected:
             {
                 ulong sid = callback.m_info.m_identityRemote.GetSteamID64();
-                Log.Info($"P2P 연결 성립: {sid}");
+                Log.Debug($"P2P 연결 성립: {sid}");
                 LogDetailedConnectionStatus(callback.m_hConn, sid);
                 break;
             }

@@ -182,6 +182,8 @@ public sealed class OperatorConsole
                 Console.WriteLine("kick <player> - 특정 유저를 추방합니다");
                 Console.WriteLine("ban <player> - 특정 유저를 차단합니다");
                 Console.WriteLine("unban <player> - 특정 유저의 차단을 해제합니다");
+                Console.WriteLine("lockdown - 점검 모드 토글 (전원 추방 + LockdownBypass만 접속 허용 + 타이틀 접미)");
+                Console.WriteLine("verbose [on|off] - 디버그 로그 표시 토글 (orchestrator.json 영속 반영)");
                 Console.WriteLine("instance [reset|stop <key|depth> | spawn <depth>] - 인스턴스 상태/조작");
                 Console.WriteLine("connections - 연결된 게이트웨이/에이전트/인스턴스(모드) 목록");
                 Console.WriteLine("prewarm [set <agent>|reset] - Prewarm 선호 에이전트 지정/해제");

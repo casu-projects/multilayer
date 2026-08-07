@@ -34,6 +34,9 @@ public static class SaveModule
     private static readonly ConcurrentDictionary<string, long> PositionSeq = new();
     private static readonly ConcurrentDictionary<string, long> ArrivalSeq = new();
 
+    /// <summary>바디 중심 기준 아래로 바닥을 확인하는 거리 (바디 높이 5 절반 2.5f + 0.5f).</summary>
+    private const float FloorCheckDistance = 3f;
+
     /// <summary>플레이어 접속/재접속 시 도착 epoch 기록 + 직전 방문 잔존물 정리.
     /// CreateNetPlayerWithPeer(접속 처리)에서 바디 스폰보다 먼저 호출된다.</summary>
     internal static void OnPlayerArrival(string persistentId)
@@ -605,17 +608,25 @@ public static class SaveModule
             }
         }
 
+        Plugin.Log.LogWarning(
+            $"[Save] 저장 위치 주변(반경 8) 안전 위치 없음 — 기본 스폰으로 폴백 (x={pos.x:F0}, y={pos.y:F0})");
         return null;
     }
 
-    /// <summary>바디 콜라이더 크기 기준으로 Ground 블록과 겹치지 않는지 검사
-    /// (바닐라 PlaceBody_FindSpawnLocation과 동일한 검사 원리).</summary>
+    /// <summary>바디 콜라이더 크기 기준으로 ① Ground 블록과 겹치지 않고 ② 발 아래 3f 내 바닥이
+    /// 있는지 검사 (LateJoinSpawnPatch와 동일 시맨틱 — 공중 스폰/낙사 방지).
+    /// 바디 중심 기준 3f = 바디 높이(5) 절반 2.5f + 0.5f 아래 바닥까지 감지.</summary>
     private static bool IsWalkable(Vector2 pos)
     {
         try
         {
-            return !Physics2D.OverlapBox(pos, Body_Awake_MultiplayerPatch.origColSize, 0f,
-                LayerMask.GetMask("Ground"));
+            if (Physics2D.OverlapBox(pos, Body_Awake_MultiplayerPatch.origColSize, 0f,
+                LayerMask.GetMask("Ground")))
+            {
+                return false;
+            }
+            return Physics2D.Raycast(pos, Vector2.down, FloorCheckDistance,
+                LayerMask.GetMask("Ground")).collider != null;
         }
         catch
         {

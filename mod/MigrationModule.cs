@@ -19,7 +19,15 @@ public sealed class MigrationModule : MonoBehaviour
     /// <summary>동결 플레이어 → 현재 epoch. 구 epoch 메시지는 무시한다 (P2 멱등).</summary>
     private static readonly ConcurrentDictionary<string, int> FrozenPlayers = new();
 
+    // 클라이언트의 "월드 생성 완료" 통지는 실제 로컬 몸과 시작 상태가 준비되기 약 2.7~2.9초 전에 온다.
+    // 괜히 1초 만에 싱크를 풀었다가 NO LOCAL NETBODY를 쏟지 않도록 4초까지 얌전히 기다린다.
+    private const float ReleaseGraceSeconds = 4.0f;
+
     public static bool IsFrozen(string persistentId) => FrozenPlayers.ContainsKey(persistentId);
+
+    /// <summary>목적지 접속은 끝났지만 RESUME이 아직 도착하지 않은 짧은 구간도 동기화를 막는다.</summary>
+    public static bool IsArrivalBlocked(NetPlayer plr) =>
+        plr != null && MigrationArrivalTracker.ClientIds.Contains(plr.clientId);
 
     /// <summary>동결된 플레이어의 현재 epoch (미동결이면 -1).</summary>
     public static int FrozenEpoch(string persistentId) =>
@@ -106,20 +114,23 @@ public sealed class MigrationModule : MonoBehaviour
         //    드랍 방식은 다른 유저가 주워 아이템을 복사할 수 있어 채택하지 않는다.
         try
         {
-            foreach (Item item in plr.body.GetAllItemsThorough())
+            // GetAllItemsThorough에는 슬롯 아이템과 착용 아이템, 컨테이너 내용물이 모두 포함돼요.
+            // 자식 아이템부터 등록을 해제하면 컨테이너가 내용을 월드에 풀어놓는 중간 상태를
+            // 조금이라도 줄일 수 있어서, 목록을 복사한 뒤 역순으로 처리해요.
+            var items = new List<Item>(plr.body.GetAllItemsThorough());
+            items.Reverse();
+
+            // 같은 아이템이 목록에 두 번 잡혀도 삭제 예약은 한 번만 보내도록 막아줘요.
+            var destroyed = new HashSet<Item>();
+            foreach (Item item in items)
             {
-                if (item == null) continue;
+                if (item == null || !destroyed.Add(item)) continue;
                 NetObjectRegistry.SafeDestroyObject(item.gameObject);
             }
-            foreach (Item wearable in plr.body.GetAllWearables())
-            {
-                if (wearable == null) continue;
-                NetObjectRegistry.SafeDestroyObject(wearable.gameObject);
-            }
-            for (int i = 0; i < plr.body.slots.Length; i++)
-            {
-                plr.body.slots[i] = null;
-            }
+
+            // body.slots는 아이템 배열이 아니라 InventorySlot[] 컴포넌트 배열이에요.
+            // 배열을 null로 비우면 이동 실패 후 인벤토리를 복원할 때 슬롯 기능까지 망가질 수 있어요.
+            // 슬롯 안의 아이템은 위 SafeDestroyObject 경로에서 정리되므로 슬롯 자체는 그대로 둬요.
         }
         catch (System.Exception ex)
         {
@@ -375,8 +386,25 @@ public sealed class MigrationModule : MonoBehaviour
         {
             return;
         }
-        FrozenPlayers.TryRemove(playerKey, out _);
-        _loadingTriggered.Remove(playerKey);
+
+        // 로딩 끝났다고 바로 데이터 보내면 캐릭터 몸이 안생겨서 에러가 생기니까 아주 잠깐 기다렸다가 보내고, 기다리는 사이에 또 다른 맵 이동했으면 이전 작업은 취소한다! 라는 부분이에요.
+        // RELEASE를 받았다고 바로 동기화를 재개하면 아직 몸이 없는 클라이언트가 10174를 받아 터진다.
+        // 새 로그에서 실제 준비까지 최대 약 2.9초가 걸렸으니, 4초의 여유를 둔 다음 문을 연다.
+        KrokoshaCasualtiesUtils.Util.DelayCallLambda(ReleaseGraceSeconds, (Action)(() =>
+        {
+            if (!FrozenPlayers.TryGetValue(playerKey, out int delayedCurrent)) return;
+            if (epoch >= 0 && delayedCurrent != epoch) return;
+
+            FrozenPlayers.TryRemove(playerKey, out _);
+            _loadingTriggered.Remove(playerKey);
+
+            // 서버에 접속한 다음에 동기화 정보가 너무 일찍 전송되지 않도록 막아둔 상태도 같이 해제.
+            NetPlayer released = FindByPersistentId(playerKey);
+            if (released != null)
+            {
+                MigrationArrivalTracker.ClientIds.Remove(released.clientId);
+            }
+        }));
     }
 
     /// <summary>클라이언트에 10170(RegenerateWorld) 전송 — 즉시 로딩 화면 진입.

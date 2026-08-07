@@ -48,7 +48,6 @@ public sealed class InstanceProcess
             + $"--ksmulti-setpass \"{payload.ServerPassword}\" "
             + $"--ksmulti-runcommand \"startserver {payload.Port}\" "
             + $"--ksmulti-runcommand \"maxplayers 200\" "
-            + "-batchmode -nographics "
             + $"-logFile \"{unityLogPath}\"";
 
         var psi = new ProcessStartInfo
@@ -113,7 +112,9 @@ public sealed class InstanceProcess
         {
             _stdin.WriteLine("quit");
             _stdin.Flush();
-            _process.WaitForExit(TimeSpan.FromSeconds(_config.StopGraceSeconds).Milliseconds);
+            // TimeSpan.Milliseconds는 '전체 밀리초'가 아니라 1초 미만 나머지라서, 5초도 0ms가 되버려요... 그래서 설정한 초를 실제 대기 시간으로 제대로 바꿔줍니다.
+            int waitMilliseconds = checked(_config.StopGraceSeconds * 1000);
+            _process.WaitForExit(waitMilliseconds);
         }
         catch { }
 

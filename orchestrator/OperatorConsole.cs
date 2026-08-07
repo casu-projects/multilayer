@@ -4,10 +4,19 @@ using System.Text.Json;
 
 namespace CasuMpOrchestrator;
 
+/// <summary>락다운 활성 상태 — 메모리 전용 (영속화 없음 — 오케스트레이터 재시작 시 해제).
+/// 게이트웨이 재연결(GATEWAY_HELLO) 시 상태 재푸시용으로 Program이 참조한다.</summary>
+public static class LockdownState
+{
+    public static bool Active;
+    public static ulong[] Bypass = Array.Empty<ulong>();
+}
+
 /// <summary>운영자 콘솔 — stdin 명령 (G-7 확장).
 /// `exec <command...>` — 매개변수 전체를 게임 콘솔 명령으로 전 인스턴스에 릴레이
 /// (구 시스템 의미 복원 — 설정 변경이 아니라 게임 명령 실행).
-/// `rule <이름> <값>` / `run <설정> <값>` — rule.json/run.json 수정 + 전 인스턴스 실시간 반영.</summary>
+/// `rule <이름> <값>` / `run <설정> <값>` — rule.json/run.json 수정 + 전 인스턴스 실시간 반영.
+/// `lockdown` — 락다운 토글 (현재 상태에 따라 점검 모드 시작/종료).</summary>
 public sealed class OperatorConsole
 {
     private readonly ConcurrentQueue<string> _pendingLines = new();
@@ -20,13 +29,17 @@ public sealed class OperatorConsole
     private readonly Action<string>? _consoleRelay;   // (game command) — 전 인스턴스 게임 콘솔 실행
     private readonly RunRuleStore _runRuleStore;      // rule.json/run.json 정본
     private readonly Action? _pushRulesAction;        // 변경 후 전 인스턴스 RUN_RULES_STATE 푸시
+    private readonly OrchestratorConfig _config;
+    private readonly BanList _banList;
+    private readonly string _configPath;
 
     /// <summary>종료 신호 수신 시 호출 (Program.Main에서 cts.Cancel과 연결 — 대화형 Ctrl+C용).</summary>
     internal Action? ShutdownRequested;
 
     public OperatorConsole(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, Action<string, string?> banAction, Action<string, string?> kickAction,
-        RunRuleStore runRuleStore, Action? pushRulesAction = null, Action<string>? consoleRelay = null)
+        RunRuleStore runRuleStore, Action? pushRulesAction = null, Action<string>? consoleRelay = null,
+        OrchestratorConfig? config = null, BanList? banList = null, string configPath = "")
     {
         _hub = hub;
         _sessions = sessions;
@@ -37,6 +50,9 @@ public sealed class OperatorConsole
         _runRuleStore = runRuleStore;
         _pushRulesAction = pushRulesAction;
         _consoleRelay = consoleRelay;
+        _config = config ?? new OrchestratorConfig();
+        _banList = banList ?? new BanList("");
+        _configPath = configPath;
     }
 
     public void Start()
@@ -181,6 +197,9 @@ public sealed class OperatorConsole
                 break;
             case "kick":
                 if (TryResolvePlayer(arg, out PlayerKey kick)) _kickAction(kick.Value, "Kicked by operator.");
+                break;
+            case "lockdown":
+                ToggleLockdown();
                 break;
             case "ban":
                 if (TryResolvePlayer(arg, out PlayerKey ban)) _banAction(ban.Value, null);
@@ -432,6 +451,61 @@ public sealed class OperatorConsole
         if (string.IsNullOrWhiteSpace(arg)) return null;
         if (int.TryParse(arg, out int depth)) return InstanceManager.DepthKey(depth);
         return arg;
+    }
+
+    /// <summary>락다운 토글 — 켜면 ① 현재 접속 세션 전체 추방(bypass 제외) ② orchestrator.json의
+    /// LockdownBypass(SteamID64)만 접속 허용 ③ 서버 타이틀 뒤에 (MAINTENANCE) 접미.
+    /// 끄면 원상 복구. 상태는 메모리 전용 (영속화 없음).</summary>
+    private void ToggleLockdown()
+    {
+        var gateway = _hub.GatewayConnection;
+        if (gateway == null)
+        {
+            Console.WriteLine("게이트웨이 미연결 — lockdown 불가.");
+            return;
+        }
+
+        if (!LockdownState.Active)
+        {
+            // orchestrator.json 재로드 — 운영자가 LockdownBypass를 편집한 뒤 실행한다.
+            OrchestratorConfig fresh = _configPath.Length > 0
+                ? OrchestratorConfig.Load(_configPath)
+                : _config;
+            ulong[] bypass = (fresh.LockdownBypass ?? new List<ulong>()).ToArray();
+
+            LockdownState.Active = true;
+            LockdownState.Bypass = bypass;
+            _hub.SendNoAck(gateway, "MAINTENANCE", new
+            {
+                On = true,
+                Message = "Server is in maintenance mode",
+                KickAll = true,
+                Bypass = bypass,
+            });
+            PushAuthInfo(gateway, " (MAINTENANCE)");
+            Console.WriteLine($"락다운 켬 — 전 세션 추방, bypass {bypass.Length}명, 타이틀 접미 적용.");
+        }
+        else
+        {
+            LockdownState.Active = false;
+            LockdownState.Bypass = Array.Empty<ulong>();
+            _hub.SendNoAck(gateway, "MAINTENANCE", new { On = false, KickAll = false });
+            PushAuthInfo(gateway, "");
+            Console.WriteLine("락다운 끔 — 접속 허용 + 타이틀 복원.");
+        }
+    }
+
+    /// <summary>AUTH_INFO 재푸시 — 서버명(접미 포함)/비밀번호/밴 목록/인원 게이트웨이에 전파
+    /// (밴 목록은 ApplyAuthInfo가 클리어 후 재구축하므로 현재 전체를 포함해야 한다).</summary>
+    private void PushAuthInfo(ControlHub.ClientConnection gateway, string suffix)
+    {
+        _hub.SendNoAck(gateway, "AUTH_INFO", new
+        {
+            serverName = _config.ServerName + suffix,
+            serverPassword = _config.ServerPassword,
+            bannedKeys = _banList.All,
+            maxPlayers = _config.MaxPlayers,
+        });
     }
 
     private bool TryResolvePlayer(string input, out PlayerKey key)

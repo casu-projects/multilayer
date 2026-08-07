@@ -36,6 +36,9 @@ public sealed class OrchestratorConfig
     /// (AUTH_INFO로 게이트웨이에 전달, 오케스트레이터도 SESSION_CONNECTED에서 2차 검증).</summary>
     public int MaxPlayers { get; set; } = 32;
 
+    /// <summary>락다운(lockdown) 중에도 접속 허용할 SteamID64 목록 (orchestrator.json —
+    /// 운영자가 편집한 뒤 lockdown 명령 실행 시 재로드된다).</summary>
+    public List<ulong> LockdownBypass { get; set; } = new();
     /// <summary>마이그레이션 트랜잭션 단계별 타임아웃(초). 월드젠(~15초) + 클라이언트 재생성 여유.</summary>
     public double MigrationStepTimeoutSeconds { get; set; } = 30;
 

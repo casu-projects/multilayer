@@ -81,18 +81,17 @@ internal static class Program
             },
             command =>
             {
-                // `exec <command...>` — 게임 콘솔 명령을 전 온라인 인스턴스에 릴레이 (구 시스템 의미 복원).
                 // 모드의 CONSOLE 핸들러(RunModule.HandleConsole)가 실행하고, 실행 결과는
                 // 인스턴스 로그(에이전트 DrainAsync)로 자연히 표시된다 — 여기서는 전송만.
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
                     hub.SendNoAck(conn, "CONSOLE", new { command });
                 }
-            });
+            },
+            config: config, banList: banList, configPath: configPath);
         // 대화형 Ctrl+C → graceful 종료 (ReadKey가 SIGINT를 소비하므로 키 감지로 연결)
         console.ShutdownRequested = () => shutdownCts.Cancel();
         console.Start();
-
         // Discord 관리 봇 (D1) — 토큰/채널 미설정 시 비활성.
         // 채널 주제에 접속 인원을 실시간 표시 (Ready 초기 동기화 + 접속/퇴장/마이그레이션 갱신).
         var discordBot = new DiscordBot(config.DiscordBotToken, config.DiscordChannelId,
@@ -261,6 +260,19 @@ internal static class Program
                 hub.SendNoAck(conn, "ACK_REPLY", null);
                 // 새 게이트웨이 — Steam 로비 메타데이터 즉시 푸시 (rules/players).
                 PushLobbyMetadata(hub, runRules, sessions, force: true);
+                // 락다운 활성 상태면 재푸시 (게이트웨이 재시작에도 유지 — 상태는 메모리 전용).
+                if (LockdownState.Active)
+                {
+                    hub.SendNoAck(conn, "MAINTENANCE", new
+                    {
+                        On = true,
+                        Message = "Server is in maintenance mode",
+                        KickAll = false,
+                        Bypass = LockdownState.Bypass,
+                    });
+                    hub.SendNoAck(conn, "AUTH_INFO",
+                        new { serverName = config.ServerName + " (MAINTENANCE)", serverPassword = config.ServerPassword, bannedKeys = banList.All, maxPlayers = config.MaxPlayers });
+                }
                 return;
 
             case "AGENT_HELLO":

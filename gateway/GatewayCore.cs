@@ -20,6 +20,8 @@ public sealed class GatewayCore
 
     private bool _maintenance;
     private string _maintenanceMessage = "";
+    private readonly HashSet<ulong> _maintenanceBypass = new();
+    private LobbyMetadataPayload? _lastLobbyMetadata;
     /// <summary>서버 비밀번호 — 오케스트레이터 AUTH_INFO로 수신 (게임 setpass와 별개 조기 검증용 사본).</summary>
     private string _serverPassword = "";
     /// <summary>최대 동시 접속 인원 — 오케스트레이터 AUTH_INFO로 수신 (orchestrator.json MaxPlayers).</summary>
@@ -158,9 +160,9 @@ public sealed class GatewayCore
             username = session.Username,
         });
 
-        if (_maintenance)
+        if (_maintenance && !IsBypassed(session))
         {
-            session.Kick(_maintenanceMessage.Length > 0 ? _maintenanceMessage : "Maintenance.");
+            session.Kick(_maintenanceMessage.Length > 0 ? _maintenanceMessage : "Server is in maintenance mode.");
             RemoveSession(session, "maintenance");
             return;
         }
@@ -394,7 +396,15 @@ public sealed class GatewayCore
             _serverPassword = payload.ServerPassword ?? "";
             _maxPlayers = payload.MaxPlayers > 0 ? payload.MaxPlayers : 32;
             if (!string.IsNullOrEmpty(payload.ServerName))
+            {
                 _serverName = payload.ServerName!;
+                // 서버명 변경(락다운 (MAINTENANCE) 접미 등) — 로비 이름 즉시 반영
+                // (BuildBaseMetadata가 _core.ServerName을 실시간 읽음 — 저장된 메타데이터 재푸시로 갱신).
+                if (_lastLobbyMetadata != null)
+                {
+                    OnLobbyMetadata?.Invoke(_lastLobbyMetadata);
+                }
+            }
             _banned.Clear();
             foreach (string key in payload.BannedKeys ?? [])
             {
@@ -409,12 +419,39 @@ public sealed class GatewayCore
         var payload = msg.PayloadAs<MaintenancePayload>() ?? throw new InvalidDataException("payload 없음");
         _maintenance = payload.On;
         _maintenanceMessage = payload.Message ?? "";
-        Log.Info($"유지보수 모드 {(payload.On ? "켬" : "끔")}.");
+        _maintenanceBypass.Clear();
+        if (payload.Bypass != null)
+        {
+            foreach (ulong id in payload.Bypass)
+            {
+                if (id != 0) _maintenanceBypass.Add(id);
+            }
+        }
+        Log.Info($"유지보수 모드 {(payload.On ? "켬" : "끔")} (bypass {_maintenanceBypass.Count}명).");
+
+        // 락다운 진입 — 현재 접속 세션 전체 추방 (bypass 제외).
+        if (payload.On && payload.KickAll)
+        {
+            lock (_lock)
+            {
+                foreach (ClientSession session in _sessions.Values.ToList())
+                {
+                    if (session.Disposed || IsBypassed(session)) continue;
+                    session.Kick("Server entered maintenance mode");
+                    RemoveSession(session, "maintenance");
+                }
+            }
+        }
     }
+
+    /// <summary>락다운 bypass 판정 — SteamID64가 허용 목록에 있으면 유지보수 중에도 통과.</summary>
+    private bool IsBypassed(ClientSession session) =>
+        session.SteamId is ulong sid && _maintenanceBypass.Contains(sid);
 
     private void ApplyLobbyMetadata(ControlMessage msg)
     {
         var payload = msg.PayloadAs<LobbyMetadataPayload>() ?? throw new InvalidDataException("payload 없음");
+        _lastLobbyMetadata = payload;
         OnLobbyMetadata?.Invoke(payload);
     }
 
@@ -478,6 +515,10 @@ public sealed class GatewayCore
     {
         public bool On { get; set; }
         public string? Message { get; set; }
+        /// <summary>락다운 bypass — 유지보수 중에도 접속 허용할 SteamID64 목록.</summary>
+        public ulong[]? Bypass { get; set; }
+        /// <summary>켬 전환 시 현재 접속 세션 전체 추방 여부 (락다운 진입 시 true).</summary>
+        public bool KickAll { get; set; }
     }
 
     /// <summary>오케스트레이터가 인스턴스 리포트를 합산해 보내는 로비 동적 메타데이터 (G2).

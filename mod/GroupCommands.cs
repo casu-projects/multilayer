@@ -53,7 +53,7 @@ internal static class GroupCommands
                     return true;
                 }
                 if (argv.Length < 3) { Usage(caller, "invite <플레이어이름>"); return true; }
-                SendRequest(caller, "invite", argv[2]);
+                SendRequest(caller, "invite", "", argv[2]);
                 return true;
             default:
                 Usage(caller);
@@ -61,10 +61,10 @@ internal static class GroupCommands
         }
     }
 
-    private static void SendRequest(NetPlayer caller, string action, string name)
+    private static void SendRequest(NetPlayer caller, string action, string name, string target = "")
     {
         OrchestratorClient.Instance?.SendEvent("GROUP_REQUEST",
-            new { playerKey = caller.GetPersistentId(), action, name });
+            new { playerKey = caller.GetPersistentId(), action, name, target });
     }
 
     private static void Usage(NetPlayer caller, string? sub = null)
@@ -100,26 +100,32 @@ internal static class GroupCommands
 
         if (VoteSystem.Server_ActiveVote != null)
         {
-            ReportInviteResult(payload, accepted: false);
+            ReportInviteResult(payload, accepted: false, reason: "busy");
             return;
         }
         try
         {
             VoteSystem.Server_AnnounceVote("그룹 초대",
-                $"그룹 [{payload.GroupName}]에 초대되었습니다.\n수락하시겠습니까?",
+                $"{payload.GroupName}",
                 30f,
-                (yes, no, ignore) => ReportInviteResult(payload, (yes?.Count ?? 0) > 0),
+                (yes, no, ignore) =>
+                {
+                    // yes/no/ignore — 수락/거절/타임아웃 구분 (오케스트레이터의 거절 통지용).
+                    if ((yes?.Count ?? 0) > 0) ReportInviteResult(payload, accepted: true, reason: "accepted");
+                    else if ((no?.Count ?? 0) > 0) ReportInviteResult(payload, accepted: false, reason: "declined");
+                    else ReportInviteResult(payload, accepted: false, reason: "timeout");
+                },
                 new List<NetPlayer> { target });
         }
         catch (Exception)
         {
-            ReportInviteResult(payload, accepted: false);
+            ReportInviteResult(payload, accepted: false, reason: "busy");
         }
     }
 
-    private static void ReportInviteResult(GroupInvitePayload payload, bool accepted)
+    private static void ReportInviteResult(GroupInvitePayload payload, bool accepted, string reason)
     {
         OrchestratorClient.Instance?.SendEvent("GROUP_INVITE_RESULT",
-            new { playerKey = payload.PlayerKey, groupName = payload.GroupName, accepted });
+            new { playerKey = payload.PlayerKey, groupName = payload.GroupName, accepted, reason });
     }
 }

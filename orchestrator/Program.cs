@@ -7,6 +7,10 @@ internal static class Program
 {
     private static bool _runActive;   // 런 수명주기: DORMANT(false) ↔ ACTIVE(true)
 
+    // 진행 중인 그룹 초대 잠금 (대상 PlayerKey → 정보) — 대상이 초대 UI를 띄우는 동안
+    // 다른 그룹의 초대를 차단한다. 결과 수신 시 해제, 크래시 시 35초 TTL로 자동 소멸.
+    private static readonly Dictionary<string, PendingInvite> _pendingInvites = new(StringComparer.OrdinalIgnoreCase);
+
     private static void Main(string[] args)
     {
         // 전역 출력: ConsoleIO(대화형 — 입력줄 보호 + ↑↓ 히스토리) + 타임스탬프 래퍼.
@@ -944,18 +948,20 @@ internal static class Program
                 // Discord 그룹 스레드 자동 생성 (실패해도 게임 내 그룹은 정상 동작).
                 _ = discordBot.CreateGroupThreadAsync(created!.Name)
                     .ContinueWith(t => groups.SetThreadId(created.Name, t.Result));
-                SendGroupResult(hub, sessions, player.Value, new[] { $"그룹 [{created.Name}]을(를) 생성하고 가입했습니다." });
+                SendGroupResult(hub, sessions, player.Value, new[] { $"{created.Name} 그룹을 생성했습니다." });
                 break;
             }
             case "join":
             {
                 string? err = groups.TryJoin(player, req.Name, out Group? joined);
                 SendGroupResult(hub, sessions, player.Value,
-                    err != null ? new[] { err } : new[] { $"그룹 [{joined!.Name}]에 가입했습니다." });
+                    err != null ? new[] { err } : new[] { $"{joined!.Name} 그룹에 가입했습니다." });
                 break;
             }
             case "leave":
             {
+                // 퇴장 공지는 Leave() 전 멤버 목록 기준 — Leave가 멤버를 제거하므로 먼저 캡처.
+                Group? myGroup = groups.GetByPlayer(player);
                 string? err = groups.Leave(player, out Group? removed);
                 if (err != null)
                 {
@@ -964,8 +970,16 @@ internal static class Program
                 }
                 if (removed != null)
                 {
-                    // 마지막 멤버 퇴장 — 그룹 삭제 + Discord 스레드 정리.
+                    // 마지막 멤버 퇴장 — 그룹 삭제 + Discord 스레드 정리 (남은 멤버 없음).
                     _ = discordBot.DeleteGroupThreadAsync(removed.DiscordThreadId);
+                }
+                else if (myGroup != null)
+                {
+                    // 접속중인 남은 멤버에게 퇴장 공지 (SendGroupResult가 오프라인/연결 없음은 스킵).
+                    foreach (string memberKey in myGroup.MemberKeys.Where(k => k != player.Value))
+                    {
+                        SendGroupResult(hub, sessions, memberKey, new[] { $"{displayName}님이 그룹에서 퇴장했습니다." });
+                    }
                 }
                 // 그룹 모드 잔류 방지 — 조용히 Global로 리셋.
                 SendChatModeReset(hub, sessions, player.Value);
@@ -987,10 +1001,10 @@ internal static class Program
                 {
                     if (memberKey == player.Value) continue;
                     SendChatModeReset(hub, sessions, memberKey);
-                    SendGroupResult(hub, sessions, memberKey, new[] { $"그룹 [{removed.Name}]이(가) 삭제되었습니다." });
+                    SendGroupResult(hub, sessions, memberKey, new[] { $"{removed.Name} 그룹이 삭제되었습니다." });
                 }
                 SendChatModeReset(hub, sessions, player.Value);
-                SendGroupResult(hub, sessions, player.Value, new[] { $"그룹 [{removed.Name}]을(를) 삭제했습니다." });
+                SendGroupResult(hub, sessions, player.Value, new[] { $"{removed.Name}] 그룹을 삭제했습니다." });
                 break;
             }
             case "list":
@@ -1004,7 +1018,7 @@ internal static class Program
                 string? err = groups.ToggleJoinable(player, out Group? g);
                 SendGroupResult(hub, sessions, player.Value,
                     err != null ? new[] { err }
-                    : new[] { $"그룹 [{g!.Name}] — 직접 가입 {(g.Joinable ? "허용" : "불가 (초대 전용)")}." });
+                    : new[] { $"그룹 직접 가입 가능 여부:  {(g.Joinable ? "<color=#90EE90>가능</color>" : "<color=#FF8080>불가능</color>")}." });
                 break;
             }
             case "invite":
@@ -1042,6 +1056,20 @@ internal static class Program
                     SendGroupResult(hub, sessions, player.Value, new[] { $"{target.Username}님의 인스턴스가 연결되지 않았습니다." });
                     return;
                 }
+                // 중복 초대 차단 — 대상이 진행 중인 초대(어느 그룹이든)가 있으면 거부.
+                // 결과 수신 시 HandleGroupInviteResult에서 해제, 크래시 시 35s TTL로 자동 소멸.
+                if (_pendingInvites.TryGetValue(target.Key.Value, out PendingInvite? pending)
+                    && (DateTime.UtcNow - pending.Since).TotalSeconds < 35)
+                {
+                    SendGroupResult(hub, sessions, player.Value,
+                        new[] { $"{target.Username}님은 이미 진행 중인 초대가 있습니다. 수락/거절 후 다시 시도하세요." });
+                    return;
+                }
+                _pendingInvites[target.Key.Value] = new PendingInvite
+                {
+                    Since = DateTime.UtcNow,
+                    SenderKey = player.Value,
+                };
                 hub.SendNoAck(targetConn, "GROUP_INVITE", new
                 {
                     playerKey = target.Key.Value,
@@ -1061,8 +1089,18 @@ internal static class Program
     private static void HandleGroupInviteResult(ControlHub hub, PlayerSessionStore sessions, GroupStore groups,
         DiscordBot discordBot, PlayerKey player, GroupInviteResultPayload result)
     {
+        // 잠금 해제 — 수락/거절/타임아웃/버지 모두 결과가 도착하면 초대가 끝났다.
+        _pendingInvites.TryGetValue(player.Value, out PendingInvite? pending);
+        _pendingInvites.Remove(player.Value);
+
         if (!result.Accepted)
         {
+            // 거절일 때만 발신자에게 통지 (타임아웃/버지 → 무통보).
+            if (result.Reason == "declined" && pending != null)
+            {
+                string targetName = sessions.Get(player)?.Username ?? player.Value;
+                SendGroupResult(hub, sessions, pending.SenderKey, new[] { $"{targetName}님이 초대를 거절했습니다." });
+            }
             return;
         }
         string? err = groups.AcceptInvite(player, result.GroupName, out Group? joined);
@@ -1073,7 +1111,7 @@ internal static class Program
         }
         PlayerState? state = sessions.Get(player);
         string displayName = state?.Username ?? player.Value;
-        SendGroupResult(hub, sessions, player.Value, new[] { $"그룹 [{joined!.Name}]에 가입했습니다." });
+        SendGroupResult(hub, sessions, player.Value, new[] { $"{joined!.Name} 그룹에 가입했습니다." });
 
         // 그룹 멤버들에게 가입 알림.
         foreach (string memberKey in joined.MemberKeys.Where(k => k != player.Value))
@@ -1203,6 +1241,13 @@ internal static class Program
         public string GroupName { get; set; } = "";
         public bool Accepted { get; set; }
         public string Reason { get; set; } = "";
+    }
+
+    // 진행 중인 그룹 초대 잠금 정보 — Since(발급 시각, 35s TTL), SenderKey(거절 통지용 발신자).
+    private sealed class PendingInvite
+    {
+        public DateTime Since { get; init; }
+        public required string SenderKey { get; init; }
     }
 
     // 채팅 모드 전환 요청 (mod → orchestrator — Group 진입 검증).

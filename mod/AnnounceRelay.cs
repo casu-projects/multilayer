@@ -33,7 +33,6 @@ public static class AnnounceRelay
             kind = KindLeave,
             playerKey = plr.GetPersistentId(),
             name = plr.playername,
-            clientId = (int)plr.clientId,
         });
     }
 
@@ -54,33 +53,28 @@ public static class AnnounceRelay
         switch (payload.Kind)
         {
             case KindDeath:
-                SendAnnouncementExcluding(payload.PlayerKey, payload.Name, payload.ClientId,
+                SendAnnouncementExcluding(payload.PlayerKey,
                     $"<color=#FF8080>{payload.Name}님이 사망했습니다.</color>");
                 break;
             case KindLeave:
-                SendAnnouncementExcluding(payload.PlayerKey, payload.Name, payload.ClientId,
+                SendAnnouncementExcluding(payload.PlayerKey,
                     $"<color=#FFFF00>{payload.Name}님이 퇴장했습니다.</color>");
                 break;
             case KindJoin:
-                SendAnnouncementExcluding(payload.PlayerKey, payload.Name, payload.ClientId,
+                SendAnnouncementExcluding(payload.PlayerKey,
                     $"<color=#FFFF00>{payload.Name}님이 접속했습니다.</color>");
                 break;
             case KindMigration:
-                SendAnnouncementExcluding(payload.PlayerKey, payload.Name, payload.ClientId,
+                SendAnnouncementExcluding(payload.PlayerKey,
                     $"<color=#87CEEB>{payload.Name}님이 L{payload.FromDepth}에서 L{payload.ToDepth}로 이동합니다</color>");
                 break;
         }
     }
 
     // playerKey 대상(본인)을 제외한 타겟으로 전송.
-    // 제외 판정 폴백: clientId(퇴장 — dict에서 이미 제거됨) > playerKey(일반) > 이름(접속 —
-    // 등록 전에 발화되어 playerKey가 비어 있음).
-    private static void SendAnnouncementExcluding(string? playerKey, string? name, int clientId, string message)
+    private static void SendAnnouncementExcluding(string? playerKey, string message)
     {
-        knetid? exclude = null;
-        if (clientId > 0) exclude = (knetid)(ushort)clientId;
-        if (exclude == null) exclude = FindClientId(playerKey);
-        if (exclude == null && !string.IsNullOrEmpty(name)) exclude = FindClientIdByName(name);
+        knetid? exclude = FindClientId(playerKey);
         List<knetid> targets = NetPlayer.ClientIdToPlayerDict.Keys
             .Where(id => id != exclude)
             .ToList();
@@ -135,8 +129,6 @@ public sealed class AnnouncePayload
     public string Kind { get; set; } = "";
     public string PlayerKey { get; set; } = "";
     public string Name { get; set; } = "";
-    // 대상 clientId — 퇴장 공지처럼 대상이 dict에서 제거된 뒤 도착하는 경우를 위한 폴백.
-    public int ClientId { get; set; } = -1;
     public int FromDepth { get; set; }
     public int ToDepth { get; set; }
 }

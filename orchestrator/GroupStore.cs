@@ -245,23 +245,24 @@ public sealed class GroupStore
         }
     }
 
-    // 전체 그룹 목록 (이름순).
+    // 전체 그룹 목록 (이름순) — 초대 전용(joinable=false)만 회색 태그.
     public string[] ListAll()
     {
         lock (_lock)
         {
             if (_groups.Count == 0) return new[] { "생성된 그룹이 없습니다." };
-            var lines = new List<string> { $"전체 그룹 {_groups.Count}개 :" };
+            var lines = new List<string> { $"총 {_groups.Count}개:" };
             foreach (Group g in _groups.Values.OrderBy(g => g.Name, StringComparer.Ordinal))
             {
-                string state = g.Joinable ? "가입 가능" : "초대 전용";
-                lines.Add($"{g.Name} — 멤버 {g.MemberKeys.Count}명, {state}");
+                string tag = g.Joinable ? "" : $"<color=#AAAAAA>, 초대 전용</color>";
+                lines.Add($"{g.Name} ({g.MemberKeys.Count}명{tag})");
             }
             return lines.ToArray();
         }
     }
 
-    // 내 그룹 멤버 목록 + 온라인/오프라인 (세션 상태 기준).
+    // 내 그룹 멤버 목록 — 유저명 (L레이어, 온라인/오프라인).
+    // 온라인: 초록 + 현재 레이어 / 오프라인: 연회색 + 퇴장 시점 레이어 (Depth는 이탈 시 유지).
     public string[] PlayerList(PlayerSessionStore sessions, PlayerKey player)
     {
         lock (_lock)
@@ -272,14 +273,17 @@ public sealed class GroupStore
             }
             if (g.MemberKeys.Count == 0) return new[] { $"그룹 [{g.Name}]에 멤버가 없습니다." };
 
-            var lines = new List<string> { $"그룹 [{g.Name}] 멤버 {g.MemberKeys.Count}명 :" };
+            var lines = new List<string> { $"총 {g.MemberKeys.Count}명:" };
             foreach (string memberKey in g.MemberKeys.OrderBy(k => k, StringComparer.Ordinal))
             {
                 var key = PlayerKey.FromString(memberKey);
-                var state = sessions.Get(key);
+                PlayerState? state = sessions.Get(key);
                 bool online = state != null && state.Session != PlayerSessionState.Offline;
                 string label = state?.Username ?? key.Value;
-                lines.Add($"  {label} — {(online ? "온라인" : "오프라인")}");
+                int depth = state?.Depth ?? 1;
+                string status = online ? "<color=#90EE90>온라인</color>"
+                                       : "<color=#AAAAAA>오프라인</color>";
+                lines.Add($"{label} (L{depth}, {status})");
             }
             return lines.ToArray();
         }

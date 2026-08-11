@@ -100,10 +100,11 @@ internal static class GunDamageServerReplayPatch
                 ServerLimbFallback(barrel, dir, gun, pb, hitLimbs, hitBuildings);
             }
 
-            // 5) 캡 — 바닐라와 동일 (림브: min(shotsPerFire, 4), 빌딩: shotsPerFire).
+            // 5) 캡 — 바닐라와 동일. gst.shotsPerFire 사용 (gun.shotsPerFire는 트래커가
+            //    0으로 비워두므로 사용 불가 — 림브: min(shotsPerFire, 4), 빌딩: shotsPerFire).
             hitLimbs = Util.LimitMaxRepeats(hitLimbs,
-                Math.Min(gun.shotsPerFire, GunScript_Fire_MultiplayerPatch.MAX_HITS_PER_LIMB_AT_ONCE));
-            hitBuildings = Util.LimitMaxRepeats(hitBuildings, gun.shotsPerFire);
+                Math.Min(gst.shotsPerFire, GunScript_Fire_MultiplayerPatch.MAX_HITS_PER_LIMB_AT_ONCE));
+            hitBuildings = Util.LimitMaxRepeats(hitBuildings, gst.shotsPerFire);
 
             // 6) 10104 릴레이 — 다른 클라이언트들이 슈터의 사격 표시를 볼 수 있게
             NetDataWriter writer = Net.CreateWriter(10104);
@@ -129,7 +130,7 @@ internal static class GunDamageServerReplayPatch
 
             // 8) 블럭 데미지 — 모든 사격에 적용. 개별 펠릿의 스프레드 방향은 패킷에 없어
             //    중앙 레이 기준 펠릿 수 합산 (근사).
-            ApplyBlockDamage(barrel, dir, gun);
+            ApplyBlockDamage(barrel, dir, gun, gst.shotsPerFire);
 
             // 9) 서버 권위 데미지 — 림브/빌딩 (중복 항목 → 펠릿별 적용 + 3펠릿 절단 판정)
             TurretScript_Shoot_MultiplayerPatch.ApplyShootDamages(gst, hitLimbs, hitBuildings);
@@ -183,10 +184,10 @@ internal static class GunDamageServerReplayPatch
     }
 
     // 블럭 데미지 — 첫 Ground 히트에 펠릿 수 합산.
-    private static void ApplyBlockDamage(Vector2 barrel, Vector2 dir, GunScript gun)
+    private static void ApplyBlockDamage(Vector2 barrel, Vector2 dir, GunScript gun, int shotsPerFire)
     {
         float num = UnityEngine.Random.Range(0.85f, 1.15f);
-        float total = gun.structureDamage * num * Math.Max(1, gun.shotsPerFire);
+        float total = gun.structureDamage * num * Math.Max(1, shotsPerFire);
         RaycastHit2D[] hits = Physics2D.RaycastAll(barrel, dir, 200f,
             LayerMask.GetMask("Ground", "Body", "Limb", "Descriptor"));
         foreach (RaycastHit2D hit in hits)

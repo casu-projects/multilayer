@@ -695,18 +695,13 @@ public sealed class MigrationCoordinator
         PlayerState? state = _sessions.Get(tx.Player);
         if (state != null)
         {
+            // 실패해도 세션을 목적지로 배치 — 재접속 시 목적지 레이어로 라우팅되고,
+            // 저장 위치의 레이어(출발지) ≠ 목적지 레이어라 위치 복원이 자동 스킵되어
+            // 목적지의 기본 시작 위치에 스폰된다 (레이어 끝 스폰 → LAYER_END 재발화 → 이중 전진 차단).
+            // 목적지 인스턴스도 유휴 오판정으로 강제 정지되지 않게 세션에 고정한다.
             state.Session = PlayerSessionState.OnLayer;
-            if (postSwap)
-            {
-                // 스왑 이후 중단 — 플레이어는 이미 목적지 인스턴스에 있음: 세션을 목적지로 유지
-                // (안 하면 목적지가 유휴로 오판정돼 강제 정지 → 플레이어 튕김)
-                state.InstanceId = tx.TargetInstance;
-                state.Depth = tx.ToDepth;
-            }
-            else
-            {
-                state.InstanceId = tx.FromInstance;
-            }
+            state.InstanceId = tx.TargetInstance;
+            state.Depth = tx.ToDepth;
             _sessions.Persist(state);
         }
         _dataStore.CommitPending(tx.Player);

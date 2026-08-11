@@ -69,6 +69,94 @@ public sealed class OperatorConsole
         _config = config ?? new OrchestratorConfig();
         _banList = banList ?? new BanList("");
         _configPath = configPath;
+
+        RegisterCommands();
+    }
+
+    // ── 명령어 등록 (등록 패턴 — 2026-08-08) ──
+    // 핸들러는 argv(전체 분할)를 받아 출력 라인 배열 반환 (null = 출력 없음).
+    // deps는 생성자 필드를 클로저로 캡처한다. help는 자동 생성 (레지스트리 내장).
+    private void RegisterCommands()
+    {
+        ConsoleCommands.Register("help", "명령어 목록을 표시합니다", _ => ConsoleCommands.GetHelpLines());
+
+        ConsoleCommands.Register("list", "유저 목록을 표시합니다", argv =>
+        {
+            var online = _sessions.All
+                .Where(p => p.Session != PlayerSessionState.Offline)
+                .OrderBy(p => p.Depth)
+                .ThenBy(p => p.Username ?? p.Key.Value)
+                .ToList();
+            if (online.Count == 0) return new[] { "현재 총 0명 접속 중 :" };
+            var lines = new List<string> { $"현재 총 {online.Count}명 접속 중 :" };
+            lines.AddRange(online.Select(p => $"{p.Username ?? p.Key.Value} (L{p.Depth}, {p.Key.Value})"));
+            return lines.ToArray();
+        });
+
+        ConsoleCommands.Register("kick", "특정 유저를 추방합니다", argv =>
+        {
+            string arg = string.Join(" ", argv.Skip(1));
+            if (TryResolvePlayer(arg, out PlayerKey kick)) _kickAction(kick.Value, "Kicked by operator.");
+            return null;
+        });
+
+        ConsoleCommands.Register("lockdown", "점검 모드 토글 (전원 추방 + LockdownBypass만 접속 허용 + 타이틀 접미)", argv =>
+        {
+            ToggleLockdown();
+            return null;
+        });
+
+        ConsoleCommands.Register("verbose", "디버그 로그 표시 토글 (orchestrator.json 영속 반영)", argv =>
+        {
+            ToggleVerbose();
+            return null;
+        });
+
+        ConsoleCommands.Register("ban", "특정 유저를 차단합니다", argv =>
+        {
+            string arg = string.Join(" ", argv.Skip(1));
+            if (TryResolvePlayer(arg, out PlayerKey ban)) _banAction(ban.Value, null);
+            return null;
+        });
+
+        ConsoleCommands.Register("unban", "특정 유저의 차단을 해제합니다", argv =>
+        {
+            string arg = string.Join(" ", argv.Skip(1));
+            if (TryResolvePlayer(arg, out PlayerKey unban)) _banAction(unban.Value, "unban");
+            return null;
+        });
+
+        ConsoleCommands.Register("instance", "인스턴스 상태/조작", HandleInstance);
+
+        ConsoleCommands.Register("clear", "터미널 화면을 지웁니다", argv =>
+        {
+            ConsoleIO.ClearScreen();
+            return null;
+        });
+
+        ConsoleCommands.Register("connections", "연결된 게이트웨이/에이전트/인스턴스(모드) 목록", argv => HandleConnections());
+
+        ConsoleCommands.Register("prewarm", "Prewarm 선호 에이전트 지정/해제", HandlePrewarm);
+
+        ConsoleCommands.Register("migrate", "특정 유저를 수동 마이그레이션합니다 (기본: 다음 레이어)", HandleMigrate);
+
+        ConsoleCommands.Register("exec", "모든 인스턴스에 게임 콘솔 명령을 실행합니다", argv =>
+        {
+            HandleRun(string.Join(" ", argv.Skip(1)));
+            return null;
+        });
+
+        ConsoleCommands.Register("rule", "rule.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)", argv =>
+        {
+            HandleSet("rule", string.Join(" ", argv.Skip(1)), isRun: false);
+            return null;
+        });
+
+        ConsoleCommands.Register("run", "run.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)", argv =>
+        {
+            HandleSet("run", string.Join(" ", argv.Skip(1)), isRun: true);
+            return null;
+        });
     }
 
     public void Start()
@@ -168,235 +256,163 @@ public sealed class OperatorConsole
 
     private void Execute(string line)
     {
-        string[] top = line.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
-        if (top.Length == 0) return;
-        string command = top[0].ToLowerInvariant();
-        string arg = top.Length > 1 ? top[1] : "";
-
-        switch (command)
+        string[] argv = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (argv.Length == 0) return;
+        if (!ConsoleCommands.TryExecute(argv, out string[]? lines))
         {
-            case "help":
-                Console.WriteLine("명령어 목록:");
-                Console.WriteLine("help - 명령어 목록을 표시합니다");
-                Console.WriteLine("list - 유저 목록을 표시합니다");
-                Console.WriteLine("kick <player> - 특정 유저를 추방합니다");
-                Console.WriteLine("ban <player> - 특정 유저를 차단합니다");
-                Console.WriteLine("unban <player> - 특정 유저의 차단을 해제합니다");
-                Console.WriteLine("lockdown - 점검 모드 토글 (전원 추방 + LockdownBypass만 접속 허용 + 타이틀 접미)");
-                Console.WriteLine("verbose - 디버그 로그 표시 토글 (orchestrator.json 영속 반영)");
-                Console.WriteLine("instance [reset|stop <key|depth> | spawn <depth>] - 인스턴스 상태/조작");
-                Console.WriteLine("connections - 연결된 게이트웨이/에이전트/인스턴스(모드) 목록");
-                Console.WriteLine("prewarm [set <agent>|reset] - Prewarm 선호 에이전트 지정/해제");
-                Console.WriteLine("clear - 터미널 화면을 지웁니다");
-                Console.WriteLine("migrate <player> [targetLayer] - 특정 유저를 수동 마이그레이션합니다 (기본: 다음 레이어)");
-                Console.WriteLine("exec <command...> - 모든 인스턴스에 게임 콘솔 명령을 실행합니다");
-                Console.WriteLine("rule <이름> <값> - rule.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)");
-                Console.WriteLine("run <설정> <값> - run.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)");
-                break;
-            case "list":
-                // 온라인 플레이어만 — 레이어 오름차순, 같은 레이어는 닉네임 오름차순.
-                // 한 줄 = 한 명: "{닉네임} (L{레이어}, {STEAM_키})".
-                var online = _sessions.All
-                    .Where(p => p.Session != PlayerSessionState.Offline)
-                    .OrderBy(p => p.Depth)
-                    .ThenBy(p => p.Username ?? p.Key.Value)
-                    .ToList();
-                if (online.Count == 0)
-                {
-                    Console.WriteLine("현재 총 0명 접속 중 :");
-                    break;
-                }
-                Console.WriteLine($"현재 총 {online.Count}명 접속 중 :");
-                foreach (PlayerState p in online)
-                {
-                    string name = p.Username ?? p.Key.Value;
-                    Console.WriteLine($"{name} (L{p.Depth}, {p.Key.Value})");
-                }
-                break;
-            case "kick":
-                if (TryResolvePlayer(arg, out PlayerKey kick)) _kickAction(kick.Value, "Kicked by operator.");
-                break;
-            case "lockdown":
-                ToggleLockdown();
-                break;
-            case "verbose":
-                ToggleVerbose();
-                break;
-            case "ban":
-                if (TryResolvePlayer(arg, out PlayerKey ban)) _banAction(ban.Value, null);
-                break;
-            case "unban":
-                if (TryResolvePlayer(arg, out PlayerKey unban)) _banAction(unban.Value, "unban");
-                break;
-            case "instance":
-                string[] sub = arg.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
-                string subCmd = sub.Length > 0 ? sub[0].ToLowerInvariant() : "";
-                string subArg = sub.Length > 1 ? sub[1] : "";
-                if (subCmd.Length == 0)
-                {
-                    // 실행 중(Ready/Idle) 인스턴스만 표시 — 정지/크래시 기록은 제외. depth 순 정렬.
-                    var running = _instances.All
-                        .Where(s => s.Status is InstanceStatus.Ready or InstanceStatus.Idle)
-                        .OrderBy(s => s.Depth)
-                        .ToList();
-                    Console.WriteLine($"총 인스턴스 {running.Count}개 :");
-                    foreach (InstanceInfo i in running)
-                    {
-                        string addr = _instances.BackendAddrFor(i) ?? "-";
-                        Console.WriteLine($"{i.Key} — depth {i.Depth}, 포트 {i.Port}, 머신 {i.MachineId ?? "-"}, {i.Status}, 주소 {addr}");
-                    }
-                    break;
-                }
-                switch (subCmd)
-                {
-                    case "reset":
-                    case "stop":
-                        string? key = ResolveInstanceKey(subArg);
-                        if (key == null || _instances.Find(key) == null)
-                        {
-                            Console.WriteLine($"인스턴스를 찾을 수 없습니다: {subArg}");
-                            break;
-                        }
-                        if (subCmd == "reset")
-                        {
-                            _instances.ResetInstance(key);
-                        }
-                        else
-                        {
-                            InstanceInfo? stopInfo = _instances.Find(key);
-                            _instances.StopInstance(key);
-                            if (stopInfo != null && _instances.IsPrewarmDepth(stopInfo.Depth))
-                            {
-                                // Prewarm 인스턴스 — 종료 후 자동 재시작 (유지 보수 용도).
-                                _instances.SchedulePrewarmRestart(key, TimeSpan.FromSeconds(5));
-                                Console.WriteLine($"{key}은(는) Prewarm 인스턴스 — 종료 후 5초 뒤 자동 재시작 예약.");
-                            }
-                        }
-                        break;
-                    case "spawn":
-                        if (!int.TryParse(subArg, out int spawnDepth) || spawnDepth < 1)
-                        {
-                            Console.WriteLine("사용법: instance spawn <depth>  (예: instance spawn 4)");
-                            break;
-                        }
-                        if (_instances.IsPrewarmDepth(spawnDepth))
-                        {
-                            Console.WriteLine($"depth-{spawnDepth}은(는) Prewarm 레이어 — instance spawn으로 생성할 수 없습니다 (자동 프리웜/재시작이 관리).");
-                            break;
-                        }
-                        string? spawnedAddr = _instances.EnsureInstance(spawnDepth);
-                        Console.WriteLine(spawnedAddr != null
-                            ? $"depth-{spawnDepth} 준비 (주소 {spawnedAddr})."
-                            : $"depth-{spawnDepth} 스폰 실패 (에이전트 없음/수용량 초과).");
-                        break;
-                    default:
-                        Console.WriteLine($"알 수 없는 instance 액션: {subCmd} — reset|stop <key|depth>, spawn <depth>");
-                        break;
-                }
-                break;
-            case "clear":
-                ConsoleIO.ClearScreen();
-                break;
-            case "connections":
-                var conns = _hub.Connections.Where(c => !c.Closed).ToList();
-                if (conns.Count == 0)
-                {
-                    Console.WriteLine("연결된 프로세스가 없습니다.");
-                    break;
-                }
-                foreach (ControlHub.ClientConnection c in conns)
-                {
-                    string remote = c.Tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep
-                        ? $"{ep.Address}:{ep.Port}" : "-";
-                    string label = c.Kind switch
-                    {
-                        ClientKind.Gateway => $"Gateway  v{c.GatewayVersion}",
-                        ClientKind.Agent => $"Agent    {c.MachineId} (수용 {c.AgentCapacity}, {c.AgentAddress})",
-                        ClientKind.Mod => $"Instance {c.InstanceKey} (포트 {c.InstancePort}, depth {c.InstanceDepth})",
-                        _ => $"Unknown  conn #{c.Id}",
-                    };
-                    Console.WriteLine($"  [{label}] {remote}");
-                }
-                break;
-            case "prewarm":
-                string[] pargs = arg.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
-                string psub = pargs.Length > 0 ? pargs[0].ToLowerInvariant() : "";
-                switch (psub)
-                {
-                    case "set":
-                        if (pargs.Length < 2)
-                        {
-                            Console.WriteLine("사용법: prewarm set <agent>  (예: prewarm set m1)");
-                            break;
-                        }
-                        _instances.SetPreferredPrewarmAgent(pargs[1]);
-                        Console.WriteLine($"Prewarm 선호 에이전트: {pargs[1]} (미연결/포화 시 알고리즘 폴백).");
-                        break;
-                    case "reset":
-                        _instances.SetPreferredPrewarmAgent(null);
-                        Console.WriteLine("Prewarm 선호 에이전트 해제 — 알고리즘 배치 사용.");
-                        break;
-                    default:
-                        string? pref = _instances.PreferredPrewarmAgent;
-                        Console.WriteLine(pref != null
-                            ? $"Prewarm 선호 에이전트: {pref}"
-                            : "Prewarm 선호 에이전트: 없음 (알고리즘 배치).");
-                        break;
-                }
-                break;
-            case "migrate":
-                string[] mparts = arg.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
-                if (mparts.Length == 0)
-                {
-                    Console.WriteLine("사용법: migrate <player> [targetLayer]  (예: migrate player2222 3)");
-                    break;
-                }
-                if (!TryResolvePlayer(mparts[0], out PlayerKey migrateKey))
-                {
-                    break; // TryResolvePlayer가 실패 사유를 출력
-                }
-                PlayerState? mstate = _sessions.Get(migrateKey);
-                if (mstate == null)
-                {
-                    Console.WriteLine("플레이어를 찾을 수 없습니다.");
-                    break;
-                }
-                int migrateTarget;
-                if (mparts.Length > 1)
-                {
-                    if (!int.TryParse(mparts[1], out migrateTarget))
-                    {
-                        Console.WriteLine($"유효하지 않은 목적지 레이어: {mparts[1]}");
-                        break;
-                    }
-                }
-                else
-                {
-                    migrateTarget = _migrations.NextLayerDepth(mstate.Depth);
-                }
-                string? migrateResult = _migrations.ManualMigrate(migrateKey, migrateTarget);
-                if (migrateResult != null)
-                {
-                    Console.WriteLine(migrateResult);
-                }
-                else
-                {
-                    Console.WriteLine($"{mstate.Username ?? migrateKey.Value}: L{mstate.Depth} → L{migrateTarget} 마이그레이션 시작.");
-                }
-                break;
-            case "exec":
-                HandleRun(arg);
-                break;
-            case "rule":
-                HandleSet("rule", arg, isRun: false);
-                break;
-            case "run":
-                HandleSet("run", arg, isRun: true);
-                break;
-            default:
-                Console.WriteLine($"알 수 없는 명령: {command}");
-                break;
+            Console.WriteLine($"알 수 없는 명령: {argv[0]}");
+            return;
         }
+        if (lines != null)
+        {
+            foreach (string l in lines) Console.WriteLine(l);
+        }
+    }
+
+    // ── 등록 핸들러 (복수 출력 라인 반환형) ──
+
+    /// <summary>instance [reset|stop <key|depth> | spawn <depth>] — 인스턴스 상태/조작.</summary>
+    private string[]? HandleInstance(string[] argv)
+    {
+        string subCmd = argv.Length > 1 ? argv[1].ToLowerInvariant() : "";
+        string subArg = string.Join(" ", argv.Skip(2));
+
+        if (subCmd.Length == 0)
+        {
+            // 실행 중(Ready/Idle) 인스턴스만 표시 — 정지/크래시 기록은 제외. depth 순 정렬.
+            var running = _instances.All
+                .Where(s => s.Status is InstanceStatus.Ready or InstanceStatus.Idle)
+                .OrderBy(s => s.Depth)
+                .ToList();
+            var lines = new List<string> { $"총 인스턴스 {running.Count}개 :" };
+            foreach (InstanceInfo i in running)
+            {
+                string addr = _instances.BackendAddrFor(i) ?? "-";
+                lines.Add($"{i.Key} — depth {i.Depth}, 포트 {i.Port}, 머신 {i.MachineId ?? "-"}, {i.Status}, 주소 {addr}");
+            }
+            return lines.ToArray();
+        }
+
+        switch (subCmd)
+        {
+            case "reset":
+            case "stop":
+                string? key = ResolveInstanceKey(subArg);
+                if (key == null || _instances.Find(key) == null)
+                {
+                    return new[] { $"인스턴스를 찾을 수 없습니다: {subArg}" };
+                }
+                if (subCmd == "reset")
+                {
+                    _instances.ResetInstance(key);
+                    return null;
+                }
+                InstanceInfo? stopInfo = _instances.Find(key);
+                _instances.StopInstance(key);
+                if (stopInfo != null && _instances.IsPrewarmDepth(stopInfo.Depth))
+                {
+                    // Prewarm 인스턴스 — 종료 후 자동 재시작 (유지 보수 용도).
+                    _instances.SchedulePrewarmRestart(key, TimeSpan.FromSeconds(5));
+                    return new[] { $"{key}은(는) Prewarm 인스턴스 — 종료 후 5초 뒤 자동 재시작 예약." };
+                }
+                return null;
+            case "spawn":
+                if (!int.TryParse(subArg, out int spawnDepth) || spawnDepth < 1)
+                {
+                    return new[] { "사용법: instance spawn <depth>  (예: instance spawn 4)" };
+                }
+                if (_instances.IsPrewarmDepth(spawnDepth))
+                {
+                    return new[] { $"depth-{spawnDepth}은(는) Prewarm 레이어 — instance spawn으로 생성할 수 없습니다 (자동 프리웜/재시작이 관리)." };
+                }
+                string? spawnedAddr = _instances.EnsureInstance(spawnDepth);
+                return new[] { spawnedAddr != null
+                    ? $"depth-{spawnDepth} 준비 (주소 {spawnedAddr})."
+                    : $"depth-{spawnDepth} 스폰 실패 (에이전트 없음/수용량 초과)." };
+            default:
+                return new[] { $"알 수 없는 instance 액션: {subCmd} — reset|stop <key|depth>, spawn <depth>" };
+        }
+    }
+
+    /// <summary>connections — 연결된 게이트웨이/에이전트/인스턴스(모드) 목록.</summary>
+    private string[]? HandleConnections()
+    {
+        var conns = _hub.Connections.Where(c => !c.Closed).ToList();
+        if (conns.Count == 0) return new[] { "연결된 프로세스가 없습니다." };
+
+        var lines = new List<string>();
+        foreach (ControlHub.ClientConnection c in conns)
+        {
+            string remote = c.Tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep
+                ? $"{ep.Address}:{ep.Port}" : "-";
+            string label = c.Kind switch
+            {
+                ClientKind.Gateway => $"Gateway  v{c.GatewayVersion}",
+                ClientKind.Agent => $"Agent    {c.MachineId} (수용 {c.AgentCapacity}, {c.AgentAddress})",
+                ClientKind.Mod => $"Instance {c.InstanceKey} (포트 {c.InstancePort}, depth {c.InstanceDepth})",
+                _ => $"Unknown  conn #{c.Id}",
+            };
+            lines.Add($"  [{label}] {remote}");
+        }
+        return lines.ToArray();
+    }
+
+    /// <summary>prewarm [set <agent>|reset] — Prewarm 선호 에이전트 지정/해제.</summary>
+    private string[]? HandlePrewarm(string[] argv)
+    {
+        string psub = argv.Length > 1 ? argv[1].ToLowerInvariant() : "";
+        switch (psub)
+        {
+            case "set":
+                if (argv.Length < 3)
+                {
+                    return new[] { "사용법: prewarm set <agent>  (예: prewarm set m1)" };
+                }
+                _instances.SetPreferredPrewarmAgent(argv[2]);
+                return new[] { $"Prewarm 선호 에이전트: {argv[2]} (미연결/포화 시 알고리즘 폴백)." };
+            case "reset":
+                _instances.SetPreferredPrewarmAgent(null);
+                return new[] { "Prewarm 선호 에이전트 해제 — 알고리즘 배치 사용." };
+            default:
+                string? pref = _instances.PreferredPrewarmAgent;
+                return new[] { pref != null
+                    ? $"Prewarm 선호 에이전트: {pref}"
+                    : "Prewarm 선호 에이전트: 없음 (알고리즘 배치)." };
+        }
+    }
+
+    /// <summary>migrate <player> [targetLayer] — 수동 마이그레이션.</summary>
+    private string[]? HandleMigrate(string[] argv)
+    {
+        if (argv.Length < 2)
+        {
+            return new[] { "사용법: migrate <player> [targetLayer]  (예: migrate player2222 3)" };
+        }
+        if (!TryResolvePlayer(argv[1], out PlayerKey migrateKey))
+        {
+            return null; // TryResolvePlayer가 실패 사유를 출력
+        }
+        PlayerState? mstate = _sessions.Get(migrateKey);
+        if (mstate == null)
+        {
+            return new[] { "플레이어를 찾을 수 없습니다." };
+        }
+        int migrateTarget;
+        if (argv.Length > 2)
+        {
+            if (!int.TryParse(argv[2], out migrateTarget))
+            {
+                return new[] { $"유효하지 않은 목적지 레이어: {argv[2]}" };
+            }
+        }
+        else
+        {
+            migrateTarget = _migrations.NextLayerDepth(mstate.Depth);
+        }
+        string? migrateResult = _migrations.ManualMigrate(migrateKey, migrateTarget);
+        return migrateResult != null
+            ? new[] { migrateResult }
+            : new[] { $"{mstate.Username ?? migrateKey.Value}: L{mstate.Depth} → L{migrateTarget} 마이그레이션 시작." };
     }
 
     /// <summary>구 시스템 의미 복원 — 매개변수 전체를 게임 콘솔 명령으로 보고

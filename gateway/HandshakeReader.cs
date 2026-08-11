@@ -2,8 +2,8 @@ using LiteNetLib.Utils;
 
 namespace CasuMpGateway;
 
-/// <summary>클라이언트 인트로 핸드셰이크 파싱 (G1-5: username 기반 신원).
-/// 형식: [GAME_FILES_HASH(8B)][version len(2B)+bytes][username len(2B)+bytes]...</summary>
+// 클라이언트 인트로 핸드셰이크 파싱 (G1-5: username 기반 신원).
+// 형식: [GAME_FILES_HASH(8B)][version len(2B)+bytes][username len(2B)+bytes]...
 public static class HandshakeReader
 {
     private const int MaxNameLength = 256;
@@ -29,12 +29,12 @@ public static class HandshakeReader
         }
     }
 
-    /// <summary>클라이언트 인트로 파싱 + 압축 섹션에서 비밀번호 추출 (게임
-    /// ReadClientConnectIntroductionPacket 형식 미러링).
-    /// 형식: [GAME_FILES_HASH(8B)][version len(2B)+bytes][username len(2B)+bytes]
-    ///       [압축 섹션: len(4B)+gzip → password(oneByteChars)+color+secret+modlist]
-    /// 압축 섹션 파싱 실패 시 password="" — 게임 서버가 최종 검증하므로 게이트웨이는
-    /// 추출 가능할 때만 조기 거부에 사용한다 (게임 버전 변경에 안전하게 폴백).</summary>
+    // 클라이언트 인트로 파싱 + 압축 섹션에서 비밀번호 추출 (게임
+    // ReadClientConnectIntroductionPacket 형식 미러링).
+    // 형식: [GAME_FILES_HASH(8B)][version len(2B)+bytes][username len(2B)+bytes]
+    //       [압축 섹션: len(4B)+gzip → password(oneByteChars)+color+secret+modlist]
+    // 압축 섹션 파싱 실패 시 password="" — 게임 서버가 최종 검증하므로 게이트웨이는
+    // 추출 가능할 때만 조기 거부에 사용한다 (게임 버전 변경에 안전하게 폴백).
     public static bool TryParseCredentials(byte[] raw, out string username, out string password)
     {
         username = "";

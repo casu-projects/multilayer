@@ -3,9 +3,9 @@ using System.Text;
 
 namespace CasuMpGateway;
 
-/// <summary>제어 채널 (오케스트레이터 ↔ 게이트웨이) — TCP JSON 라인 (G12-R1).
-/// 게이트웨이가 오케스트레이터에 연결하는 방향. 재연결 시 테이블 재동기화 + 활성 세션 재보고 (R4).
-/// 명령은 read 루프에서 수신 → 코어 큐, ACK/보고는 write 루프가 전송.</summary>
+// 제어 채널 (오케스트레이터 ↔ 게이트웨이) — TCP JSON 라인 (G12-R1).
+// 게이트웨이가 오케스트레이터에 연결하는 방향. 재연결 시 테이블 재동기화 + 활성 세션 재보고 (R4).
+// 명령은 read 루프에서 수신 → 코어 큐, ACK/보고는 write 루프가 전송.
 public sealed class ControlChannel
 {
     private readonly GatewayConfig _config;

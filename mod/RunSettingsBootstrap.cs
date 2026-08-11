@@ -6,8 +6,8 @@ using KrokoshaCasualtiesMP;
 
 namespace CasuMod;
 
-/// <summary>오케스트레이터 전달 런 설정(run.json) 적용 — PreRunScript.StartRun 직전 (Prefix).
-/// 월드젠 파라미터로 소비되므로 StartRun 본문 이전에 반영해야 한다.</summary>
+// 오케스트레이터 전달 런 설정(run.json)을 StartRun 직전 적용 — 월드젠 파라미터로 소비되므로
+// 본문 이전에 반영해야 한다.
 [HarmonyPatch(typeof(PreRunScript), nameof(PreRunScript.StartRun))]
 internal static class PreRunScript_StartRun_RunSettingsBootstrapPatch
 {
@@ -34,7 +34,7 @@ internal static class PreRunScript_StartRun_RunSettingsBootstrapPatch
             }
         }
 
-        // PreRunScript 인스턴스는 씬 로드로 파괴되므로 WorldGeneration(정적)에 동기화.
+        // PreRunScript 인스턴스는 씬 로드로 파괴되므로 WorldGeneration(정적)에도 동기화한다.
         WorldGeneration.runSettings = __instance.runSettings;
 
         Plugin.Log.LogInfo($"[Run] runSettings 적용 {applied}건.");

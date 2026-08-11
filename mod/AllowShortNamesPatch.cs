@@ -3,9 +3,7 @@ using KrokoshaCasualtiesMP;
 
 namespace CasuMod;
 
-/// <summary>짧은 닉네임 허용 (구 프로젝트 AllowShortNamesPatch 이식) — 베이스 모드가
-/// 2자 이하 이름을 "Name too short."로 거부하므로, 데디 서버에서 허용으로 덮어쓴다.
-/// deny_reason은 out 매개변수 — Harmony Postfix는 ref로 매칭된다.</summary>
+// 2자 이하 닉네임 허용 — 베이스 모드의 "Name too short." 거부를 무효화한다.
 [HarmonyPatch(typeof(KrokoshaScavMultiplayer),
     nameof(KrokoshaScavMultiplayer.ValidateClientConnectIntroductionPacket))]
 internal static class AllowShortNamesPatch
@@ -15,6 +13,7 @@ internal static class AllowShortNamesPatch
         if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         if (!__result && deny_reason == "Name too short.")
         {
+            // deny_reason은 out 매개변수 — Harmony Postfix는 ref로 매칭된다.
             deny_reason = "Success";
             __result = true;
         }

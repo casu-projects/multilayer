@@ -7,42 +7,42 @@ using System.Net.Sockets;
 
 namespace CasuMpAgent;
 
-/// <summary>agent.json 스키마 (D3/G-3/G-4).</summary>
+// agent.json 스키마 (D3/G-3/G-4).
 public sealed class AgentConfig
 {
-    /// <summary>오케스트레이터 제어 허브 주소 (host:port).</summary>
+    // 오케스트레이터 제어 허브 주소 (host:port).
     public string OrchestratorAddr { get; set; } = "127.0.0.1:17900";
 
-    /// <summary>머신 ID — 오케스트레이터의 배치/식별 키.</summary>
+    // 머신 ID — 오케스트레이터의 배치/식별 키.
     public string MachineId { get; set; } = "m1";
 
-    /// <summary>동시 실행 가능한 인스턴스 수 (배치 결정용).</summary>
+    // 동시 실행 가능한 인스턴스 수 (배치 결정용).
     public int Capacity { get; set; } = 4;
 
-    /// <summary>인스턴스 실행 파일/스크립트 경로 (기존 run_bepinex.sh 방식).</summary>
+    // 인스턴스 실행 파일/스크립트 경로 (기존 run_bepinex.sh 방식).
     public string GameExecutablePath { get; set; } = "";
 
-    /// <summary>헤드리스 실행 여부 — true면 -batchmode -nographics (기본).
-    /// false면 그래픽 모드 (GPU 지원 환경에서만 — 미지원 GPU에서는 셰이더/네이티브
-    /// 호출 불안정으로 인스턴스 크래시 유발 실측 2026-08-08).</summary>
+    // 헤드리스 실행 여부 — true면 -batchmode -nographics (기본).
+    // false면 그래픽 모드 (GPU 지원 환경에서만 — 미지원 GPU에서는 셰이더/네이티브
+    // 호출 불안정으로 인스턴스 크래시를 유발한다).
     public bool HeadlessMode { get; set; } = true;
 
-    /// <summary>인스턴스 홈 디렉토리 루트 (인스턴스당 {instancesDir}/{key}/home) — 실행 위치(pwd)
-    /// 기준: 게임 폴더와 분리해 에이전트가 실행되는 디렉토리 아래 {pwd}/instances에 유지한다.
-    /// [JsonIgnore] — 파생 값이라 config에 노출하지 않는다.</summary>
+    // 인스턴스 홈 디렉토리 루트 (인스턴스당 {instancesDir}/{key}/home) — 실행 위치(pwd)
+    // 기준: 게임 폴더와 분리해 에이전트가 실행되는 디렉토리 아래 {pwd}/instances에 유지한다.
+    // [JsonIgnore] — 파생 값이라 config에 노출하지 않는다.
     [JsonIgnore]
     public string InstancesDir => Path.Combine(Directory.GetCurrentDirectory(), "instances");
 
-    /// <summary>STOP 시 graceful 대기(초) 후 강제 종료 (G-4).</summary>
+    // STOP 시 graceful 대기(초) 후 강제 종료 (G-4).
     public int StopGraceSeconds { get; set; } = 5;
 
-    /// <summary>오케스트레이터 재연결 간격(초).</summary>
+    // 오케스트레이터 재연결 간격(초).
     public double ReconnectIntervalSeconds { get; set; } = 2;
 
-    /// <summary>게이트웨이가 인스턴스에 직결할 때 사용할 호스트 IP 자동 탐지 —
-    /// 첫 비루프백 IPv4 (루프백/가상 인터페이스/APIPA 제외). 게이트웨이와 같은 머신이면
-    /// 루프백과 동일하게 동작하고, 게이트웨이가 원격이어도 이 머신의 LAN IP로 도달한다.
-    /// 탐지 실패(인터페이스 없음) 시 127.0.0.1 폴백.</summary>
+    // 게이트웨이가 인스턴스에 직결할 때 사용할 호스트 IP 자동 탐지 —
+    // 첫 비루프백 IPv4 (루프백/가상 인터페이스/APIPA 제외). 게이트웨이와 같은 머신이면
+    // 루프백과 동일하게 동작하고, 게이트웨이가 원격이어도 이 머신의 LAN IP로 도달한다.
+    // 탐지 실패(인터페이스 없음) 시 127.0.0.1 폴백.
     public static string DetectLocalIPv4()
     {
         foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
@@ -76,7 +76,7 @@ public sealed class AgentConfig
     }
 }
 
-/// <summary>제어 프로토콜 메시지 — 오케스트레이터와 동일 규약 (JSON 라인 + seq-ack).</summary>
+// 제어 프로토콜 메시지 — 오케스트레이터와 동일 규약 (JSON 라인 + seq-ack).
 public sealed class ControlMessage
 {
     private static readonly JsonSerializerOptions ParseOptions = new()

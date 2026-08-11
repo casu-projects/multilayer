@@ -177,7 +177,7 @@ internal static class Program
             {
                 FinalizeVote(hub, sessions, runRules, banList, discordBot, voteResult);
             }
-            // 유휴 정리 계수 (2026-08-02): 마이그레이션 중인 플레이어(Migrating, InstanceId=출발지)와
+            // 유휴 정리 계수: 마이그레이션 중인 플레이어(Migrating, InstanceId=출발지)와
             // 도착 대기 중인 목적지(tx.TargetInstance)도 인원으로 계산 — FREEZE/READY 대기 중
             // 출발지·목적지가 유휴 오판정으로 강제 정지되는 것을 방지한다.
             instances.TickPrewarm();
@@ -192,11 +192,8 @@ internal static class Program
         ConsoleIO.DisableInteractive();
         Console.WriteLine("종료 중 — 데이터 저장 후 스택 종료...");
 
-        // ── 종료 캐스케이드 (오케스트레이터 주도) ──
-        // ① SHUTDOWN 브로드캐스트:
-        //    모드들 — 접속 플레이어 데이터 제출(동결 제외) + outbound flush + quit
-        //    게이트웨이 — 전 세션 Kick + 종료
-        //    에이전트 — 전 인스턴스 graceful 정리 + 종료
+        // SHUTDOWN 브로드캐스트 — 모드들(데이터 제출+quit) / 게이트웨이(전 세션 Kick+종료) /
+        // 에이전트(인스턴스 graceful 정리+종료).
         foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
         {
             hub.SendNoAck(conn, "SHUTDOWN", null);
@@ -207,8 +204,8 @@ internal static class Program
             hub.SendNoAck(conn, "SHUTDOWN", null);
         }
 
-        // ② 유예 창: 메인 루프를 계속 돌리며 플레이어 데이터 제출(PLAYER_DATA_SUBMIT)을
-        //    수신·디스크 저장한다 (모드가 제출 → 오케스트레이터가 영속화 → 재시작 시 복원).
+        // 유예 창: 메인 루프를 계속 돌리며 플레이어 데이터 제출(PLAYER_DATA_SUBMIT)을
+        // 수신·디스크 저장한다 (모드가 제출 → 오케스트레이터가 영속화 → 재시작 시 복원).
         DateTime shutdownDeadline = DateTime.UtcNow.AddSeconds(5);
         while (DateTime.UtcNow < shutdownDeadline)
         {
@@ -227,7 +224,7 @@ internal static class Program
             Thread.Sleep(20);
         }
 
-        // ③ 세션 전부 Offline 영속화 — 재시작 시 클린 상태 (스테일 온라인 복원 방지).
+        // 세션 전부 Offline 영속화 — 재시작 시 클린 상태 (스테일 온라인 복원 방지).
         sessions.PersistAllOffline();
 
         // 서버 종료 알림 (메시지 채널) — 프로세스 종료 전 전송 완료 대기.
@@ -631,10 +628,9 @@ internal static class Program
         return true;
     }
 
-    // ── 크로스 인스턴스 투표 (VOTE_START 처리) ──
 
-    /// <summary>VOTE_START 수신 — ban 대상 해석(온라인 세션) + 활성 투표 검증 후 전 인스턴스
-    /// VOTE_RUN 브로드캐스트 + Discord 공지. 거부 시 VOTE_REJECTED로 발신자 개인 회신.</summary>
+    // VOTE_START 수신 — ban 대상 해석(온라인 세션) + 활성 투표 검증 후 전 인스턴스
+    // VOTE_RUN 브로드캐스트 + Discord 공지. 거부 시 VOTE_REJECTED로 발신자 개인 회신.
     private static void HandleVoteStart(ControlHub hub, PlayerSessionStore sessions, VoteCoordinator votes,
         DiscordBot discordBot, ControlHub.ClientConnection conn, VoteStartMarker marker)
     {
@@ -694,7 +690,7 @@ internal static class Program
         _ = discordBot.SendVoteRejectedAsync(marker.Kind, marker.Title, reason);
     }
 
-    /// <summary>온라인 세션에서 대상 해석 — 이름(대소문자 무시) 또는 PlayerKey 일치.</summary>
+    // 온라인 세션에서 대상 해석 — 이름(대소문자 무시) 또는 PlayerKey 일치.
     private static bool TryResolveOnlinePlayer(PlayerSessionStore sessions, string query,
         out string playerKey, out string name)
     {
@@ -712,8 +708,8 @@ internal static class Program
         return true;
     }
 
-    /// <summary>투표 확정 처리 — VOTE_RESULT 브로드캐스트 + Discord 결과 + 가결 시 효과:
-    /// ban → 밴 파일 + 게이트웨이 즉시 차단/킥, run → run.json 즉시 반영 (RUN_RULES_STATE 푸시).</summary>
+    // 투표 확정 처리 — VOTE_RESULT 브로드캐스트 + Discord 결과 + 가결 시 효과:
+    // ban → 밴 파일 + 게이트웨이 즉시 차단/킥, run → run.json 즉시 반영 (RUN_RULES_STATE 푸시).
     private static void FinalizeVote(ControlHub hub, PlayerSessionStore sessions, RunRuleStore runRules,
         BanList banList, DiscordBot discordBot, VoteCoordinator.VoteFinalizeResult voteResult)
     {
@@ -764,7 +760,7 @@ internal static class Program
         }
     }
 
-    /// <summary>RUN_RULES_STATE 전 인스턴스 브로드캐스트 (rule/run 명령 푸시와 동일 경로).</summary>
+    // RUN_RULES_STATE 전 인스턴스 브로드캐스트 (rule/run 명령 푸시와 동일 경로).
     private static void PushRunRulesToInstances(ControlHub hub, RunRuleStore runRules)
     {
         var runSettings = runRules.RunSnapshot;
@@ -783,14 +779,14 @@ internal static class Program
         return true;
     }
 
-    /// <summary>마이그레이션 이벤트 payload의 epoch 추출 (없으면 null — 하위 호환).</summary>
+    // 마이그레이션 이벤트 payload의 epoch 추출 (없으면 null — 하위 호환).
     private static int? GetEpoch(ControlMessage msg)
     {
         if (msg.Payload is not JsonElement el || el.ValueKind != JsonValueKind.Object) return null;
         return el.TryGetProperty("epoch", out JsonElement e) && e.TryGetInt32(out int v) ? v : null;
     }
 
-    /// <summary>SESSION_CONNECTED payload의 username 추출 (없으면 null).</summary>
+    // SESSION_CONNECTED payload의 username 추출 (없으면 null).
     private static string? GetUsername(ControlMessage msg)
     {
         if (msg.Payload is not JsonElement el || el.ValueKind != JsonValueKind.Object) return null;
@@ -799,8 +795,8 @@ internal static class Program
             : null;
     }
 
-    /// <summary>!list 응답 라인 배열 — 온라인 세션을 depth별로 집계, 레이어당 한 줄
-    /// ("[L1]: 이름들"). 모드가 각 줄을 별도의 개인 채팅으로 표시한다.</summary>
+    // !list 응답 라인 배열 — 온라인 세션을 depth별로 집계, 레이어당 한 줄
+    // ("[L1]: 이름들"). 모드가 각 줄을 별도의 개인 채팅으로 표시한다.
     private static string[] BuildPlayerListLines(PlayerSessionStore sessions)
     {
         var byDepth = sessions.All
@@ -814,8 +810,8 @@ internal static class Program
             $"[L{g.Key}] {string.Join(", ", g.Select(s => s.Username ?? s.Key.Value))}").ToArray();
     }
 
-    /// <summary>Discord 채널 주제용 접속 인원 문자열 — "현재 n명 접속중 / [L1] 2명 / [L3] 1명".
-    /// 온라인 정의(MaxPlayers 검사와 동일): Session != Offline. 플레이어가 없는 레이어는 생략.</summary>
+    // Discord 채널 주제용 접속 인원 문자열 — "현재 n명 접속중 / [L1] 2명 / [L3] 1명".
+    // 온라인 정의(MaxPlayers 검사와 동일): Session != Offline. 플레이어가 없는 레이어는 생략.
     private static string BuildPlayerCountText(PlayerSessionStore sessions)
     {
         var online = sessions.All.Where(s => s.Session != PlayerSessionState.Offline).ToList();
@@ -827,13 +823,13 @@ internal static class Program
         return string.Join(" / ", parts);
     }
 
-    /// <summary>접속 인원 채널 주제 갱신 (fire-and-forget — 미연결 시 내부 no-op).</summary>
+    // 접속 인원 채널 주제 갱신 (fire-and-forget — 미연결 시 내부 no-op).
     private static void RefreshPlayerCountTopic(DiscordBot discordBot, PlayerSessionStore sessions)
     {
         _ = discordBot.UpdatePlayerCountTopicAsync(BuildPlayerCountText(sessions));
     }
 
-    /// <summary>!currentrun 응답 텍스트 — 키 조회 또는 전체 목록 (RunRuleStore가 정본).</summary>
+    // !currentrun 응답 텍스트 — 키 조회 또는 전체 목록 (RunRuleStore가 정본).
     private static string BuildRunSettingsText(RunRuleStore runRules, string key)
     {
         var snapshot = runRules.RunSnapshot;
@@ -846,7 +842,6 @@ internal static class Program
         return string.Join("\n", snapshot.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}: {kv.Value}"));
     }
 
-    // ── payload 모델 ──
 
     private sealed class HelloVersion { public int Version { get; set; } }
     private sealed class AgentHelloPayload { public string MachineId { get; set; } = ""; public int Capacity { get; set; } public string Address { get; set; } = ""; }
@@ -855,16 +850,16 @@ internal static class Program
     private sealed class InstanceFaultPayload { public string InstanceKey { get; set; } = ""; public string? Reason { get; set; } }
     private sealed class LayerEndPayload { public string PlayerKey { get; set; } = ""; public int FromDepth { get; set; } public int MaxLayers { get; set; } }
 
-    /// <summary>!respawn 요청 (mod → orchestrator) — fromDepth는 발신 인스턴스 실제 depth.</summary>
+    // !respawn 요청 (mod → orchestrator) — fromDepth는 발신 인스턴스 실제 depth.
     private sealed class RespawnPayload { public string PlayerKey { get; set; } = ""; public int FromDepth { get; set; } }
 
-    /// <summary>실시간 로그 릴레이 (agent/gateway → orchestrator — LOG).</summary>
+    // 실시간 로그 릴레이 (agent/gateway → orchestrator — LOG).
     private sealed class LogPayload { public string Source { get; set; } = ""; public string Message { get; set; } = ""; }
     private sealed class PlayerKeyPayload { public string? PlayerKey { get; set; } }
     private sealed class InstancePayload { public string InstanceId { get; set; } = ""; }
     private sealed class SwapFailedPayload { public string? Reason { get; set; } }
 
-    /// <summary>크로스 인스턴스 채팅 payload (mod → orchestrator → mod).</summary>
+    // 크로스 인스턴스 채팅 payload (mod → orchestrator → mod).
     private sealed class ChatPayload
     {
         public string Speaker { get; set; } = "";
@@ -872,33 +867,33 @@ internal static class Program
         public string Color { get; set; } = "";
     }
 
-    /// <summary>!list 요청 (mod → orchestrator).</summary>
+    // !list 요청 (mod → orchestrator).
     private sealed class ListRequestPayload
     {
         public string PlayerKey { get; set; } = "";
     }
 
-    /// <summary>!currentrun 요청 (mod → orchestrator).</summary>
+    // !currentrun 요청 (mod → orchestrator).
     private sealed class CurrentRequestPayload
     {
         public string PlayerKey { get; set; } = "";
         public string Key { get; set; } = "";
     }
 
-    /// <summary>!discord 요청 (mod → orchestrator).</summary>
+    // !discord 요청 (mod → orchestrator).
     private sealed class DiscordRequestPayload
     {
         public string PlayerKey { get; set; } = "";
     }
 
-    /// <summary>!calladmin 보고 (mod → orchestrator — Discord는 후속).</summary>
+    // !calladmin 보고 (mod → orchestrator — Discord는 후속).
     private sealed class CallAdminPayload
     {
         public string PlayerKey { get; set; } = "";
         public string Username { get; set; } = "";
     }
 
-    /// <summary>사망/리스폰 이벤트 (mod → orchestrator — D1 Discord 알림).</summary>
+    // 사망/리스폰 이벤트 (mod → orchestrator — D1 Discord 알림).
     private sealed class PlayerEventPayload
     {
         public string PlayerKey { get; set; } = "";
@@ -906,7 +901,7 @@ internal static class Program
         public string Layer { get; set; } = "";
     }
 
-    /// <summary>크로스 인스턴스 시스템 공지 (mod ↔ orchestrator ↔ mod — 사망/마이그레이션).</summary>
+    // 크로스 인스턴스 시스템 공지 (mod ↔ orchestrator ↔ mod — 사망/마이그레이션).
     private sealed class AnnouncePayload
     {
         public string Kind { get; set; } = "";
@@ -916,26 +911,25 @@ internal static class Program
         public int ToDepth { get; set; }
     }
 
-    /// <summary>PlayerKey에서 SteamID64 추출 — STEAM_ 접두사가 아니면 0 (직접연결/steam 비활성).</summary>
+    // PlayerKey에서 SteamID64 추출 — STEAM_ 접두사가 아니면 0 (직접연결/steam 비활성).
     private static ulong SteamIdOf(PlayerKey key) =>
         key.Value.StartsWith("STEAM_") && ulong.TryParse(key.Value.AsSpan(6), out ulong sid) ? sid : 0;
 
-    // ── Steam 로비 메타데이터 (G13 — LOBBY_METADATA) ──
 
-    /// <summary>세션별 생존 상태 — DIED/RESPAWNED 이벤트로 갱신, 접속 시 기본 생존,
-    /// 퇴장 시 제거. livingCount(=로비 KeyLivingCount) 산출에 사용 (실시간 반영).</summary>
+    // 세션별 생존 상태 — DIED/RESPAWNED 이벤트로 갱신, 접속 시 기본 생존,
+    // 퇴장 시 제거. livingCount(=로비 KeyLivingCount) 산출에 사용 (실시간 반영).
     private static readonly Dictionary<PlayerKey, bool> _alive = new();
 
     private static DateTime _lastLobbyMetadataPush = DateTime.MinValue;
-    /// <summary>안전망 주기 (2026-08-03): 이벤트 구동이 기본 — 드문 푸시 유실/엣지 케이스의
-    /// 자가 치유용 저빈도 폴링 (접속/퇴장/사망/리스폰/rule 명령/마이그레이션 시 force 푸시가 즉시 반영).</summary>
+    // 안전망 주기: 이벤트 구동이 기본 — 드문 푸시 유실/엣지 케이스의
+    // 자가 치유용 저빈도 폴링 (접속/퇴장/사망/리스폰/rule 명령/마이그레이션 시 force 푸시가 즉시 반영).
     private static readonly TimeSpan LobbyMetadataInterval = TimeSpan.FromSeconds(30);
 
-    /// <summary>Steam 로비 동적 메타데이터 푸시: livingCount = 온라인 세션 중 생존 상태 수,
-    /// happinessSum = 0 (기본값 고정 — 2026-08-03), steamIds = STEAM_ 세션 목록,
-    /// rulesBase64 = rule.json 기반 규칙 구조체 (RulesBlobBuilder — 규칙 단일 정본).
-    /// mod 목록은 전송하지 않는다 (개조 전용 모드뿐 — 게이트웨이가 빈 값으로 고정).
-    /// 30초 안전망 스로틀 — force=true면 즉시 (게이트웨이 재연결/세션 변동/사망·리스폰/rule 명령 시).</summary>
+    // Steam 로비 동적 메타데이터 푸시: livingCount = 온라인 세션 중 생존 상태 수,
+    // happinessSum = 0 (기본값 고정), steamIds = STEAM_ 세션 목록,
+    // rulesBase64 = rule.json 기반 규칙 구조체 (RulesBlobBuilder — 규칙 단일 정본).
+    // mod 목록은 전송하지 않는다 (개조 전용 모드뿐 — 게이트웨이가 빈 값으로 고정).
+    // 30초 안전망 스로틀 — force=true면 즉시 (게이트웨이 재연결/세션 변동/사망·리스폰/rule 명령 시).
     private static void PushLobbyMetadata(ControlHub hub, RunRuleStore runRules,
         PlayerSessionStore sessions, bool force = false)
     {
@@ -964,7 +958,7 @@ internal static class Program
     }
 }
 
-/// <summary>밴 목록 — 중앙 원본, 게이트웨이에 BAN 명령 전파 (O6-8).</summary>
+// 밴 목록 — 중앙 원본, 게이트웨이에 BAN 명령 전파 (O6-8).
 public sealed class BanList
 {
     private readonly string _path;
@@ -983,7 +977,7 @@ public sealed class BanList
         Save();
     }
 
-    /// <summary>전체 목록 (게이트웨이 AUTH_INFO 푸시용).</summary>
+    // 전체 목록 (게이트웨이 AUTH_INFO 푸시용).
     public IReadOnlyCollection<string> All => _banned.ToList();
 
     private void Load()

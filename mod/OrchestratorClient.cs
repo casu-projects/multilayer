@@ -10,8 +10,8 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>오케스트레이터 제어 채널 (D3) — TCP 소켓, MOD_HELLO 등록, 명령 수신/이벤트 전송.
-/// 네트워크는 백그라운드 스레드, 메시지 처리는 메인 스레드(Update)에서.</summary>
+// 오케스트레이터 제어 채널 — TCP 소켓, MOD_HELLO 등록, 명령 수신/이벤트 전송.
+// 네트워크는 백그라운드 스레드, 메시지 처리는 메인 스레드(Update)에서.
 public sealed class OrchestratorClient : MonoBehaviour
 {
     public static OrchestratorClient Instance { get; private set; }
@@ -22,13 +22,9 @@ public sealed class OrchestratorClient : MonoBehaviour
     private Thread _thread;
     private volatile bool _running;
     private volatile bool _connected;
-    /// <summary>이번 연결에서 INSTANCE_READY를 보고했는지 — 재연결 시에만 리셋되어
-    /// 재보고를 허용한다 (첫 연결은 FinishWorldGeneration 완료 보고가 담당).
-    /// ROUTE-ON-READY 연동: 오케스트레이터 재시작 후 웜 인스턴스(이미 월드젠 완료)는
-    /// FinishWorldGeneration Postfix의 1회 보고 가드(_readyReported)로 재보고되지 않으므로,
-    /// 재연결 시점에 월드가 생성되어 있으면 READY를 재보고한다.</summary>
+    // 이번 연결에서 INSTANCE_READY를 보고했는지 — 재연결 시에만 리셋해 웜 인스턴스의
+    // READY 상태를 재보고한다 (첫 연결 보고는 FinishWorldGeneration Postfix 담당).
     private volatile bool _readyReportedOnConnection = true;
-    /// <summary>이 인스턴스 프로세스에서 오케스트레이터에 한 번이라도 연결했는지.</summary>
     private volatile bool _everConnected;
 
     public string OrchAddr { get; private set; } = "";
@@ -68,9 +64,7 @@ public sealed class OrchestratorClient : MonoBehaviour
         TryReportReadyOnConnection();
     }
 
-    /// <summary>연결 수립 + 월드 생성 완료 시 INSTANCE_READY 재보고 (ROUTE-ON-READY).
-    /// 첫 부팅은 FinishWorldGeneration Postfix가 보고하고, 이 경로는 재연결(오케스트레이터
-    /// 재시작) 후 웜 인스턴스의 READY 상태를 복원한다.</summary>
+    // 재연결 후 월드가 생성되어 있으면 INSTANCE_READY 재보고.
     private void TryReportReadyOnConnection()
     {
         if (!_connected || _readyReportedOnConnection) return;
@@ -79,8 +73,7 @@ public sealed class OrchestratorClient : MonoBehaviour
         SendEvent("INSTANCE_READY", new { instanceKey = InstanceKey });
     }
 
-    /// <summary>인바운드 큐 처리 (메인 스레드 전용). Update에서 호출되며, Body.Start의
-    /// 복원 대기 루프에서도 직접 호출해 응답을 즉시 반영한다 (디스패치 경쟁 제거).</summary>
+    // 인바운드 큐 처리 (메인 스레드 전용). Body.Start의 복원 대기 루프에서도 직접 호출된다.
     public void ProcessInbound()
     {
         while (_inbound.TryDequeue(out ControlMessage msg))
@@ -90,14 +83,13 @@ public sealed class OrchestratorClient : MonoBehaviour
         }
     }
 
-    /// <summary>이벤트/보고 전송 (메인 스레드에서 호출 — fire-and-forget).</summary>
+    // 이벤트/보고 전송 (fire-and-forget).
     public void SendEvent(string type, object payload)
     {
         _outbound.Enqueue(ControlMessage.Create(0, type, payload));
     }
 
-    /// <summary>outbound 큐가 비워질 때까지 대기 — 종료 전 제출(PLAYER_DATA_SUBMIT)이
-    /// WriteLoop를 통해 소켓에 전달되도록 보장 (Application.Quit 전에 호출).</summary>
+    // outbound 큐가 비워질 때까지 대기 — 종료 전 제출이 소켓에 전달되도록 보장.
     public void WaitForOutboundFlush(int timeoutMs)
     {
         DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
@@ -202,9 +194,8 @@ public sealed class OrchestratorClient : MonoBehaviour
         }
     }
 
-    /// <summary>마이그레이션 실패 추방 — 오케스트레이터가 Abort 시 KICK_PLAYER를 전송한다.
-    /// 전송 레벨 Net.Server_Kick 사용 (NetPlayer.Server_Kick은 아이템 드랍 부작용 — 동결 중
-    /// 바디에 위험). 재접속 시 세이브 캡처로 데이터가 복구된다.</summary>
+    // 마이그레이션 실패 추방 — 전송 레벨 Net.Server_Kick 사용 (NetPlayer.Server_Kick은
+    // 아이템 드랍 부작용 — 동결 중 바디에 위험).
     private static void HandleKickPlayer(ControlMessage msg)
     {
         var payload = msg.PayloadAs<KickPlayerPayload>();
@@ -226,8 +217,6 @@ public sealed class OrchestratorClient : MonoBehaviour
         }
     }
 
-    // ── 네트워크 스레드 ──
-
     private void ThreadLoop()
     {
         var (host, port) = SplitAddr(OrchAddr);
@@ -244,17 +233,14 @@ public sealed class OrchestratorClient : MonoBehaviour
                 _connected = true;
                 Plugin.Log.LogInfo($"[Orch] 오케스트레이터 연결: {OrchAddr}");
 
-                // READY 재보고는 재연결 전용 (2026-08-02 수정): 첫 연결은 FinishWorldGeneration
-                // 완료 시점의 INSTANCE_READY 보고가 담당한다 — 첫 연결에서도 재보고가 발동하면
-                // ROUTE_UPDATE가 중복되어 게이트웨이가 백엔드를 이중 연결하고
-                // "Player with this name already exists" 추방을 유발한다.
+                // READY 재보고는 재연결 전용 — 첫 연결에서 재보고하면 ROUTE_UPDATE가 중복되어
+                // 게이트웨이가 백엔드를 이중 연결한다.
                 if (_everConnected)
                 {
                     _readyReportedOnConnection = false;
                 }
                 _everConnected = true;
 
-                // MOD_HELLO 등록 (D3)
                 writer.WriteLine(ControlMessage.Create(1, "MOD_HELLO", new
                 {
                     instanceKey = InstanceKey,

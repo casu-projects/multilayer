@@ -4,9 +4,8 @@ using System.Linq;
 
 namespace CasuMpOrchestrator;
 
-/// <summary>콘솔 명령어 레지스트리 — 등록 패턴 (2026-08-08 리팩토링).
-/// Register(name, description, handler)로 등록하고 help는 자동 생성된다.
-/// 핸들러는 argv(명령 포함 전체 분할)를 받아 출력 라인 배열을 반환한다 (null = 출력 없음).</summary>
+// 콘솔 명령어 레지스트리 — Register로 등록하고 help는 자동 생성된다.
+// 핸들러는 argv를 받아 출력 라인 배열을 반환한다 (null = 출력 없음).
 public sealed class ConsoleCommand
 {
     public string Name { get; init; } = "";
@@ -18,13 +17,13 @@ public static class ConsoleCommands
 {
     private static readonly Dictionary<string, ConsoleCommand> Commands = new();
 
-    /// <summary>명령어 등록 — name은 소문자 매칭, 같은 이름이면 덮어쓴다.</summary>
+    // 소문자 매칭 — 같은 이름이면 덮어쓴다.
     public static void Register(string name, string description, Func<string[], string[]?> handler)
     {
         Commands[name] = new ConsoleCommand { Name = name, Description = description, Handler = handler };
     }
 
-    /// <summary>명령 실행 — argv[0] = 명령어 (소문자 매칭). 성공 시 출력 라인 반환 (null = 출력 없음).</summary>
+    // argv[0] = 명령어. 성공 시 출력 라인 반환 (null = 출력 없음).
     public static bool TryExecute(string[] argv, out string[]? lines)
     {
         lines = null;
@@ -34,7 +33,7 @@ public static class ConsoleCommands
         return true;
     }
 
-    /// <summary>자동 생성 도움말 — 등록된 모든 명령을 이름순 정렬.</summary>
+    // 등록된 모든 명령을 이름순 정렬한 도움말.
     public static string[] GetHelpLines()
     {
         var result = new List<string> { "명령어 목록:" };

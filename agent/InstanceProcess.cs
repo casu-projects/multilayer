@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace CasuMpAgent;
 
-/// <summary>단일 인스턴스 프로세스 — 스폰/감시/정지 (D3/G-3/G-4).</summary>
+// 단일 인스턴스 프로세스 — 스폰/감시/정지 (D3/G-3/G-4).
 public sealed class InstanceProcess
 {
     private readonly AgentConfig _config;
@@ -24,7 +24,7 @@ public sealed class InstanceProcess
         _stdin = process.StandardInput;
     }
 
-    /// <summary>SPAWN 페이로드로 프로세스 실행 (HOME 격리 + 환경변수).</summary>
+    // SPAWN 페이로드로 프로세스 실행 (HOME 격리 + 환경변수).
     public static InstanceProcess? Spawn(AgentConfig config, SpawnPayload payload)
     {
         // 게임 경로 미설정 — 명확한 실패 (Path.GetFullPath("") 예외/ack 타임아웃 대신).
@@ -106,14 +106,14 @@ public sealed class InstanceProcess
         }
     }
 
-    /// <summary>G-4: stdin으로 quit 전달 → 유예 대기 → 강제 종료.</summary>
+    // G-4: stdin으로 quit 전달 → 유예 대기 → 강제 종료.
     public void Stop()
     {
         try
         {
             _stdin.WriteLine("quit");
             _stdin.Flush();
-            // TimeSpan.Milliseconds는 '전체 밀리초'가 아니라 1초 미만 나머지라서, 5초도 0ms가 되버려요... 그래서 설정한 초를 실제 대기 시간으로 제대로 바꿔줍니다.
+            // TimeSpan.Milliseconds는 1초 미만 나머지 — 설정한 초를 실제 대기 시간으로 변환한다.
             int waitMilliseconds = checked(_config.StopGraceSeconds * 1000);
             _process.WaitForExit(waitMilliseconds);
         }
@@ -130,7 +130,7 @@ public sealed class InstanceProcess
         catch (InvalidOperationException) { }
     }
 
-    /// <summary>종료 후 홈 디렉토리/로그 정리 (G-4). 진단용으로 unity.log는 보존한다.</summary>
+    // 종료 후 홈 디렉토리/로그 정리 (G-4). 진단용으로 unity.log는 보존한다.
     public void Cleanup()
     {
         try
@@ -207,7 +207,7 @@ public sealed class SpawnPayload
     public string? ServerPassword { get; set; }
 }
 
-/// <summary>디버그 로그 표시 상태 (오케스트레이터 VERBOSE 메시지).</summary>
+// 디버그 로그 표시 상태 (오케스트레이터 VERBOSE 메시지).
 public sealed class VerbosePayload
 {
     public bool On { get; set; }

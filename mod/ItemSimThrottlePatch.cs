@@ -5,14 +5,8 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>바닥 아이템 Update 스로틀 (2026-08-11, CPU 최적화).
-/// Item.Update는 renderer 게이트로 활성 청크 밖은 스킵되지만, 활성 청크(5×5 그리드 + linger)에
-/// 있는 아이템은 전부 매프레임 decay+물리 게이팅을 실행한다 — 베이스에 수백 개가 쌓이면
-/// ~0.5-1ms/프레임의 누적 부담.
-/// 수정: 최근접 플레이어 50유닛 밖의 바닥 아이템만 0.25초 간격으로 스로틀 (decay/wetness만
-/// 느려짐 — 시야 밖이라 무관). 스킵 중에도 vanilla가 하던 rb.simulated/affect.enabled
-/// 게이팅을 재현해 물리 상태가 낡지 않게 한다 (청크가 꺼지면 물리도 꺼짐).
-/// 컨테이너/착용 아이템(parent != null)은 제외.</summary>
+// 바닥 아이템 Update 스로틀 — 50유닛 밖 아이템은 0.25초 간격으로 갱신한다. 스킵 중에도
+// vanilla가 하던 rb.simulated/affect 게이팅을 재현해 물리 상태가 낡지 않게 한다.
 [HarmonyPatch(typeof(Item), "Update")]
 internal static class ItemSimThrottlePatch
 {
@@ -41,8 +35,7 @@ internal static class ItemSimThrottlePatch
         int id = __instance.GetInstanceID();
         if (_nextUpdate.TryGetValue(id, out double next) && now < next)
         {
-            // vanilla Item.Update가 매프레임 하던 rb/affect 게이팅 재현 — 물리 상태 보존.
-            // (청크 비활성 시 rb.simulated=false — 스로틀로 인한 물리 잔류 방지)
+            // 청크 비활성 시 rb.simulated=false — 스로틀로 인한 물리 잔류 방지.
             bool chunkActive = world.worldExists
                 && world.GetClosestChunkRenderer(world.WorldToBlockPos(__instance.transform.position))?.enabled == true;
             if (__instance.rb != null)
@@ -63,7 +56,7 @@ internal static class ItemSimThrottlePatch
         return true;
     }
 
-    /// <summary>파괴된 아이템의 잔존 엔트리 정리 (60초 미접촉 제거).</summary>
+    // 파괴된 아이템의 잔존 엔트리 정리 (60초 미접촉 제거).
     private static void Prune(double now)
     {
         if (now - _lastPruneAt < 10.0) return;

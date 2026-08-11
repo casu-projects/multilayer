@@ -3,8 +3,8 @@ using LiteNetLib.Utils;
 
 namespace CasuMpGateway;
 
-/// <summary>직접연결(DirectIpAdapter) — LiteNetLib 리스너 (G2). 클라이언트 피어 → 세션 매핑을
-/// 어댑터가 소유한다. 신원은 username (G1-5).</summary>
+// 직접연결(DirectIpAdapter) — LiteNetLib 리스너 (G2). 클라이언트 피어 → 세션 매핑을
+// 어댑터가 소유한다. 신원은 username (G1-5).
 public sealed class DirectIpAdapter : INetEventListener
 {
     private readonly GatewayConfig _config;

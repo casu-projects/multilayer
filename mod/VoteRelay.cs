@@ -5,9 +5,8 @@ using KrokoshaCasualtiesMP;
 
 namespace CasuMod;
 
-/// <summary>크로스 인스턴스 투표 릴레이 (구 시스템 CrossInstanceVoteRelay/Receive 이식 — 2026-08-03).
-/// VOTE_START 발신 / VOTE_RUN 수신(바닐라 투표 UI + tally 발신) / VOTE_RESULT 수신(공지 + 효과) /
-/// VOTE_REJECTED 수신(발신자 개인 회신). 오케스트레이터 VoteCoordinator와 페어.</summary>
+// 크로스 인스턴스 투표 릴레이 — VOTE_START 발신 / VOTE_RUN·VOTE_RESULT·VOTE_REJECTED 수신.
+// 오케스트레이터 VoteCoordinator와 페어.
 public static class VoteRelay
 {
     internal static void EmitVoteStart(string voteId, string kind, string title, string promptBody,
@@ -24,11 +23,11 @@ public static class VoteRelay
         });
     }
 
-    /// <summary>오케스트레이터 VOTE_RUN 수신 — 바닐라 투표 팝업(10182) 실행, 종료 시 tally 보고.</summary>
+    // VOTE_RUN 수신 — 바닐라 투표 팝업 실행, 종료 시 tally 보고.
     internal static void HandleRun(VoteRunPayload payload)
     {
         if (payload == null || string.IsNullOrEmpty(payload.VoteId)) return;
-        if (VoteSystem.Server_ActiveVote != null) return; // 방어 — 중복 시작 무시
+        if (VoteSystem.Server_ActiveVote != null) return; // 중복 시작 무시
 
         string voteId = payload.VoteId;
         try
@@ -51,7 +50,7 @@ public static class VoteRelay
         }
     }
 
-    /// <summary>오케스트레이터 VOTE_RESULT 수신 — 합산 공지 + 가결 시 효과 공지 (적용은 오케스트레이터).</summary>
+    // VOTE_RESULT 수신 — 합산 공지 + 가결 시 효과 공지.
     internal static void HandleResult(VoteResultPayload payload)
     {
         if (payload == null || string.IsNullOrEmpty(payload.VoteId)) return;
@@ -80,7 +79,7 @@ public static class VoteRelay
         }
     }
 
-    /// <summary>오케스트레이터 VOTE_REJECTED 수신 — 발신자에게 개인 회신.</summary>
+    // VOTE_REJECTED 수신 — 발신자에게 개인 회신.
     internal static void HandleRejected(VoteRejectedPayload payload)
     {
         if (payload == null || string.IsNullOrEmpty(payload.CallerClientId)) return;

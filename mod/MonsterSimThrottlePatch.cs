@@ -6,24 +6,17 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>몬스터 시뮬레이션 스로틀 (2026-08-11, CPU 최적화).
-/// 게임 Body.Update에는 청크 게이트가 없다 (UpdateChunkVisibility는 renderer.enabled만
-/// 토글 — WorldGeneration.cs:1206) — 데디서버에서 세계의 모든 몬스터 바디가 매 프레임
-/// HandleGroundedState(BoxCast ×3)+온도+순환+비주얼+사운드를 실행한다. 이는 인원과 무관한
-/// 상수 부담이지만 매우 큰 단일 항목이다.
-/// 수정: 플레이어 거리 기준 티어 스로틀 — 가까우면 매프레임, 멀수록 간격 확대.
-/// AI(SpiderHandler/GrabberPlant — renderer 게이트)와 물리(force-dynamic 패치)는 무관하게
-/// 유지되고, 이벤트 기반 데미지/사망 처리도 스로틀과 무관하다. mod의 Body_Update
-/// Prefix/Postfix는 Harmony 특성상 계속 실행되어 안전.</summary>
+// 몬스터 시뮬레이션 스로틀 — 게임 Body.Update는 청크 게이트가 없어 세계의 모든 몬스터
+// 바디가 매 프레임 시뮬레이션된다. 플레이어 거리 티어로 갱신 간격을 확대한다.
 [HarmonyPatch(typeof(Body), "Update")]
 internal static class MonsterSimThrottlePatch
 {
     private const float NearDistSqr = 4900f;     // 70유닛 — 매프레임
     private const float MidDistSqr = 25600f;     // 160
     private const float FarDistSqr = 102400f;    // 320
-    private const double NearInterval = 0.1;     // ~6Hz
-    private const double MidInterval = 0.3;      // ~3Hz
-    private const double FarInterval = 0.8;      // ~1.2Hz
+    private const double NearInterval = 0.1;
+    private const double MidInterval = 0.3;
+    private const double FarInterval = 0.8;
 
     private static readonly Dictionary<int, double> _nextUpdate = new();
     private static double _lastPruneAt;
@@ -60,7 +53,7 @@ internal static class MonsterSimThrottlePatch
         return true;
     }
 
-    /// <summary>파괴된 바디의 잔존 엔트리 정리 (Unity fake-null 회피 — id 기반, 60초 미접촉 제거).</summary>
+    // 파괴된 바디의 잔존 엔트리 정리 — Unity fake-null을 피해 id 기반으로 60초 미접촉 제거.
     private static void Prune(double now)
     {
         if (now - _lastPruneAt < 10.0) return;

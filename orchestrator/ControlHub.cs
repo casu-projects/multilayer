@@ -13,9 +13,8 @@ public enum ClientKind
     Mod,
 }
 
-/// <summary>제어 허브 — TCP 리스너로 게이트웨이/노드 에이전트/모드 3종 클라이언트를 수용 (O6-1).
-/// JSON 라인 + seq-ack (R1). 모든 상태 접근은 메인 스레드(Tick)에서만, 네트워크 루프는
-/// 백그라운드 스레드에서 큐로만 소통한다.</summary>
+// 제어 허브 — TCP 리스너로 게이트웨이/노드 에이전트/모드를 수용. JSON 라인 + seq-ack.
+// 모든 상태 접근은 메인 스레드(Tick)에서만, 네트워크 루프는 백그라운드 스레드에서 큐로만 소통한다.
 public sealed class ControlHub
 {
     public sealed class ClientConnection
@@ -24,7 +23,7 @@ public sealed class ControlHub
         public TcpClient Tcp { get; init; } = null!;
         public ClientKind Kind { get; set; } = ClientKind.Unknown;
 
-        // HELLO로 확정되는 신원
+        // HELLO로 확정되는 신원.
         public int? GatewayVersion { get; set; }
         public string? MachineId { get; set; }
         public int AgentCapacity { get; set; }
@@ -162,11 +161,10 @@ public sealed class ControlHub
         }
     }
 
-    // ── 메인 스레드 API ──
+    // 메인 스레드 API.
 
     public long NextSeq() => ++_seqCounter;
 
-    /// <summary>제어 채널 연결 목록 (메인 스레드 전용).</summary>
     public IReadOnlyList<ClientConnection> Connections
     {
         get { lock (_connections) { return _connections.ToList(); } }
@@ -176,7 +174,7 @@ public sealed class ControlHub
     public ClientConnection? AgentConnection(string machineId) => Connections.FirstOrDefault(c => c.Kind == ClientKind.Agent && c.MachineId == machineId && !c.Closed);
     public ClientConnection? ModConnection(string instanceKey) => Connections.FirstOrDefault(c => c.Kind == ClientKind.Mod && c.InstanceKey == instanceKey && !c.Closed);
 
-    /// <summary>명령 전송 + ack/타임아웃 콜백 (R1: 3초 × 3회 재전송). 콜백은 메인 스레드에서 실행.</summary>
+    // 명령 전송 + ack/타임아웃 콜백 (R1: 3초 × 3회 재전송). 콜백은 메인 스레드에서 실행.
     public bool Send(ClientConnection? conn, string type, object? payload, Action<bool, string?>? onResult = null)
     {
         if (conn == null || conn.Closed)
@@ -197,14 +195,14 @@ public sealed class ControlHub
         return true;
     }
 
-    /// <summary>보고/응답 메시지 (ack 불필요).</summary>
+    // 보고/응답 메시지 (ack 불필요).
     public void SendNoAck(ClientConnection? conn, string type, object? payload)
     {
         if (conn == null || conn.Closed) return;
         conn.Outbound.Enqueue(ControlMessage.Create(NextSeq(), type, payload));
     }
 
-    /// <summary>수신 메시지 디스패치 (메인 스레드 Tick에서 호출).</summary>
+    // 수신 메시지 디스패치 (메인 스레드 Tick에서 호출).
     public void DrainInbound(Action<ClientConnection, ControlMessage> dispatch)
     {
         while (_inbound.TryDequeue(out var item))
@@ -213,10 +211,10 @@ public sealed class ControlHub
         }
     }
 
-    /// <summary>ACK 완료 처리 + 재전송/타임아웃 + 연결 종료 처리 (메인 스레드 Tick에서 호출).</summary>
+    // ACK 완료 처리 + 재전송/타임아웃 + 연결 종료 처리 (메인 스레드 Tick에서 호출).
     public void Tick()
     {
-        // ACK 완료
+        // ACK 완료.
         while (_ackCompletions.TryDequeue(out var ack))
         {
             if (ack.Conn.PendingAcks.TryRemove(ack.Seq, out PendingCommand? pending))
@@ -225,7 +223,7 @@ public sealed class ControlHub
             }
         }
 
-        // 재전송/타임아웃
+        // 재전송/타임아웃.
         DateTime now = DateTime.UtcNow;
         foreach (ClientConnection conn in Connections)
         {
@@ -247,7 +245,7 @@ public sealed class ControlHub
             }
         }
 
-        // 연결 종료
+        // 연결 종료.
         while (_closedConnections.TryDequeue(out ClientConnection? conn))
         {
             lock (_connections)
@@ -264,7 +262,7 @@ public sealed class ControlHub
         }
     }
 
-    /// <summary>연결 종료 통지 (에이전트/모드/게이트웨이 이탈 처리용 — 메인 스레드에서 실행).</summary>
+    // 연결 종료 통지 (메인 스레드에서 실행).
     public event Action<ClientConnection>? OnConnectionClosed;
 
     private static bool IsOk(ControlMessage msg) => msg.PayloadAs<AckPayload>()?.Ok ?? false;

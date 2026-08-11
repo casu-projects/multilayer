@@ -4,10 +4,10 @@ using Steamworks;
 
 namespace CasuMpGateway;
 
-/// <summary>SteamLobbyAdapter — Steam P2P 수신 + 로비 (G2/G13).
-/// 클라이언트는 "로비 소유자"에게 P2P 접속(바닐라 고정)하므로, Steamworks.NET 사용자 세션으로
-/// P2P를 종단하고 SteamID64를 네이티브로 확보한 뒤 ClientSession을 코어에 넘긴다.
-/// 로비(SteamKit2)는 SteamLobby가 담당. 인스턴스는 여전히 순수 LiteNetLib (tail v2로 신원 전달).</summary>
+// SteamLobbyAdapter — Steam P2P 수신 + 로비 (G2/G13).
+// 클라이언트는 "로비 소유자"에게 P2P 접속(바닐라 고정)하므로, Steamworks.NET 사용자 세션으로
+// P2P를 종단하고 SteamID64를 네이티브로 확보한 뒤 ClientSession을 코어에 넘긴다.
+// 로비(SteamKit2)는 SteamLobby가 담당. 인스턴스는 여전히 순수 LiteNetLib (tail v2로 신원 전달).
 public sealed class SteamLobbyAdapter
 {
     private static readonly TimeSpan PendingCloseDelay = TimeSpan.FromSeconds(1.5);
@@ -133,13 +133,13 @@ public sealed class SteamLobbyAdapter
         _lobby.Stop();
     }
 
-    /// <summary>오케스트레이터 LOBBY_METADATA → 로비 메타데이터 반영.</summary>
+    // 오케스트레이터 LOBBY_METADATA → 로비 메타데이터 반영.
     public void UpdateLobbyMetadata(GatewayCore.LobbyMetadataPayload payload) => _lobby.UpdateDynamicMetadata(payload);
 
-    /// <summary>주기적 P2P 연결 품질 로그 (10초 간격) — direct/relay 여부는 연결 성립 시
-    /// 상세 상태(GetDetailedConnectionStatus — "transport" 라인)로, 실시간 품질은
-    /// GetConnectionRealTimeStatus(핑/품질/패킷률/백로그)로 관찰한다.
-    /// 릴레이 경유 유저 식별 + 손실/백로그 실측 — 동기화 문제의 데이터 기반 판단용.</summary>
+    // 주기적 P2P 연결 품질 로그 (10초 간격) — direct/relay 여부는 연결 성립 시
+    // 상세 상태(GetDetailedConnectionStatus — "transport" 라인)로, 실시간 품질은
+    // GetConnectionRealTimeStatus(핑/품질/패킷률/백로그)로 관찰한다.
+    // 릴레이 경유 유저 식별 + 손실/백로그 실측 — 동기화 문제의 데이터 기반 판단용.
     private DateTime _nextQualityLogAtUtc = DateTime.MinValue;
 
     private void LogConnectionQuality()
@@ -187,7 +187,7 @@ public sealed class SteamLobbyAdapter
         }
     }
 
-    /// <summary>Steam 세션 KICK: 로비 채팅 사유 전달 후 지연 종료 (채팅이 CM 왕복을 먼저 마치게).</summary>
+    // Steam 세션 KICK: 로비 채팅 사유 전달 후 지연 종료 (채팅이 CM 왕복을 먼저 마치게).
     internal void RequestClose(HSteamNetConnection conn, ulong steamId, string reason)
     {
         if (steamId != 0)
@@ -292,8 +292,8 @@ public sealed class SteamLobbyAdapter
     }
 }
 
-/// <summary>Steam P2P 클라이언트 싱크 — wire 형식([payload][1바이트 flag]) 인코딩.
-/// DisconnectClient(reason)는 어댑터의 지연 종료 경로(로비 채팅 사유 전달)를 사용한다.</summary>
+// Steam P2P 클라이언트 싱크 — wire 형식([payload][1바이트 flag]) 인코딩.
+// DisconnectClient(reason)는 어댑터의 지연 종료 경로(로비 채팅 사유 전달)를 사용한다.
 public sealed class SteamClientSink : IClientSink
 {
     private readonly SteamLobbyAdapter _adapter;

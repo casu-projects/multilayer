@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>헤드리스 서버의 지진 파괴 중심을 안보이는 호스트의 카메라가 아니라 플레이 중인 유저로 바꾼다.</summary>
+// 지진 파괴 중심을 주차된 서버 카메라 대신 플레이어 기준으로 옮긴다.
 [HarmonyPatch(typeof(WorldGeneration), "Update")]
 internal static class HeadlessEarthquakePatch
 {
@@ -39,7 +39,7 @@ internal static class HeadlessEarthquakePatch
                 && list[i].operand is float value && value == QuakeDestructionRate
                 && IsEarthquakeIntensityMultiply(list, i))
             {
-                // 서버 카메라 주변을 부수는 원본 분기만 끄고, 각 플레이어가 처리를 대신 맡게함.
+                // 서버 카메라 주변 파괴 분기 비활성화 — 플레이어 처리가 대신한다.
                 list[i].operand = 0f;
             }
             yield return list[i];

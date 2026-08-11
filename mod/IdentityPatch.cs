@@ -6,8 +6,8 @@ using LiteNetLib.Utils;
 
 namespace CasuMod;
 
-/// <summary>tail v2 (G6/R3): connect data 끝 15바이트 [Magic C5A5][Ver 1][SteamID64 8B]
-/// [clientId 2B][isReturning 1B][isMigratingArrival 1B]. Magic/Ver 불일치 시 접속 거부 (fail-fast).</summary>
+// 접속 신원 프로토콜 — connect data 끝 15바이트: [Magic C5A5][Ver 1][SteamID64 8B]
+// [clientId 2B][isReturning 1B][isMigratingArrival 1B]. Magic/Ver 불일치 시 접속 거부.
 [HarmonyPatch]
 internal static class OnConnectionRequest_TailV2Patch
 {
@@ -40,7 +40,7 @@ internal static class OnConnectionRequest_TailV2Patch
         int start = offset + size - TailSize;
         if (raw[start] != MagicHigh || raw[start + 1] != MagicLow || raw[start + 2] != Version)
         {
-            // 버전 스큐 — 조용한 실패 금지 (R3 fail-fast)
+            // 버전 스큐 — 조용한 실패 금지 (fail-fast).
             Plugin.Log.LogError($"[Identity] tail v2 불일치 (Magic/Ver) — 접속 거부. "
                 + "게이트웨이와 모드 버전을 맞춰야 합니다.");
             var reject = new NetDataWriter();
@@ -63,7 +63,7 @@ internal static class OnConnectionRequest_TailV2Patch
     internal static bool TakeIsReturning() { var v = _pendingIsReturning ?? false; _pendingIsReturning = null; return v; }
 }
 
-/// <summary>오케스트레이터가 전역 배정한 clientId 강제 적용.</summary>
+// 오케스트레이터가 전역 배정한 clientId 강제 적용.
 [HarmonyPatch(typeof(Net), "GetNextPlayerId")]
 internal static class Net_GetNextPlayerId_ForceClientIdPatch
 {
@@ -79,22 +79,19 @@ internal static class Net_GetNextPlayerId_ForceClientIdPatch
     }
 }
 
-/// <summary>복귀(재접속/세션 복원) 플레이어 clientId 집합 — RosterBarrier가 신뢰성 DELETE로
-/// 관찰자들의 NPC/스테일 항목을 정리해 재생성하게 하는 데 사용 (2026-08-03).</summary>
+// 복귀(재접속/세션 복원) 플레이어 clientId 집합.
 internal static class ReturningTracker
 {
     internal static readonly System.Collections.Generic.HashSet<knetid> ClientIds = new();
 }
 
-/// <summary>마이그레이션 도착 플레이어 clientId 집합 — 접속 공지 억제 전용
-/// (isMigratingArrival=true — 게이트웨이 SwapBackend만 true, 일반 재접속은 미등록).
-/// 마이그레이션 도착만 억제하고 퇴장 후 재접속은 접속 공지를 표시하기 위한 구분 (2026-08-04).</summary>
+// 마이그레이션 도착 플레이어 clientId 집합 — 접속 공지 억제용.
 internal static class MigrationArrivalTracker
 {
     internal static readonly System.Collections.Generic.HashSet<knetid> ClientIds = new();
 }
 
-/// <summary>신원 적용: SteamID64 + 접속 시 PLAYER_DATA_REQUEST 전송.</summary>
+// 신원 적용: SteamID64 + 접속 시 PLAYER_DATA_REQUEST 전송.
 [HarmonyPatch(typeof(TransportLiteNetLib), nameof(TransportLiteNetLib.CreateNetPlayerWithPeer))]
 internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
 {
@@ -120,13 +117,10 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
             __result.steam_id = steamId.Value;
         }
 
-        // S9-4 도착 epoch: 직전 방문의 잔존 PendingData/PendingPositions 소비 차단.
-        // 바디 스폰(Body.Start)보다 반드시 먼저 실행된다 (CreateNetPlayerWithPeer 동기 처리).
+        // 직전 방문의 잔존 PendingData 소비 차단 — 바디 스폰(Body.Start)보다 먼저 실행된다.
         SaveModule.OnPlayerArrival(__result.GetPersistentId());
 
-        // S9-4: 접속 시 플레이어 데이터 요청 — 직접연결(steam_id=0) 포함 전 플레이어.
-        // playerKey는 GetPersistentId (STEAM_ 경로 패치 적용됨 — steam_id 있으면 STEAM_,
-        // 없으면 NAME_hex(username) — 게이트웨이 키와 일치).
+        // 접속 시 플레이어 데이터 요청 (직접연결 포함 전 플레이어).
         if (OrchestratorClient.Instance != null)
         {
             OrchestratorClient.Instance.SendEvent("PLAYER_DATA_REQUEST",
@@ -135,7 +129,7 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
     }
 }
 
-/// <summary>GetPersistentId — steam_id가 있으면 STEAM_ 경로 (게이트웨이 키 일치).</summary>
+// GetPersistentId — steam_id가 있으면 STEAM_ 경로 (게이트웨이 키 일치).
 [HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.GetPersistentId))]
 internal static class NetPlayer_GetPersistentId_PreferSteamIdPatch
 {

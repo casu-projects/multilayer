@@ -4,8 +4,7 @@ using Newtonsoft.Json.Linq;
 
 namespace CasuMod;
 
-/// <summary>제어 프로토콜 메시지 — 오케스트레이터와 동일 규약 (JSON 라인 + seq-ack, R1).
-/// net48 호환을 위해 Newtonsoft.Json 사용 (게임 내장).</summary>
+// 제어 프로토콜 메시지 — 오케스트레이터와 동일 규약 (JSON 라인 + seq-ack).
 public sealed class ControlMessage
 {
     private static readonly JsonSerializerSettings ParseSettings = new()
@@ -44,53 +43,39 @@ public sealed class ControlMessage
     public T PayloadAs<T>() where T : class =>
         Payload is JObject obj ? obj.ToObject<T>() : null;
 
-    /// <summary>payload의 하위 프로퍼티 (예: PLAYER_DATA_RESPONSE의 "payload").</summary>
     public JToken Inner(string prop) => Payload is JObject obj ? obj[prop] : null;
 }
 
-/// <summary>공통 payload 구조 (마이그레이션 메시지에는 epoch 포함 — P2 멱등).</summary>
 public sealed class PlayerKeyPayload
 {
     public string PlayerKey { get; set; } = "";
 
-    /// <summary>마이그레이션 트랜잭션 epoch. -1이면 검증 생략 (구버전 하위 호환).</summary>
+    // 마이그레이션 트랜잭션 epoch — -1이면 검증 생략 (구버전 하위 호환).
     public int Epoch { get; set; } = -1;
 }
 
 public sealed class ChatPayload
 {
     public string Speaker { get; set; } = "";
-
-    /// <summary>닉네임 색상 (HTML hex — "#RRGGBB"). 오케스트레이터가 추가하는 레이어 태그와 함께 표시.</summary>
     public string Color { get; set; } = "";
-
-    /// <summary>발신 인스턴스 레이어 태그 (예: "L1") — 오케스트레이터가 부여.</summary>
     public string Layer { get; set; } = "";
-
-    /// <summary>이름 앞 배지 라벨 (예: Discord 채팅의 "D") — 클라이언트 괄호 안 "[D]"로 표시.</summary>
     public string Prefix { get; set; } = "";
-
-    /// <summary>배지 색상 (HTML hex — "#RRGGBB"). Discord 채팅은 블러플 #5865F2.</summary>
     public string PrefixColor { get; set; } = "";
-
     public string Message { get; set; } = "";
 }
 
-/// <summary>!list 결과 (오케스트레이터 → 요청자 — 라인 배열, 각 줄을 별도 개인 채팅으로 표시).</summary>
 public sealed class ListResultPayload
 {
     public string PlayerKey { get; set; } = "";
     public string[] Lines { get; set; } = Array.Empty<string>();
 }
 
-/// <summary>!currentrun 결과 (오케스트레이터 → 요청자 개인 회신용).</summary>
 public sealed class CurrentResultPayload
 {
     public string PlayerKey { get; set; } = "";
     public string Text { get; set; } = "";
 }
 
-/// <summary>!discord 결과 (오케스트레이터 → 요청자 개인 회신용).</summary>
 public sealed class DiscordResultPayload
 {
     public string PlayerKey { get; set; } = "";
@@ -102,23 +87,18 @@ public sealed class ConsolePayload
     public string Command { get; set; } = "";
 }
 
-/// <summary>!respawn 요청 (mod → orchestrator) — fromDepth는 발신 인스턴스 실제 depth.
-/// 레이어 1은 인플레이스(로컬 리셋) 처리, 그 이상은 하향 마이그레이션 트랜잭션 처리.</summary>
 public sealed class RespawnPayload
 {
     public string PlayerKey { get; set; } = "";
     public int FromDepth { get; set; }
 }
 
-/// <summary>마이그레이션 실패 추방 (orchestrator → mod) — Abort 시 플레이어가 연결된
-/// 인스턴스로 전송. 전송 레벨 킥으로 강제 재접속 → 세이브 캡처 복구 경로 보장.</summary>
 public sealed class KickPlayerPayload
 {
     public string PlayerKey { get; set; } = "";
     public string Reason { get; set; } = "";
 }
 
-/// <summary>디버그 로그 표시 상태 (orchestrator → mod — `verbose on/off` 명령).</summary>
 public sealed class VerbosePayload
 {
     public bool On { get; set; }

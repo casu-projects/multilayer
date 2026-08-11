@@ -3,8 +3,8 @@ using System.Text.Json;
 
 namespace CasuMpGateway;
 
-/// <summary>게이트웨이 코어 — 세션 레지스트리 + 라우팅 미러 + 제어 명령 처리.
-/// 모든 게임 데이터 경로 처리는 메인 루프 스레드에서만 일어난다.</summary>
+// 게이트웨이 코어 — 세션 레지스트리 + 라우팅 미러 + 제어 명령 처리.
+// 모든 게임 데이터 경로 처리는 메인 루프 스레드에서만 일어난다.
 public sealed class GatewayCore
 {
     public GatewayConfig Config { get; }
@@ -22,11 +22,11 @@ public sealed class GatewayCore
     private string _maintenanceMessage = "";
     private readonly HashSet<ulong> _maintenanceBypass = new();
     private LobbyMetadataPayload? _lastLobbyMetadata;
-    /// <summary>서버 비밀번호 — 오케스트레이터 AUTH_INFO로 수신 (게임 setpass와 별개 조기 검증용 사본).</summary>
+    // 서버 비밀번호 — 오케스트레이터 AUTH_INFO로 수신 (게임 setpass와 별개 조기 검증용 사본).
     private string _serverPassword = "";
-    /// <summary>최대 동시 접속 인원 — 오케스트레이터 AUTH_INFO로 수신 (orchestrator.json MaxPlayers).</summary>
+    // 최대 동시 접속 인원 — 오케스트레이터 AUTH_INFO로 수신 (orchestrator.json MaxPlayers).
     private int _maxPlayers = 32;
-    /// <summary>서버 이름 — 오케스트레이터 AUTH_INFO로 수신 (Steam 로비 서버명 등).</summary>
+    // 서버 이름 — 오케스트레이터 AUTH_INFO로 수신 (Steam 로비 서버명 등).
     private string _serverName = "CasuMP Server";
 
     public GatewayCore(GatewayConfig config)
@@ -37,24 +37,24 @@ public sealed class GatewayCore
     public bool IsMaintenance => _maintenance;
     public string MaintenanceMessage => _maintenanceMessage;
 
-    /// <summary>최대 동시 접속 인원 (AUTH_INFO).</summary>
+    // 최대 동시 접속 인원 (AUTH_INFO).
     public int MaxPlayers => _maxPlayers;
 
-    /// <summary>서버 이름 (AUTH_INFO — Steam 로비 서버명 등).</summary>
+    // 서버 이름 (AUTH_INFO — Steam 로비 서버명 등).
     public string ServerName => _serverName;
 
-    /// <summary>서버 비밀번호 설정 여부 (AUTH_INFO — Steam 로비 KeyHasPassword).</summary>
+    // 서버 비밀번호 설정 여부 (AUTH_INFO — Steam 로비 KeyHasPassword).
     public bool HasPassword => !string.IsNullOrEmpty(_serverPassword);
 
-    /// <summary>AUTH_INFO(인증/서버 정보) 수신 여부 — Steam 로비 생성 게이트 (2026-08-03):
-    /// AUTH_INFO가 오기 전에는 서버명/인원/비밀번호 여부가 확정되지 않으므로 로비를 만들지 않는다.</summary>
+    // AUTH_INFO(인증/서버 정보) 수신 여부 — Steam 로비 생성 게이트 :
+    // AUTH_INFO가 오기 전에는 서버명/인원/비밀번호 여부가 확정되지 않으므로 로비를 만들지 않는다.
     public bool AuthInfoReceived { get; private set; }
 
-    /// <summary>서버 비밀번호 검증 — 미설정이면 항상 허용 (게임 서버가 최종 권위).</summary>
+    // 서버 비밀번호 검증 — 미설정이면 항상 허용 (게임 서버가 최종 권위).
     public bool ValidatePassword(string? candidate) =>
         string.IsNullOrEmpty(_serverPassword) || candidate == _serverPassword;
 
-    /// <summary>오케스트레이터 종료 신호 — 전 세션 정리 후 프로세스 종료 요청.</summary>
+    // 오케스트레이터 종료 신호 — 전 세션 정리 후 프로세스 종료 요청.
     public event Action? ShutdownRequested;
 
     private void ApplyShutdown()
@@ -71,13 +71,12 @@ public sealed class GatewayCore
         ShutdownRequested?.Invoke();
     }
 
-    /// <summary>활성 세션 수 (로비 PLRCOUNT 메타데이터용).</summary>
+    // 활성 세션 수 (로비 PLRCOUNT 메타데이터용).
     public int SessionCount => _sessions.Count;
 
-    /// <summary>오케스트레이터 LOBBY_METADATA 명령 → Steam 어댑터 전달 (없으면 무시).</summary>
+    // 오케스트레이터 LOBBY_METADATA 명령 → Steam 어댑터 전달 (없으면 무시).
     public Action<LobbyMetadataPayload>? OnLobbyMetadata { get; set; }
 
-    // ── 제어 채널 (ControlChannel) ──
 
     public void EnqueueCommand(ControlMessage msg) => _inbound.Enqueue(msg);
 
@@ -85,15 +84,15 @@ public sealed class GatewayCore
 
     public long NextSeq() => ++_seqCounter;
 
-    /// <summary>보고 메시지 (best-effort, ack 불필요 — R1).</summary>
+    // 보고 메시지 (best-effort, ack 불필요 — R1).
     public void Report(string type, object? payload) =>
         _outbound.Enqueue(ControlMessage.Report(NextSeq(), type, payload));
 
-    /// <summary>실시간 로그 릴레이 (LOG — 오케스트레이터 콘솔 표시용).</summary>
+    // 실시간 로그 릴레이 (LOG — 오케스트레이터 콘솔 표시용).
     public void SendLog(string message) =>
         Report("LOG", new { source = "gateway", message });
 
-    /// <summary>재연결 후 활성 세션 전부 재보고 (G12-R4).</summary>
+    // 재연결 후 활성 세션 전부 재보고 (G12-R4).
     public void ReportActiveSessions()
     {
         lock (_lock)
@@ -110,7 +109,7 @@ public sealed class GatewayCore
         }
     }
 
-    /// <summary>메인 루프 틱 — 제어 명령 처리 + 세션 틱.</summary>
+    // 메인 루프 틱 — 제어 명령 처리 + 세션 틱.
     public void Tick()
     {
         while (_inbound.TryDequeue(out ControlMessage? msg) && msg != null)
@@ -137,9 +136,8 @@ public sealed class GatewayCore
         }
     }
 
-    // ── 세션 수용/종료 (어댑터 호출) ──
 
-    /// <summary>어댑터가 새 세션을 전달 (G3 — ACCEPTED). 같은 플레이어의 기존 세션은 폐기 (G13 갭1).</summary>
+    // 어댑터가 새 세션을 전달 (G3 — ACCEPTED). 같은 플레이어의 기존 세션은 폐기 (G13 갭1).
     public void AcceptSession(ClientSession session)
     {
         lock (_lock)
@@ -193,7 +191,7 @@ public sealed class GatewayCore
 
         lock (_lock)
         {
-            // 라우팅 결정은 오케스트레이터만 (ROUTE-ON-READY — 2026-08-02 수정):
+            // 라우팅 결정은 오케스트레이터만 (ROUTE-ON-READY — 수정):
             // 미러 라우트를 즉시 사용하면 재접속 플레이어가 스테일 라우트(예: 이전 레이어,
             // 정지된 인스턴스)로 오접속된다. 웜 인스턴스는 SESSION_CONNECTED 직후
             // 오케스트레이터의 ROUTE_UPDATE가 즉시 도착하므로 대기 비용이 없다.
@@ -201,14 +199,13 @@ public sealed class GatewayCore
         }
     }
 
-    /// <summary>백엔드 미연결 세션의 클라이언트 이탈 (어댑터 호출).</summary>
+    // 백엔드 미연결 세션의 클라이언트 이탈 (어댑터 호출).
     public void CloseSession(ClientSession session, string reason)
     {
         if (session.Disposed) return;
         session.Dispose();
         RemoveSession(session, reason);
     }
-    // ── 세션 이벤트 (ClientSession → 코어) ──
     public void OnSessionBackendConnected(ClientSession session)
     {
         Report("BACKEND_CONNECTED", new
@@ -224,7 +221,6 @@ public sealed class GatewayCore
         RemoveSession(session, reason);
     }
 
-    // ── 내부 ──
 
     private void HandleCommand(ControlMessage msg)
     {
@@ -341,7 +337,7 @@ public sealed class GatewayCore
             }
         }
         Log.Debug($"{session.Username} 세션을 {payload.BackendAddr}(으)로 전환 (클라 연결 유지).");
-        // SWAP 멱등성 (2026-08-02): 이미 같은 목적지로 Active/Connecting/Swapping이면
+        // SWAP 멱등성 : 이미 같은 목적지로 Active/Connecting/Swapping이면
         // 재연결하지 않는다 — 중복 SWAP(오케스트레이터 재전송/재시도)으로 백엔드를 이중
         // 연결하면 인스턴스의 "Player with this name already exists" 추방이 발생한다.
         if (session.BackendAddr == payload.BackendAddr
@@ -388,9 +384,9 @@ public sealed class GatewayCore
         }
     }
 
-    /// <summary>AUTH_INFO (오케스트레이터 → 게이트웨이 — 연결 시/재연결 시 스냅샷).
-    /// 밴 목록 단일 소유자는 오케스트레이터 — 여기서는 메모리 사본 교체 + 서버 비밀번호/
-    /// 최대 인원 저장 (파일 영속화 없음 — 게이트웨이 재시작 시 AUTH_INFO 재수신으로 수렴).</summary>
+    // AUTH_INFO (오케스트레이터 → 게이트웨이 — 연결 시/재연결 시 스냅샷).
+    // 밴 목록 단일 소유자는 오케스트레이터 — 여기서는 메모리 사본 교체 + 서버 비밀번호/
+    // 최대 인원 저장 (파일 영속화 없음 — 게이트웨이 재시작 시 AUTH_INFO 재수신으로 수렴).
     private void ApplyAuthInfo(ControlMessage msg)
     {
         var payload = msg.PayloadAs<AuthInfoPayload>() ?? throw new InvalidDataException("payload 없음");
@@ -417,7 +413,7 @@ public sealed class GatewayCore
         }
     }
 
-    /// <summary>디버그 로그 표시 상태 (오케스트레이터 VERBOSE 메시지).</summary>
+    // 디버그 로그 표시 상태 (오케스트레이터 VERBOSE 메시지).
     private void ApplyVerbose(ControlMessage msg)
     {
         var payload = msg.PayloadAs<VerbosePayload>();
@@ -454,7 +450,7 @@ public sealed class GatewayCore
         }
     }
 
-    /// <summary>락다운 bypass 판정 — SteamID64가 허용 목록에 있으면 유지보수 중에도 통과.</summary>
+    // 락다운 bypass 판정 — SteamID64가 허용 목록에 있으면 유지보수 중에도 통과.
     private bool IsBypassed(ClientSession session) =>
         session.SteamId is ulong sid && _maintenanceBypass.Contains(sid);
 
@@ -482,11 +478,10 @@ public sealed class GatewayCore
         }
     }
 
-    /// <summary>백엔드 연결 가능한 주소인지 — 빈/무효 주소는 스테일 라우트로 취급한다.</summary>
+    // 백엔드 연결 가능한 주소인지 — 빈/무효 주소는 스테일 라우트로 취급한다.
     internal static bool IsUsableBackendAddr(string? addr) =>
         !string.IsNullOrEmpty(addr) && addr.Contains(':');
 
-    // ── payload 모델 (G12-R1) ──
 
     public sealed class TableSnapshot
     {
@@ -512,7 +507,7 @@ public sealed class GatewayCore
         public bool Banned { get; set; }
     }
 
-    /// <summary>AUTH_INFO (오케스트레이터 → 게이트웨이 — 밴 스냅샷 + 서버 비밀번호 + 최대 인원 + 서버명).</summary>
+    // AUTH_INFO (오케스트레이터 → 게이트웨이 — 밴 스냅샷 + 서버 비밀번호 + 최대 인원 + 서버명).
     public sealed class AuthInfoPayload
     {
         public string? ServerPassword { get; set; }
@@ -521,7 +516,7 @@ public sealed class GatewayCore
         public int MaxPlayers { get; set; }
     }
 
-    /// <summary>디버그 로그 표시 상태 (VERBOSE 메시지 — `verbose on/off` 명령).</summary>
+    // 디버그 로그 표시 상태 (VERBOSE 메시지 — `verbose on/off` 명령).
     public sealed class VerbosePayload
     {
         public bool On { get; set; }
@@ -531,15 +526,15 @@ public sealed class GatewayCore
     {
         public bool On { get; set; }
         public string? Message { get; set; }
-        /// <summary>락다운 bypass — 유지보수 중에도 접속 허용할 SteamID64 목록.</summary>
+        // 락다운 bypass — 유지보수 중에도 접속 허용할 SteamID64 목록.
         public ulong[]? Bypass { get; set; }
-        /// <summary>켬 전환 시 현재 접속 세션 전체 추방 여부 (락다운 진입 시 true).</summary>
+        // 켬 전환 시 현재 접속 세션 전체 추방 여부 (락다운 진입 시 true).
         public bool KickAll { get; set; }
     }
 
-    /// <summary>오케스트레이터가 인스턴스 리포트를 합산해 보내는 로비 동적 메타데이터 (G2).
-    /// mod 목록은 전송하지 않는다 (2026-08-03 — 개조 전용 모드뿐이므로 로비 표시 불필요 —
-    /// EXTRADATA 와이어에는 빈 목록+false로 고정 포함).</summary>
+    // 오케스트레이터가 인스턴스 리포트를 합산해 보내는 로비 동적 메타데이터 (G2).
+    // mod 목록은 전송하지 않는다 (개조 전용 모드뿐이므로 로비 표시 불필요 —
+    // EXTRADATA 와이어에는 빈 목록+false로 고정 포함).
     public sealed class LobbyMetadataPayload
     {
         public int LivingCount { get; set; }

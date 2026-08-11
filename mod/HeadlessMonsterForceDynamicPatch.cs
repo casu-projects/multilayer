@@ -4,8 +4,7 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>헤드리스 서버에서 플레이 중인 유저의 근처 적들만 Dynamic 물리로 깨움.
-/// 하지만 적Ai를 전부 깨우면 CPU와 blockDamages 목록이 터지니, 그 부분은 방지.</summary>
+// 플레이어 가시 범위의 적만 Dynamic 물리로 전환 — 전부 깨우면 CPU/blockDamages가 폭주한다.
 [HarmonyPatch]
 internal static class HeadlessMonsterForceDynamicPatch
 {
@@ -21,6 +20,7 @@ internal static class HeadlessMonsterForceDynamicPatch
         if (WorldGeneration.world.generatingWorld) return true;
 
         GameObject go = rb.gameObject;
+        // 스파이더/그랩버플랜트 또는 animal 플래그 빌딩만 대상.
         if (go.GetComponent<SpiderHandler>() == null && go.GetComponent<GrabberPlant>() == null)
         {
             BuildingEntity building = go.GetComponent<BuildingEntity>();

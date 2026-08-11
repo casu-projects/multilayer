@@ -3,7 +3,7 @@ using LiteNetLib.Utils;
 
 namespace CasuMpGateway;
 
-/// <summary>직접연결(DirectIpAdapter) 클라이언트 싱크 — LiteNetLib 피어로 전송.</summary>
+// 직접연결(DirectIpAdapter) 클라이언트 싱크 — LiteNetLib 피어로 전송.
 public sealed class LiteNetLibClientSink : IClientSink
 {
     private readonly NetPeer _peer;

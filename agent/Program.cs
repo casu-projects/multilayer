@@ -8,10 +8,10 @@ namespace CasuMpAgent;
 
 internal static class Program
 {
-    /// <summary>시작 시 자동 탐지된 게이트웨이 직결용 호스트 IP (AGENT_HELLO address).</summary>
+    // 시작 시 자동 탐지된 게이트웨이 직결용 호스트 IP (AGENT_HELLO address).
     private static string _localIp = "127.0.0.1";
 
-    /// <summary>SHUTDOWN 수신 시 메인 루프 종료 요청 (Main에서 cts.Cancel과 연결).</summary>
+    // SHUTDOWN 수신 시 메인 루프 종료 요청 (Main에서 cts.Cancel과 연결).
     private static Action? _shutdownRequested;
     private static void Main(string[] args)
     {
@@ -71,10 +71,9 @@ internal static class Program
         }
     }
 
-    /// <summary>오케스트레이터로 보낼 보고 메시지 (연결 수립 시 flush).</summary>
+    // 오케스트레이터로 보낼 보고 메시지 (연결 수립 시 flush).
     private static readonly ConcurrentQueue<ControlMessage> outboundReports = new();
 
-    // ── 명령 처리 ──
 
     private static void HandleCommand(AgentConfig config, Dictionary<string, InstanceProcess> instances,
         ControlMessage msg, Action<ControlMessage> ack)
@@ -150,7 +149,6 @@ internal static class Program
         }
     }
 
-    // ── 제어 채널 (오케스트레이터에 연결) ──
 
     private static async Task RunControlChannelAsync(AgentConfig config,
         ConcurrentQueue<(ControlMessage, Action<ControlMessage>)> inbound, CancellationToken ct)
@@ -220,7 +218,7 @@ internal static class Program
         }
     }
 
-    /// <summary>명령 처리 스레드가 아닌 곳에서도 쓸 수 있게 ACK를 스트림에 직접 기록.</summary>
+    // 명령 처리 스레드가 아닌 곳에서도 쓸 수 있게 ACK를 스트림에 직접 기록.
     private static void SendAck(Stream stream, ControlMessage ack)
     {
         // 메인 스레드의 HandleCommand에서 호출됨 — 여기서는 outbound 전용 큐로 보낸다.
@@ -253,7 +251,6 @@ internal static class Program
         }
     }
 
-    // ── 유틸 ──
 
     private static (string Host, int Port) SplitAddr(string addr)
     {
@@ -275,7 +272,6 @@ internal static class Program
         }
     }
 
-    // ── PID 추적 / orphan 정리 (G-3) ──
 
     private static string PidPath(AgentConfig config, string key) =>
         Path.Combine(Path.GetFullPath(config.InstancesDir), Sanitize(key), "pid");

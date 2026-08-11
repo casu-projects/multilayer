@@ -2,20 +2,15 @@ using System.Text;
 
 namespace CasuMpOrchestrator;
 
-/// <summary>콘솔 출력에 전역 타임스탬프 + 소스 접두사를 부여하는 TextWriter 래퍼.
-/// 자기 로그(일반 WriteLine)는 "[HH:mm:ss] [orch] " — 릴레이 로그는 PrintRelayed를 통해
-/// "[HH:mm:ss] [source] "로 표시된다 (접두사는 오케스트레이터 표시 계층이 단독 부여).
-/// 완성된 라인은 ConsoleIO.WriteLine으로 라우팅 — 대화형 시 입력줄 보호(로그 침범 방지)를
-/// 받고, ConsoleIO는 SetOut 전 원본 writer를 직접 사용하므로 재귀가 없다.
-/// 부분 쓰기(Write)는 개행 단위로 버퍼링해 한 줄당 하나의 접두사를 붙인다.</summary>
+// 콘솔 출력에 전역 타임스탬프 + 소스 접두사를 부여하는 TextWriter 래퍼.
+// 자기 로그는 "[HH:mm:ss] [orch] ", 릴레이 로그는 PrintRelayed로 "[HH:mm:ss] [source] ".
+// ConsoleIO.WriteLine으로 라우팅 (대화형 입력줄 보호), 부분 쓰기는 개행 단위로 버퍼링.
 public sealed class TimestampedConsoleWriter : TextWriter
 {
-    /// <summary>전역 인스턴스 — LOG 릴레이 핸들러가 PrintRelayed로 접근한다.</summary>
+    // 전역 인스턴스 — LOG 릴레이 핸들러가 PrintRelayed로 접근한다.
     public static TimestampedConsoleWriter? Instance { get; private set; }
 
-    /// <summary>완성된 로그 라인 콜백 (접두사 포함 — D1 Discord 콘솔 릴레이용).
-    /// EmitLine/PrintRelayed가 표시 전에 호출한다 — 오케스트레이터 자체 로그와
-    /// 게이트웨이/에이전트/인스턴스 릴레이 로그가 전부 이 경로로 수집된다.</summary>
+    // 완성된 로그 라인 콜백 (접두사 포함 — Discord 콘솔 릴레이용).
     public Action<string>? OnConsoleLine;
 
     private readonly TextWriter _inner;
@@ -36,8 +31,7 @@ public sealed class TimestampedConsoleWriter : TextWriter
         ConsoleIO.WriteLine(formatted);
     }
 
-    /// <summary>릴레이 로그 표시 (agent/gateway/인스턴스 — LOG 메시지 수신 시).
-    /// 소스는 "name:subname/thirdname" 규약 (예: agent:m1/depth-1) — 단일 블록에 통합.</summary>
+    // 릴레이 로그 표시 (agent/gateway/인스턴스 — LOG 메시지 수신 시).
     public void PrintRelayed(string source, string message)
     {
         string formatted = $"[{DateTime.Now:HH:mm:ss} {source}] {message}";

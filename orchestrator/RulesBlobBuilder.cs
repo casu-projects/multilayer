@@ -1,10 +1,8 @@
 namespace CasuMpOrchestrator;
 
-/// <summary>rule.json → Steam 로비 EXTRADATA용 KrokoshaMultiplayerGameRules 구조체 이진
-/// 레이아웃 재구성 (구 시스템 RulesBlobBuilder 이식 — 2026-08-03). 규칙은 RunRuleStore
-/// (rule.json)가 단일 정본이므로 모드 경유 없이 여기서 직접 구성한다.
-/// 100바이트: int deathcounter(4) + KrokoshaMultiplayerGameRules(96) — 구조체 오프셋은
-/// 구 시스템 검증값을 그대로 사용한다 (게임 업데이트 시 재검증 필요).</summary>
+// rule.json → Steam 로비 EXTRADATA용 KrokoshaMultiplayerGameRules 구조체 이진 레이아웃 재구성.
+// 100바이트: int deathcounter(4) + KrokoshaMultiplayerGameRules(96) — 구조체 오프셋은
+// 구 시스템 검증값을 그대로 사용한다 (게임 업데이트 시 재검증 필요).
 internal static class RulesBlobBuilder
 {
     internal static byte[] Build(Dictionary<string, string> data)
@@ -13,8 +11,7 @@ internal static class RulesBlobBuilder
         var buf = new byte[100];
         var span = new Span<byte>(buf);
 
-        // deathcounter at offset 0 (default 0)
-        // rules start at offset 4
+        // deathcounter at offset 0 (default 0), rules start at offset 4.
         const int R = 4;
         SetBool(span, R + 0, data, "sv_cheats", false);
         SetBool(span, R + 1, data, "AllowClientCheatCommands", false);

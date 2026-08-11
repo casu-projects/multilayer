@@ -7,107 +7,119 @@ using UnityEngine;
 namespace CasuMod;
 
 /// <summary>
-/// 구 프로젝트 이식 (project/mod/InventorySlotMoveBystanderSyncPatch.cs):
-/// 베이스 모드의 클라이언트 패킷 적용 로직은 "소유 바디/컨테이너가 실제로 바뀔 때만"
-/// 방관자 클라이언트의 아이템 슬롯을 갱신한다 — 같은 바디 내 슬롯 이동/교환은 소유자가
-/// 그대로라 조건에 안 걸려 방관자가 옛 슬롯을 계속 본다. 서버는 실제 drop→재pickup을
-/// 수행하지만 (Body.SwapSlots + 네트워크 픽업 핸들러) 같은 틱 안에 일어나 두 동기화
-/// 패킷("바디에서 나감"/"새 슬롯 부착")이 하나로 합쳐져 방관자가 중간 상태를 못 본다.
+/// 같은 캐릭터 안에서 아이템 슬롯을 옮길 때, 다른 유저 화면에도 이동 과정이 제대로 보이게 수정
 ///
-/// 수정: 서버 측 drop을 기록한 뒤, 즉시 이어지는 같은 바디로의 pickup(0.15초 창)이면
-/// "바디에서 나감" 강제동기화를 즉시 플러시 → 재pickup → "새 슬롯 부착"도 즉시 플러시해
-/// 두 상태가 분리된 패킷으로 발신되게 한다 (라운드로빈 대기 제거, 인공 지연 없음).
+/// KrokMP는 같은 틱에 처리된 drop과 pickup을 마지막 상태 하나로 합칠 수 있는데
+/// 그렇다고 모든 CoolSync 시스템을 강제로 두번 갱신하면 상관없는 아이템에까지 패킷을 만들어내니
+/// 그건 해결책이라기보다 서버에 렉을 더 만드는 셈이에요.
+/// 여기서는 실제 슬롯 교환이 사용하는 DropItem(int)만 기록하고, 같은 몸으로 돌아오는 pickup만 다음 서버 틱에 가깝게 미뤄 두 상태를 자연스럽게 분리한다.
 /// </summary>
-[HarmonyPatch(typeof(Body), "DropItem", new Type[] { typeof(Item) })]
-internal static class Body_DropItem_RecordForBystanderSlotSyncPatch
+internal static class InventorySlotMoveBystanderSyncPatch
 {
-    private const float StaleEntryPurgeSeconds = 5f;
+    private const float SameBodyMoveWindowSeconds = 0.15f;
+    private const float DeferredPickupSeconds = 0.12f;
+    private const int CleanupThreshold = 256;
 
-    internal static readonly Dictionary<Item, (Body Body, float DroppedAt)> RecentDrops = new();
-
-    private static void Postfix(Body __instance, Item item)
+    private sealed class RecentDrop
     {
-        if (!KrokoshaScavMultiplayer.is_server || item == null)
+        internal Body Body;
+        internal float Time;
+    }
+
+    private static readonly Dictionary<int, RecentDrop> RecentDrops = new();
+    private static readonly HashSet<int> ReplayingPickups = new();
+
+    [HarmonyPatch(typeof(Body), nameof(Body.DropItem), new[] { typeof(int) })]
+    private static class BodyDropItemRecordPatch
+    {
+        private static void Prefix(Body __instance, int __0, out Item __state)
         {
-            return;
+            __state = null;
+            if (!ShouldRun() || __instance == null) return;
+
+            __state = __instance.GetItem(__0);
         }
 
-        float now = Time.realtimeSinceStartup;
-        if (RecentDrops.Count > 0)
+        private static void Postfix(Body __instance, Item __state)
         {
-            var stale = new List<Item>();
-            foreach (KeyValuePair<Item, (Body Body, float DroppedAt)> kv in RecentDrops)
+            if (!ShouldRun() || __instance == null || __state == null) return;
+
+            int itemId = __state.GetInstanceID();
+            RecentDrops[itemId] = new RecentDrop
             {
-                if (now - kv.Value.DroppedAt > StaleEntryPurgeSeconds)
+                Body = __instance,
+                Time = Time.realtimeSinceStartup
+            };
+
+            if (RecentDrops.Count > CleanupThreshold)
+            {
+                CleanupExpiredDrops(Time.realtimeSinceStartup);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(Body), nameof(Body.PickUpItem), new[] { typeof(Item), typeof(int), typeof(bool) })]
+    private static class BodyPickUpItemDeferPatch
+    {
+        private static bool Prefix(Body __instance, Item __0, int __1, bool __2)
+        {
+            if (!ShouldRun() || __instance == null || __0 == null) return true;
+
+            int itemId = __0.GetInstanceID();
+            if (ReplayingPickups.Contains(itemId)) return true;
+            if (!RecentDrops.TryGetValue(itemId, out RecentDrop drop)) return true;
+
+            RecentDrops.Remove(itemId);
+            float age = Time.realtimeSinceStartup - drop.Time;
+            if (drop.Body != __instance || age < 0f || age > SameBodyMoveWindowSeconds)
+            {
+                return true;
+            }
+
+            Body body = __instance;
+            Item item = __0;
+            int slot = __1;
+            bool pickupFlag = __2;
+
+            // 전체 동기화를 강제로 돌리지 않고, drop을 서버에 먼저 전송될 시간을 조금 준다.
+            KrokoshaCasualtiesUtils.Util.DelayCallLambda(DeferredPickupSeconds, (Action)(() =>
+            {
+                if (body == null || item == null) return;
+
+                int delayedItemId = item.GetInstanceID();
+                ReplayingPickups.Add(delayedItemId);
+                try
                 {
-                    stale.Add(kv.Key);
+                    body.PickUpItem(item, slot, pickupFlag);
                 }
-            }
-            foreach (Item staleItem in stale)
+                finally
+                {
+                    ReplayingPickups.Remove(delayedItemId);
+                }
+            }));
+
+            return false;
+        }
+    }
+
+    private static bool ShouldRun() =>
+        KrokoshaScavMultiplayer.network_system_is_running
+        && KrokoshaScavMultiplayer.is_server;
+
+    private static void CleanupExpiredDrops(float now)
+    {
+        var expired = new List<int>();
+        foreach (KeyValuePair<int, RecentDrop> pair in RecentDrops)
+        {
+            if (pair.Value.Body == null || now - pair.Value.Time > SameBodyMoveWindowSeconds)
             {
-                RecentDrops.Remove(staleItem);
+                expired.Add(pair.Key);
             }
         }
 
-        RecentDrops[item] = (__instance, now);
-    }
-}
-
-[HarmonyPatch(typeof(Body), nameof(Body.PickUpItem))]
-internal static class Body_PickUpItem_ForceBystanderSlotSyncPatch
-{
-    private const float SameBodyReslotWindowSeconds = 0.15f;
-    private static readonly HashSet<Item> InFlightItems = new HashSet<Item>();
-
-    private static bool Prefix(Body __instance, Item item, int slot)
-    {
-        if (!KrokoshaScavMultiplayer.is_server || item == null || InFlightItems.Contains(item))
+        foreach (int itemId in expired)
         {
-            return true;
-        }
-
-        if (!Body_DropItem_RecordForBystanderSlotSyncPatch.RecentDrops.TryGetValue(item, out (Body Body, float DroppedAt) record))
-        {
-            return true;
-        }
-        Body_DropItem_RecordForBystanderSlotSyncPatch.RecentDrops.Remove(item);
-
-        if (record.Body != __instance || Time.realtimeSinceStartup - record.DroppedAt > SameBodyReslotWindowSeconds)
-        {
-            return true;
-        }
-
-        // 위 drop이 이미 "바디에서 나감" 상태의 강제동기화를 큐잉했다 — 라운드로빈 차례를
-        // 기다리지 말고 지금 플러시해, 바로 아래의 재부착이 같은 패킷으로 합쳐지지 않게 한다.
-        FlushForcedSyncNow();
-
-        item.rb.simulated = false;
-        item.rb.velocity = Vector2.zero;
-
-        InFlightItems.Add(item);
-        try
-        {
-            __instance.PickUpItem(item, slot, force: true);
-        }
-        finally
-        {
-            InFlightItems.Remove(item);
-        }
-
-        // "새 슬롯 부착" 상태도 같은 이유로 즉시 플러시.
-        FlushForcedSyncNow();
-        return false;
-    }
-
-    /// <summary>등록된 모든 동기화 서브시스템의 틱 전송 단계를 즉시 실행한다
-    /// (CoolSyncManager의 라운드로빈 대기 대신). NewCoolerObjectPacketWriteReadSystem
-    /// (아이템을 실제로 소유하는 시스템)은 내부 타입이라 공개 BaseCoolSyncSubSystem
-    /// 참조로만 도달한다.</summary>
-    private static void FlushForcedSyncNow()
-    {
-        foreach (BaseCoolSyncSubSystem system in CoolSyncManager.AllSystems)
-        {
-            system.Server_Update();
+            RecentDrops.Remove(itemId);
         }
     }
 }

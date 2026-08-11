@@ -5,60 +5,109 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>유체 시뮬레이션 범위를 모든 플레이어 기준으로 강제 (2026-08-07, v3).
-/// 문제: 바닐라 FluidManager.SimulationStep의 시뮬레이션 범위(SimulationRangeIndex —
-/// FluidManager.cs:101-105)가 PlayerCamera.main.transform.position(주차된 서버 카메라) 기준
-/// ±64블록이라, 플레이어가 그 밖에 있으면 서버 유체 배열이 갱신되지 않는다 → 서버 권위
-/// 동기화(WorldChunkSync.FluidTilemapSyncUpdate)가 클라 로컬 시뮬레이션을 원복해
-/// 유체가 퍼지지 않거나 되돌아간다 (Fluid 동기화 이상).
-/// v2: 플레이어별 라운드로빈(1/N) — 프로덕션 다중 유저에서 각자 1/N 속도로만 시뮬레이션되어
-/// 서버 유체가 클라를 못 따라잡음 → "유체 초기화" 관측 (2026-08-07, 프로덕션 조사).
-/// v3: 라운드로빈 제거 — FixedUpdate마다 **모든 플레이어의 영역을 전부 시뮬레이션**한다
-/// (MP forcenext 훅으로 범위 강제 + SimulationStep을 플레이어 수만큼 호출).
-/// 모든 유저가 풀레이트 — 서버가 클라를 따라잡아 원복이 사라진다.
-/// 반경 64 (성능: N×16,384 타일/프레임 — 타일당 분기 체크 수준).
-/// 범위 경계는 바닐라와 동일하게 클램프 (1 ~ worldSize-2). 헤드리스/그래픽 무관.</summary>
+/// <summary>
+/// 서버의 액체에 관련한 계산 범위를 플레이중인 유저 주변으로 옮김.
+///
+/// 이전 코드에서는 유저 한명마다 많은 영역을 FixedUpdate의 시간마다 다시 계산했는데
+/// 이러면 다수의 유저가 한곳에 모이면 같은 액체의 이동과 계산을 인원수만큼 여러번 반복 계산하는 방식이라 서버 렉이걸려요
+/// 그래서 유저의 계산 범위가 겹치거나 맞닿은 범위를 먼저 합친 뒤, 서로 떨어진 영역에 대해서만 SimulationStep을 한 번씩 호출하게 변경했어요.
+/// </summary>
 [HarmonyPatch(typeof(FluidManager), "FixedUpdate")]
 internal static class FluidSimRangeFollowPlayersPatch
 {
     private const int RangeBlocks = 64;
 
-    private static readonly List<NetPlayer> _players = new();
+    private struct SimulationArea
+    {
+        internal int MinX;
+        internal int MaxX;
+        internal int MinY;
+        internal int MaxY;
+    }
+
+    private static readonly List<SimulationArea> Areas = new();
 
     private static bool Prefix(FluidManager __instance)
     {
         if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
+
         WorldGeneration world = WorldGeneration.world;
         if (world == null || world.generatingWorld) return true;
 
-        _players.Clear();
-        foreach (NetPlayer p in NetPlayer.AllLivingPlayers)
+        Areas.Clear();
+        foreach (NetPlayer player in NetPlayer.AllLivingPlayers)
         {
-            if (p != null && p.body != null) _players.Add(p);
-        }
-        if (_players.Count == 0) return true;
+            if (player == null || player.body == null) continue;
 
-        foreach (NetPlayer p in _players)
+            Vector2Int center = world.WorldToBlockPos(player.body.transform.position);
+            AddAndMerge(new SimulationArea
+            {
+                MinX = Clamp(center.x - RangeBlocks, (int)world.width),
+                MaxX = Clamp(center.x + RangeBlocks, (int)world.width),
+                MinY = Clamp(center.y - RangeBlocks, (int)world.height),
+                MaxY = Clamp(center.y + RangeBlocks, (int)world.height)
+            });
+        }
+
+        if (Areas.Count == 0) return true;
+
+        foreach (SimulationArea area in Areas)
         {
-            Vector2Int c = world.WorldToBlockPos(p.body.transform.position);
             FluidManager_SimulationRangeIndex_MultiplayerPatch.forcenext = (
-                ClampRange(c.x - RangeBlocks, c.x + RangeBlocks, (int)world.width),
-                ClampRange(c.y - RangeBlocks, c.y + RangeBlocks, (int)world.height));
+                new RangeI(area.MinX, area.MaxX),
+                new RangeI(area.MinY, area.MaxY));
             FluidManager_SimulationRangeIndex_MultiplayerPatch.forcenext_avaiable = true;
             __instance.SimulationStep();
         }
 
-        // 바닐라 단일 SimulationStep은 이미 플레이어별로 대체 실행 — 스킵.
         return false;
     }
 
-    /// <summary>바닐라 SimulationRangeIndex와 동일한 경계 클램프 (1 ~ size-2).</summary>
-    private static RangeI ClampRange(int min, int max, int worldSize)
+    private static void AddAndMerge(SimulationArea area)
     {
-        if (min < 1) min = 1;
-        if (max < 1) max = 1;
-        if (max > worldSize - 2) max = worldSize - 2;
-        if (min > worldSize - 2) min = worldSize - 2;
-        return new RangeI(min, max);
+        // 유저들의 계산 구역을 합친 뒤 다른 영역과 새로 겹칠 수도 있으니 처음부터 다시 검사.
+        for (int i = 0; i < Areas.Count;)
+        {
+            if (!CanMergeWithoutExtraWork(Areas[i], area))
+            {
+                i++;
+                continue;
+            }
+
+            SimulationArea existing = Areas[i];
+            area.MinX = Mathf.Min(area.MinX, existing.MinX);
+            area.MaxX = Mathf.Max(area.MaxX, existing.MaxX);
+            area.MinY = Mathf.Min(area.MinY, existing.MinY);
+            area.MaxY = Mathf.Max(area.MaxY, existing.MaxY);
+            Areas.RemoveAt(i);
+            i = 0;
+        }
+
+        Areas.Add(area);
+    }
+
+    private static bool CanMergeWithoutExtraWork(SimulationArea a, SimulationArea b)
+    {
+        if (a.MinX > b.MaxX + 1 || a.MaxX + 1 < b.MinX
+            || a.MinY > b.MaxY + 1 || a.MaxY + 1 < b.MinY)
+        {
+            return false;
+        }
+
+        long mergedWidth = (long)Mathf.Max(a.MaxX, b.MaxX) - Mathf.Min(a.MinX, b.MinX) + 1L;
+        long mergedHeight = (long)Mathf.Max(a.MaxY, b.MaxY) - Mathf.Min(a.MinY, b.MinY) + 1L;
+        long mergedCells = mergedWidth * mergedHeight;
+        long separateCells = AreaSize(a) + AreaSize(b);
+
+        return mergedCells <= separateCells;
+    }
+
+    private static long AreaSize(SimulationArea area) =>
+        ((long)area.MaxX - area.MinX + 1L) * ((long)area.MaxY - area.MinY + 1L);
+
+    private static int Clamp(int value, int worldSize)
+    {
+        int max = Mathf.Max(1, worldSize - 2);
+        return Mathf.Clamp(value, 1, max);
     }
 }

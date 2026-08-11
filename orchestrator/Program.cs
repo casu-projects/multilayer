@@ -39,6 +39,7 @@ internal static class Program
         var sessions = new PlayerSessionStore(config, hub, instances);
         var dataStore = new PlayerDataStore(config);
         var migrations = new MigrationCoordinator(config, hub, instances, sessions, dataStore);
+        var groups = new GroupStore(config);
 
         var banList = new BanList(config.BanListPath);
 
@@ -121,6 +122,15 @@ internal static class Program
         // 락다운 시작/종료 → Discord 알림 (메시지 채널).
         console.LockdownNotify = on =>
             _ = on ? discordBot.SendLockdownAsync(started: true) : discordBot.SendLockdownAsync(started: false);
+        // 그룹 스레드 채팅 → 게임 그룹 멤버 라우팅. username은 무색 (D 배지만 파랑).
+        discordBot.OnThreadChat = (username, message, threadId) =>
+        {
+            if (groups.TryGetByThreadId(threadId, out Group? group))
+            {
+                RouteGroupChat(hub, sessions, groups, discordBot, group, senderKey: null,
+                    username, message, color: "", layerLabel: "");
+            }
+        };
         // 전체 콘솔 로그 → Discord 콘솔 채널 (접두사 포함 — 오케스트레이터 + 릴레이 전부).
         TimestampedConsoleWriter.Instance!.OnConsoleLine = line => discordBot.EnqueueConsoleLog(line);
 
@@ -161,7 +171,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, votes, discordBot, conn, msg);
+                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, votes, discordBot, groups, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -214,7 +224,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, votes, discordBot, conn, msg);
+                    Dispatch(config, hub, sessions, instances, migrations, dataStore, banList, runRules, votes, discordBot, groups, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -252,7 +262,7 @@ internal static class Program
     private static void Dispatch(OrchestratorConfig config, ControlHub hub, PlayerSessionStore sessions,
         InstanceManager instances, MigrationCoordinator migrations, PlayerDataStore dataStore,
         BanList banList, RunRuleStore runRules, VoteCoordinator votes, DiscordBot discordBot,
-        ControlHub.ClientConnection conn, ControlMessage msg)
+        GroupStore groups, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -340,19 +350,19 @@ internal static class Program
         switch (conn.Kind)
         {
             case ClientKind.Gateway:
-                DispatchGateway(config, hub, sessions, migrations, runRules, discordBot, conn, msg);
+                DispatchGateway(config, hub, sessions, migrations, runRules, discordBot, groups, conn, msg);
                 break;
             case ClientKind.Agent:
                 DispatchAgent(instances, sessions, conn, msg);
                 break;
             case ClientKind.Mod:
-                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, votes, discordBot, config.DiscordUrl, conn, msg);
+                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, votes, discordBot, groups, config.DiscordUrl, conn, msg);
                 break;
         }
     }
 
     private static void DispatchGateway(OrchestratorConfig config, ControlHub hub, PlayerSessionStore sessions, MigrationCoordinator migrations,
-        RunRuleStore runRules, DiscordBot discordBot, ControlHub.ClientConnection conn, ControlMessage msg)
+        RunRuleStore runRules, DiscordBot discordBot, GroupStore groups, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -370,6 +380,13 @@ internal static class Program
                         break;
                     }
                     sessions.OnSessionConnected(connected, GetUsername(msg));
+
+                    // 스테일 그룹 채팅 모드 정리 — 그룹 미가입자는 Global이 기본 (오프라인 중
+                    // 그룹 이탈/삭제 시 모드 dict에 남은 Group 잔존 방지).
+                    if (groups.GetByPlayer(connected) == null)
+                    {
+                        SendChatModeReset(hub, sessions, connected.Value);
+                    }
 
                     // G13 — 접속 시 생존 상태 기본값(생존) + 로비 목록 즉시 갱신.
                     _alive[connected] = true;
@@ -444,7 +461,7 @@ internal static class Program
 
     private static void DispatchMod(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, PlayerDataStore dataStore, RunRuleStore runRules, VoteCoordinator votes,
-        DiscordBot discordBot, string discordUrl, ControlHub.ClientConnection conn, ControlMessage msg)
+        DiscordBot discordBot, GroupStore groups, string discordUrl, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -501,9 +518,32 @@ internal static class Program
             case "CHAT":
                 if (msg.PayloadAs<ChatPayload>() is { } chat && !string.IsNullOrEmpty(chat.Speaker))
                 {
-                    // 크로스 인스턴스 채팅 릴레이 (Phase 2): 플레이어 메시지만 전파 —
-                    // 발신자 제외 전 인스턴스에 레이어 태그("L" + 발신 depth)를 부여해 재전송.
                     string layerLabel = $"L{conn.InstanceDepth}";
+
+                    // 그룹 채팅 — 그룹 멤버가 있는 인스턴스에만 targets(멤버 이름)와 함께 전송.
+                    // 발신자 본인은 모드가 senderKey로 제외한다 (같은 인스턴스의 다른 멤버는 수신).
+                    if (chat.Mode == "group")
+                    {
+                        if (TryPlayerKey(chat.PlayerKey, out var senderKey))
+                        {
+                            Group? group = groups.GetByPlayer(senderKey);
+                            if (group == null)
+                            {
+                                // 그룹 미가입 — 안내 (그룹 모드인데 그룹이 없음).
+                                SendGroupResult(hub, sessions, chat.PlayerKey,
+                                    new[] { "그룹에 가입되어 있지 않습니다. !group list로 확인하세요." });
+                            }
+                            else
+                            {
+                                RouteGroupChat(hub, sessions, groups, discordBot, group,
+                                    senderKey: senderKey.Value,
+                                    chat.Speaker, chat.Message, chat.Color ?? "", layerLabel);
+                            }
+                        }
+                        break;
+                    }
+
+                    // 크로스 인스턴스 채팅 릴레이: 발신자 제외 전 인스턴스에 레이어 태그 부여 재전송.
                     int forwarded = 0;
                     foreach (ControlHub.ClientConnection other in hub.Connections
                         .Where(c => c.Kind == ClientKind.Mod && !c.Closed && c != conn))
@@ -600,6 +640,28 @@ internal static class Program
                             toDepth = announce.ToDepth,
                         });
                     }
+                }
+                break;
+            case "GROUP_REQUEST":
+                if (msg.PayloadAs<GroupRequestPayload>() is { } groupReq
+                    && TryPlayerKey(groupReq.PlayerKey, out var groupPlayer))
+                {
+                    HandleGroupRequest(hub, sessions, instances, groups, discordBot, conn, groupPlayer, groupReq);
+                }
+                break;
+            case "GROUP_INVITE_RESULT":
+                if (msg.PayloadAs<GroupInviteResultPayload>() is { } inviteResult
+                    && TryPlayerKey(inviteResult.PlayerKey, out var invitePlayer))
+                {
+                    HandleGroupInviteResult(hub, sessions, groups, discordBot, invitePlayer, inviteResult);
+                }
+                break;
+            case "CHATMODE_REQUEST":
+                if (msg.PayloadAs<ChatModeRequestPayload>() is { } cmReq && TryPlayerKey(cmReq.PlayerKey, out var cmPlayer))
+                {
+                    // 그룹 모드 진입 검증 — 미가입이면 모드가 Global로 건너뛴다.
+                    bool ok = cmReq.Mode == "group" && groups.GetByPlayer(cmPlayer) != null;
+                    hub.SendNoAck(conn, "CHATMODE_RESULT", new { playerKey = cmReq.PlayerKey, ok });
                 }
                 break;
             case "VOTE_START":
@@ -842,6 +904,241 @@ internal static class Program
         return string.Join("\n", snapshot.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}: {kv.Value}"));
     }
 
+    // ── 그룹 (GROUP_REQUEST / 초대 / 채팅 라우팅) ──
+
+    private static void SendGroupResult(ControlHub hub, PlayerSessionStore sessions, string playerKey, string[] lines)
+    {
+        PlayerState? state = sessions.Get(PlayerKey.FromString(playerKey));
+        if (state?.InstanceId == null) return;
+        ControlHub.ClientConnection? conn = hub.ModConnection(state.InstanceId);
+        if (conn == null) return;
+        hub.SendNoAck(conn, "GROUP_RESULT", new { playerKey, lines });
+    }
+
+    // 채팅 모드 강제 리셋 (그룹 이탈/삭제 — 그룹 모드 잔류 방지, 모드가 조용히 Global 전환).
+    private static void SendChatModeReset(ControlHub hub, PlayerSessionStore sessions, string playerKey)
+    {
+        PlayerState? state = sessions.Get(PlayerKey.FromString(playerKey));
+        if (state?.InstanceId == null) return;
+        ControlHub.ClientConnection? conn = hub.ModConnection(state.InstanceId);
+        if (conn == null) return;
+        hub.SendNoAck(conn, "CHATMODE_RESET", new { playerKey });
+    }
+
+    private static void HandleGroupRequest(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
+        GroupStore groups, DiscordBot discordBot, ControlHub.ClientConnection conn, PlayerKey player, GroupRequestPayload req)
+    {
+        PlayerState? state = sessions.Get(player);
+        string displayName = state?.Username ?? player.Value;
+
+        switch (req.Action)
+        {
+            case "create":
+            {
+                string? err = groups.TryCreate(player, req.Name, out Group? created);
+                if (err != null)
+                {
+                    SendGroupResult(hub, sessions, player.Value, new[] { err });
+                    return;
+                }
+                // Discord 그룹 스레드 자동 생성 (실패해도 게임 내 그룹은 정상 동작).
+                _ = discordBot.CreateGroupThreadAsync(created!.Name)
+                    .ContinueWith(t => groups.SetThreadId(created.Name, t.Result));
+                SendGroupResult(hub, sessions, player.Value, new[] { $"그룹 [{created.Name}]을(를) 생성하고 가입했습니다." });
+                break;
+            }
+            case "join":
+            {
+                string? err = groups.TryJoin(player, req.Name, out Group? joined);
+                SendGroupResult(hub, sessions, player.Value,
+                    err != null ? new[] { err } : new[] { $"그룹 [{joined!.Name}]에 가입했습니다." });
+                break;
+            }
+            case "leave":
+            {
+                string? err = groups.Leave(player, out Group? removed);
+                if (err != null)
+                {
+                    SendGroupResult(hub, sessions, player.Value, new[] { err });
+                    return;
+                }
+                if (removed != null)
+                {
+                    // 마지막 멤버 퇴장 — 그룹 삭제 + Discord 스레드 정리.
+                    _ = discordBot.DeleteGroupThreadAsync(removed.DiscordThreadId);
+                }
+                // 그룹 모드 잔류 방지 — 조용히 Global로 리셋.
+                SendChatModeReset(hub, sessions, player.Value);
+                SendGroupResult(hub, sessions, player.Value, new[] { "그룹에서 퇴장했습니다." });
+                break;
+            }
+            case "remove":
+            {
+                string? err = groups.Remove(player, out Group? removed);
+                if (err != null)
+                {
+                    SendGroupResult(hub, sessions, player.Value, new[] { err });
+                    return;
+                }
+                _ = discordBot.DeleteGroupThreadAsync(removed!.DiscordThreadId);
+                // 잔류 멤버 퇴출 알림 + 그룹 모드 잔류 방지 (조용히 Global 리셋).
+                // 생성자(삭제 실행자)는 아래의 "삭제했습니다" 메시지로 충분 — 이중 안내 제외.
+                foreach (string memberKey in removed.MemberKeys)
+                {
+                    if (memberKey == player.Value) continue;
+                    SendChatModeReset(hub, sessions, memberKey);
+                    SendGroupResult(hub, sessions, memberKey, new[] { $"그룹 [{removed.Name}]이(가) 삭제되었습니다." });
+                }
+                SendChatModeReset(hub, sessions, player.Value);
+                SendGroupResult(hub, sessions, player.Value, new[] { $"그룹 [{removed.Name}]을(를) 삭제했습니다." });
+                break;
+            }
+            case "list":
+                SendGroupResult(hub, sessions, player.Value, groups.ListAll());
+                break;
+            case "players":
+                SendGroupResult(hub, sessions, player.Value, groups.PlayerList(sessions, player));
+                break;
+            case "joinable":
+            {
+                string? err = groups.ToggleJoinable(player, out Group? g);
+                SendGroupResult(hub, sessions, player.Value,
+                    err != null ? new[] { err }
+                    : new[] { $"그룹 [{g!.Name}] — 직접 가입 {(g.Joinable ? "허용" : "불가 (초대 전용)")}." });
+                break;
+            }
+            case "invite":
+            {
+                // 대상 해석 (온라인 세션만 — 이름 또는 PlayerKey).
+                string query = req.Target.Trim();
+                PlayerState? target = sessions.All.FirstOrDefault(s =>
+                    s.Session != PlayerSessionState.Offline
+                    && (s.Username != null && s.Username.Equals(query, StringComparison.OrdinalIgnoreCase)
+                        || s.Key.Value.Equals(query, StringComparison.OrdinalIgnoreCase)));
+                if (target == null)
+                {
+                    SendGroupResult(hub, sessions, player.Value, new[] { $"플레이어를 찾을 수 없습니다: {query}" });
+                    return;
+                }
+                Group? myGroup = groups.GetByPlayer(player);
+                if (myGroup == null)
+                {
+                    SendGroupResult(hub, sessions, player.Value, new[] { "그룹에 가입되어 있지 않습니다." });
+                    return;
+                }
+                if (groups.GetByPlayer(target.Key) != null)
+                {
+                    SendGroupResult(hub, sessions, player.Value, new[] { $"{target.Username}님은 이미 그룹에 가입되어 있습니다." });
+                    return;
+                }
+                if (target.InstanceId == null)
+                {
+                    SendGroupResult(hub, sessions, player.Value, new[] { $"{target.Username}님의 인스턴스를 찾을 수 없습니다." });
+                    return;
+                }
+                ControlHub.ClientConnection? targetConn = hub.ModConnection(target.InstanceId);
+                if (targetConn == null)
+                {
+                    SendGroupResult(hub, sessions, player.Value, new[] { $"{target.Username}님의 인스턴스가 연결되지 않았습니다." });
+                    return;
+                }
+                hub.SendNoAck(targetConn, "GROUP_INVITE", new
+                {
+                    playerKey = target.Key.Value,
+                    groupName = myGroup.Name,
+                    callerName = displayName,
+                });
+                SendGroupResult(hub, sessions, player.Value,
+                    new[] { $"{target.Username}님에게 초대를 보냈습니다." });
+                break;
+            }
+            default:
+                SendGroupResult(hub, sessions, player.Value, new[] { $"알 수 없는 그룹 명령: {req.Action}" });
+                break;
+        }
+    }
+
+    private static void HandleGroupInviteResult(ControlHub hub, PlayerSessionStore sessions, GroupStore groups,
+        DiscordBot discordBot, PlayerKey player, GroupInviteResultPayload result)
+    {
+        if (!result.Accepted)
+        {
+            return;
+        }
+        string? err = groups.AcceptInvite(player, result.GroupName, out Group? joined);
+        if (err != null)
+        {
+            SendGroupResult(hub, sessions, player.Value, new[] { err });
+            return;
+        }
+        PlayerState? state = sessions.Get(player);
+        string displayName = state?.Username ?? player.Value;
+        SendGroupResult(hub, sessions, player.Value, new[] { $"그룹 [{joined!.Name}]에 가입했습니다." });
+
+        // 그룹 멤버들에게 가입 알림.
+        foreach (string memberKey in joined.MemberKeys.Where(k => k != player.Value))
+        {
+            SendGroupResult(hub, sessions, memberKey, new[] { $"{displayName}님이 그룹에 가입했습니다." });
+        }
+    }
+
+    // 그룹 채팅 라우팅 — 그룹 멤버가 있는 인스턴스에 targets(멤버 이름)와 함께 전송.
+    // 발신자도 targets에 포함된다 (그룹 모드는 원본 브로드캐스트가 억제되므로 중복 없음).
+    // senderKey: 게임 유저 발신 여부 — null이면 Discord 스레드 출처 (스레드 재에코 방지).
+    private static void RouteGroupChat(ControlHub hub, PlayerSessionStore sessions, GroupStore groups,
+        DiscordBot discordBot, Group group, string? senderKey,
+        string speaker, string message, string color, string layerLabel)
+    {
+        // 온라인 멤버를 인스턴스별로 묶어 전송 — 각 인스턴스는 targets(멤버 이름)로 필터.
+        var byInstance = group.MemberKeys
+            .Select(k => PlayerKey.FromString(k))
+            .Select(k => (Key: k, State: sessions.Get(k)))
+            .Where(x => x.State != null && x.State.Session != PlayerSessionState.Offline)
+            .Where(x => x.State!.InstanceId != null)
+            .GroupBy(x => x.State!.InstanceId!);
+
+        foreach (var instGroup in byInstance)
+        {
+            ControlHub.ClientConnection? modConn = hub.ModConnection(instGroup.Key);
+            if (modConn == null) continue;
+            string[] targets = instGroup.Select(x => x.State!.Username ?? x.Key.Value).ToArray();
+            bool fromDiscord = senderKey == null;
+            hub.SendNoAck(modConn, "CHAT", new
+            {
+                speaker,
+                message,
+                color,
+                layer = layerLabel,
+                mode = "group",
+                targets,
+                prefix = group.Name,
+                prefixColor = GroupColor(group.Name),
+                // Discord 스레드 발신 — 전체 채팅과 동일한 "D" 파란색 배지.
+                badge = fromDiscord ? "D" : "",
+                badgeColor = fromDiscord ? "#5865F2" : "",
+            });
+        }
+
+        // 게임 유저 발신 메시지만 Discord 그룹 스레드로 전송 (스레드 출처 메시지 재에코 방지).
+        if (senderKey != null && group.DiscordThreadId != 0)
+        {
+            _ = discordBot.SendGroupChatAsync(group.DiscordThreadId, speaker, message, layerLabel);
+        }
+    }
+
+    // 그룹명 → 안정적 배지 색상 (팔레트 해시).
+    private static string GroupColor(string name)
+    {
+        string[] palette =
+        {
+            "#87CEEB", "#98FB98", "#FFD700", "#FFA07A",
+            "#DDA0DD", "#87CEFA", "#F4A460", "#AFEEEE",
+        };
+        int h = 0;
+        foreach (char c in name) h = (h * 31 + c) % palette.Length;
+        return palette[h];
+    }
+
 
     private sealed class HelloVersion { public int Version { get; set; } }
     private sealed class AgentHelloPayload { public string MachineId { get; set; } = ""; public int Capacity { get; set; } public string Address { get; set; } = ""; }
@@ -865,6 +1162,67 @@ internal static class Program
         public string Speaker { get; set; } = "";
         public string Message { get; set; } = "";
         public string Color { get; set; } = "";
+        public string Layer { get; set; } = "";
+        public string Mode { get; set; } = "";          // "group" — 그룹 채팅
+        public string PlayerKey { get; set; } = "";     // 발신자 (그룹 라우팅용)
+        public string[] Targets { get; set; } = [];     // 수신할 멤버 이름
+        public string Prefix { get; set; } = "";        // 그룹명 배지
+        public string PrefixColor { get; set; } = "";
+        public string Badge { get; set; } = "";         // Discord 그룹 채팅의 "D" 배지
+        public string BadgeColor { get; set; } = "";
+    }
+
+    // 그룹 명령 요청 (mod → orchestrator).
+    private sealed class GroupRequestPayload
+    {
+        public string PlayerKey { get; set; } = "";
+        public string Action { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Target { get; set; } = "";
+    }
+
+    // 그룹 명령 결과 (orchestrator → mod — 개인 회신 라인).
+    private sealed class GroupResultPayload
+    {
+        public string PlayerKey { get; set; } = "";
+        public string[] Lines { get; set; } = [];
+    }
+
+    // 그룹 초대 요청 (orchestrator → 대상 인스턴스 mod — 단일 유저 투표).
+    private sealed class GroupInvitePayload
+    {
+        public string PlayerKey { get; set; } = "";
+        public string GroupName { get; set; } = "";
+        public string CallerName { get; set; } = "";
+    }
+
+    // 초대 투표 결과 (mod → orchestrator).
+    private sealed class GroupInviteResultPayload
+    {
+        public string PlayerKey { get; set; } = "";
+        public string GroupName { get; set; } = "";
+        public bool Accepted { get; set; }
+        public string Reason { get; set; } = "";
+    }
+
+    // 채팅 모드 전환 요청 (mod → orchestrator — Group 진입 검증).
+    private sealed class ChatModeRequestPayload
+    {
+        public string PlayerKey { get; set; } = "";
+        public string Mode { get; set; } = "";
+    }
+
+    // 채팅 모드 전환 결과 (orchestrator → mod).
+    private sealed class ChatModeResultPayload
+    {
+        public string PlayerKey { get; set; } = "";
+        public bool Ok { get; set; }
+    }
+
+    // 채팅 모드 강제 리셋 (orchestrator → mod — 그룹 이탈/삭제 시 Global).
+    private sealed class ChatModeResetPayload
+    {
+        public string PlayerKey { get; set; } = "";
     }
 
     // !list 요청 (mod → orchestrator).

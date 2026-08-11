@@ -33,6 +33,7 @@ public static class AnnounceRelay
             kind = KindLeave,
             playerKey = plr.GetPersistentId(),
             name = plr.playername,
+            clientId = (int)plr.clientId,
         });
     }
 
@@ -53,28 +54,33 @@ public static class AnnounceRelay
         switch (payload.Kind)
         {
             case KindDeath:
-                SendAnnouncementExcluding(payload.PlayerKey,
+                SendAnnouncementExcluding(payload.PlayerKey, payload.Name, payload.ClientId,
                     $"<color=#FF8080>{payload.Name}님이 사망했습니다.</color>");
                 break;
             case KindLeave:
-                SendAnnouncementExcluding(payload.PlayerKey,
+                SendAnnouncementExcluding(payload.PlayerKey, payload.Name, payload.ClientId,
                     $"<color=#FFFF00>{payload.Name}님이 퇴장했습니다.</color>");
                 break;
             case KindJoin:
-                SendAnnouncementExcluding(payload.PlayerKey,
+                SendAnnouncementExcluding(payload.PlayerKey, payload.Name, payload.ClientId,
                     $"<color=#FFFF00>{payload.Name}님이 접속했습니다.</color>");
                 break;
             case KindMigration:
-                SendAnnouncementExcluding(payload.PlayerKey,
+                SendAnnouncementExcluding(payload.PlayerKey, payload.Name, payload.ClientId,
                     $"<color=#87CEEB>{payload.Name}님이 L{payload.FromDepth}에서 L{payload.ToDepth}로 이동합니다</color>");
                 break;
         }
     }
 
     // playerKey 대상(본인)을 제외한 타겟으로 전송.
-    private static void SendAnnouncementExcluding(string? playerKey, string message)
+    // 제외 판정 폴백: clientId(퇴장 — dict에서 이미 제거됨) > playerKey(일반) > 이름(접속 —
+    // 등록 전에 발화되어 playerKey가 비어 있음).
+    private static void SendAnnouncementExcluding(string? playerKey, string? name, int clientId, string message)
     {
-        knetid? exclude = FindClientId(playerKey);
+        knetid? exclude = null;
+        if (clientId > 0) exclude = (knetid)(ushort)clientId;
+        if (exclude == null) exclude = FindClientId(playerKey);
+        if (exclude == null && !string.IsNullOrEmpty(name)) exclude = FindClientIdByName(name);
         List<knetid> targets = NetPlayer.ClientIdToPlayerDict.Keys
             .Where(id => id != exclude)
             .ToList();
@@ -99,6 +105,18 @@ public static class AnnounceRelay
         Net.Server_SendToClients(DeliveryMethod.ReliableOrdered, in writer, targets);
     }
 
+    // 10098 타겟 전송 — name 지정 (그룹 채팅: "[그룹명] [L1] [이름]" 배지 렌더).
+    internal static void SendChatAnnouncementToNamed(string name, string message, List<knetid> targets)
+    {
+        if (targets.Count == 0) return;
+        var writer = Net.CreateWriter(10098);
+        writer.Put((byte)2);
+        writer.Put(name);
+        writer.Put("");
+        writer.Put(message);
+        Net.Server_SendToClients(DeliveryMethod.ReliableOrdered, in writer, targets);
+    }
+
     // playerKey로 이 인스턴스의 clientId 검색 (없으면 null — 다른 레이어).
     private static knetid? FindClientId(string? playerKey)
     {
@@ -117,6 +135,8 @@ public sealed class AnnouncePayload
     public string Kind { get; set; } = "";
     public string PlayerKey { get; set; } = "";
     public string Name { get; set; } = "";
+    // 대상 clientId — 퇴장 공지처럼 대상이 dict에서 제거된 뒤 도착하는 경우를 위한 폴백.
+    public int ClientId { get; set; } = -1;
     public int FromDepth { get; set; }
     public int ToDepth { get; set; }
 }

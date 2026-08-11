@@ -20,6 +20,9 @@ internal sealed class DiscordBot
     private readonly Action<string, string>? _onDiscordChat;   // 채팅 채널 → 게임 (유저명, 텍스트)
     private readonly Action<string>? _onConsoleCommand;   // 콘솔 채널 → 서버 콘솔 명령
 
+    // 그룹 스레드 채팅 → 게임 (유저명, 텍스트, 스레드 ID) — Program이 threadId→그룹 매핑.
+    internal Action<string, string, ulong>? OnThreadChat { get; set; }
+
     // Ready 전이 시 콜백 (채널 주제 초기 동기화 등).
     internal Action? OnReady { get; set; }
     private readonly Dictionary<ulong, string> _avatarCache = new();
@@ -256,6 +259,65 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(text: $"[{layer}] **{playerName}**: {message}");
     }
 
+    // 그룹 스레드 생성 — 채팅 채널 아래 공개 스레드. 실패 시 0.
+    internal async Task<ulong> CreateGroupThreadAsync(string groupName)
+    {
+        if (!IsConnected || _channelId == 0) return 0;
+        try
+        {
+            var channel = await _client.GetChannelAsync(_channelId) as SocketTextChannel;
+            if (channel == null) return 0;
+            var thread = await channel.CreateThreadAsync(
+                name: $"[그룹] {groupName}",
+                type: ThreadType.PublicThread,
+                autoArchiveDuration: ThreadArchiveDuration.ThreeDays);
+            return thread.Id;
+        }
+        catch (Exception ex)
+        {
+            Log($"그룹 스레드 생성 실패 ({groupName}): {ex.Message}");
+            return 0;
+        }
+    }
+
+    // 그룹 스레드 삭제.
+    internal async Task DeleteGroupThreadAsync(ulong threadId)
+    {
+        if (!IsConnected || threadId == 0) return;
+        try
+        {
+            if (await _client.GetChannelAsync(threadId) is IThreadChannel thread)
+            {
+                await thread.DeleteAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"그룹 스레드 삭제 실패 ({threadId}): {ex.Message}");
+        }
+    }
+
+    // 그룹 채팅 → 그룹 스레드. 보관된 스레드는 unarchive 후 전송한다.
+    internal async Task SendGroupChatAsync(ulong threadId, string playerName, string message, string layer)
+    {
+        if (!IsConnected || threadId == 0) return;
+        try
+        {
+            var thread = await _client.GetChannelAsync(threadId) as SocketThreadChannel;
+            if (thread == null) return;
+            if (thread.IsArchived)
+            {
+                await thread.ModifyAsync(x => x.Archived = false);
+            }
+            string layerTag = string.IsNullOrEmpty(layer) ? "" : $"[{layer}] ";
+            await thread.SendMessageAsync(text: $"{layerTag}**{playerName}**: {message}");
+        }
+        catch (Exception ex)
+        {
+            Log($"그룹 채팅 전송 실패 ({threadId}): {ex.Message}");
+        }
+    }
+
     // 채널 주제 갱신 — 접속 인원 실시간 표시. 현재 주제와 같으면 스킵.
     internal async Task UpdatePlayerCountTopicAsync(string text)
     {
@@ -452,6 +514,13 @@ internal sealed class DiscordBot
         string text = msg.Content.Trim();
         if (string.IsNullOrEmpty(text)) return Task.CompletedTask;
 
+        // 그룹 스레드 메시지 — threadId → Program이 그룹 멤버에게 라우팅.
+        if (msg.Channel is IThreadChannel thread)
+        {
+            _ = RelayThreadChatAsync(msg, thread.Id);
+            return Task.CompletedTask;
+        }
+
         // 콘솔 채널 우선 — 채널이 동일하게 설정된 경우 콘솔 명령 경로가 승리한다.
         if (_consoleChannelId != 0 && msg.Channel.Id == _consoleChannelId)
         {
@@ -464,6 +533,13 @@ internal sealed class DiscordBot
             _ = RelayDiscordChatAsync(msg);
         }
         return Task.CompletedTask;
+    }
+
+    // 그룹 스레드 채팅 → 게임 — 서버 닉네임 해석 후 threadId와 함께 전달.
+    private async Task RelayThreadChatAsync(SocketMessage msg, ulong threadId)
+    {
+        string name = await ResolveDisplayNameAsync(msg.Author, msg.Channel);
+        OnThreadChat?.Invoke(name, msg.Content.Trim(), threadId);
     }
 
     // Discord 채팅 → 게임 — 서버 닉네임 해석 후 릴레이.

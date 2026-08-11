@@ -176,6 +176,18 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "DISCORD_RESULT":
                 ChatCommands.HandleDiscordResult(msg);
                 break;
+            case "GROUP_RESULT":
+                GroupCommands.HandleResult(msg);
+                break;
+            case "GROUP_INVITE":
+                GroupCommands.HandleInvite(msg);
+                break;
+            case "CHATMODE_RESULT":
+                ChatCommands.ChatModeCommand.HandleResult(msg);
+                break;
+            case "CHATMODE_RESET":
+                ChatCommands.ChatModeCommand.HandleReset(msg);
+                break;
             case "CONSOLE":
                 RunModule.HandleConsole(msg.PayloadAs<ConsolePayload>()?.Command ?? "");
                 Ack(msg, true);

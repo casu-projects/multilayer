@@ -27,8 +27,21 @@ public static class ChatCommands
             reader.Get(out bool _unusedFlag);
             reader.Get(out string message);
 
-            if (string.IsNullOrEmpty(message) || !message.StartsWith(CommandPrefix))
+            if (string.IsNullOrEmpty(message))
             {
+                reader.SetPosition(startPosition); // 원본이 정상 읽도록 복원
+                return true;
+            }
+
+            if (!message.StartsWith(CommandPrefix))
+            {
+                // 그룹 모드 — 원본 브로드캐스트를 억제하고 그룹 멤버에게만 라우팅한다.
+                if (NetPlayer.TryGetPlayerFromClientId(clientId, out NetPlayer gmPlr)
+                    && ChatModeCommand.GetMode(clientId) == ChatMode.Group)
+                {
+                    SendGroupChat(gmPlr, message);
+                    return false;
+                }
                 reader.SetPosition(startPosition); // 원본이 정상 읽도록 복원
                 return true;
             }
@@ -49,7 +62,8 @@ public static class ChatCommands
                     || CallAdminCommand.TryHandle(plr, argv)
                     || DiscordCommand.TryHandle(plr, argv)
                     || RespawnCommand.TryHandle(plr, argv)
-                    || VoteCommands.TryHandle(plr, argv))
+                    || VoteCommands.TryHandle(plr, argv)
+                    || GroupCommands.TryHandle(plr, argv))
                 {
                     return false;
                 }
@@ -70,6 +84,16 @@ public static class ChatCommands
             }
             return false; // 명령은 브로드캐스트/릴레이에서 제외
         }
+
+        // 그룹 모드 채팅 — 오케스트레이터로 전송 (그룹 멤버 라우팅 + Discord 스레드).
+        private static void SendGroupChat(NetPlayer plr, string message)
+        {
+            if (OrchestratorClient.Instance == null) return;
+            Color24 c = plr.plrcolor;
+            string color = $"#{c.r:X2}{c.g:X2}{c.b:X2}";
+            OrchestratorClient.Instance.SendEvent("CHAT",
+                new { playerKey = plr.GetPersistentId(), speaker = plr.playername, message, color, mode = "group" });
+        }
     }
 
     // 개인 채팅 회신 — AnnounceRelay.SendChatAnnouncementTo와 동일 포맷.
@@ -86,9 +110,11 @@ public static class ChatCommands
     {
         Global,
         Local,
+        Group,
     }
 
-    // !chatmode — 채팅 공유 범위 토글 (Global/Local). 릴레이(ChatRelay)가 참조한다.
+    // !chatmode — 채팅 공유 범위 순환 토글 (Global → Local → Group). 릴레이가 참조한다.
+    // Local→Group 방향은 오케스트레이터에 그룹 가입을 검증받는다 — 미가입이면 Global로 건너뛴다.
     internal static class ChatModeCommand
     {
         private const string CommandName = "chatmode";
@@ -102,14 +128,57 @@ public static class ChatCommands
             if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
 
             ChatMode current = GetMode(caller.clientId);
-            ChatMode next = current == ChatMode.Global ? ChatMode.Local : ChatMode.Global;
-            ModeByClientId[caller.clientId] = next;
+            if (current == ChatMode.Local)
+            {
+                // 다음 단계(그룹)는 오케스트레이터 검증 필요 — 결과에 따라 Group/Global 적용.
+                if (OrchestratorClient.Instance != null)
+                {
+                    OrchestratorClient.Instance.SendEvent("CHATMODE_REQUEST",
+                        new { playerKey = caller.GetPersistentId(), mode = "group" });
+                }
+                else
+                {
+                    ApplyMode(caller, ChatMode.Global, quiet: false); // 오케스트레이터 미연결 — 폴백.
+                }
+                return true;
+            }
 
-            string label = next == ChatMode.Global
-                ? "<color=#87CEEB>모든 레이어</color>"
-                : "<color=#FFFF00>이 레이어</color>";
-            ChatPrivateReply.SendToPlayer(caller, $"채팅 모드 토글 : {label}");
+            ChatMode next = current == ChatMode.Global ? ChatMode.Local : ChatMode.Global;
+            ApplyMode(caller, next, quiet: false);
             return true;
+        }
+
+        // CHATMODE_RESULT — 그룹 진입 검증 결과. ok: Group 적용 / !ok: Global로 건너뜀.
+        internal static void HandleResult(ControlMessage msg)
+        {
+            var payload = msg.PayloadAs<ChatModeResultPayload>();
+            if (payload == null) return;
+            NetPlayer plr = ChatCommands.FindByPersistentId(payload.PlayerKey);
+            if (plr == null) return;
+            ApplyMode(plr, payload.Ok ? ChatMode.Group : ChatMode.Global, quiet: false);
+        }
+
+        // CHATMODE_RESET — 그룹 이탈/삭제: 안내 없이 Global로 강제 전환.
+        internal static void HandleReset(ControlMessage msg)
+        {
+            var payload = msg.PayloadAs<ChatModeResetPayload>();
+            if (payload == null) return;
+            NetPlayer plr = ChatCommands.FindByPersistentId(payload.PlayerKey);
+            if (plr == null) return;
+            ApplyMode(plr, ChatMode.Global, quiet: true);
+        }
+
+        private static void ApplyMode(NetPlayer caller, ChatMode mode, bool quiet)
+        {
+            ModeByClientId[caller.clientId] = mode;
+            if (quiet) return;
+            string label = mode switch
+            {
+                ChatMode.Global => "<color=#87CEEB>모든 레이어</color>",
+                ChatMode.Local => "<color=#FFFF00>이 레이어</color>",
+                _ => "<color=#DDA0DD>그룹</color>",
+            };
+            ChatPrivateReply.SendToPlayer(caller, $"채팅 모드 토글 : {label}");
         }
     }
 
@@ -123,7 +192,7 @@ public static class ChatCommands
 
             ChatPrivateReply.SendToPlayer(caller, "사용 가능한 명령어:");
             ChatPrivateReply.SendToPlayer(caller, "!help - 도움말 표시");
-            ChatPrivateReply.SendToPlayer(caller, "!chatmode - 채팅 공유 범위 전환 (전체 레이어/현재 레이어)");
+            ChatPrivateReply.SendToPlayer(caller, "!chatmode - 채팅 공유 범위 전환 (전체 레이어/현재 레이어/그룹)");
             ChatPrivateReply.SendToPlayer(caller, "!list - 접속 중인 플레이어 목록");
             ChatPrivateReply.SendToPlayer(caller, "!currentrun [key] - 현재 Run 설정 보기 (생략 시 전체 목록)");
             ChatPrivateReply.SendToPlayer(caller, "!calladmin - 관리자 호출");
@@ -131,6 +200,7 @@ public static class ChatCommands
             ChatPrivateReply.SendToPlayer(caller, "!respawn - 사망 시 레이어 1에서 새 캐릭터로 리스폰");
             ChatPrivateReply.SendToPlayer(caller, "!runvote <설정> <값> - Run 설정 변경 투표 (전체 레이어)");
             ChatPrivateReply.SendToPlayer(caller, "!banvote <이름> - 플레이어 영구 차단 투표 (전체 레이어)");
+            ChatPrivateReply.SendToPlayer(caller, "!group [create <이름>|join <이름>|leave|remove|list|players|invite <이름>|joinable] - 그룹 관리");
             return true;
         }
     }

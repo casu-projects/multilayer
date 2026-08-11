@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using KrokoshaCasualtiesMP;
 
 namespace CasuMod;
@@ -39,6 +41,13 @@ public static class ChatRelay
         string speaker = payload.Speaker ?? "";
         if (speaker == "" || speaker == "*") return; // 시스템 공지 — 제외
 
+        // 그룹 채팅 — targets(멤버 이름)로 대상 지정 표시 (발신자 제외).
+        if (payload.Targets != null && payload.Targets.Length > 0)
+        {
+            ShowGroupChat(payload);
+            return;
+        }
+
         try
         {
             string name = BuildDisplayName(payload);
@@ -51,17 +60,42 @@ public static class ChatRelay
         }
     }
 
+    // 그룹 채팅 표시 — 이 인스턴스의 대상 멤버에게 타겟 전송 ("[그룹명] [L1] [이름]: 메시지").
+    // 발신자도 포함된다 (그룹 모드는 원본 브로드캐스트가 억제되므로 중복 없음).
+    private static void ShowGroupChat(ChatPayload payload)
+    {
+        string name = BuildDisplayName(payload);
+        var targets = new List<knetid>();
+        foreach (NetPlayer p in NetPlayer.ClientIdToPlayerDict.Values)
+        {
+            if (payload.Targets.Contains(p.playername)) targets.Add(p.clientId);
+        }
+        if (targets.Count == 0) return;
+        AnnounceRelay.SendChatAnnouncementToNamed(name, payload.Message, targets);
+    }
+
     private static string BuildDisplayName(ChatPayload payload)
     {
-        // 클라이언트가 이름을 "[" + name + "]: "로 감싸므로, "[L1] [이름]: "을 만들기 위해
-        // 레이어 태그의 앞 '['는 생략하고 내부 '['만 넣는다 ("L1] [이름" → 클라가 "[L1] [이름]: ").
-        bool hasBadge = !string.IsNullOrEmpty(payload.Layer) || !string.IsNullOrEmpty(payload.Prefix);
-        string badgeTag = string.IsNullOrEmpty(payload.Prefix) ? "" : BadgeTag(payload);
-        string layerTag = string.IsNullOrEmpty(payload.Layer) ? "" : $"{payload.Layer}] ";
-        string innerBracket = hasBadge ? "[" : "";
+        // 클라이언트가 name을 "[" + name + "]: "로 감싼다. 첫 태그는 클라이언트의 선행 '['
+        // 로 열리고, 이후 태그는 자체 '['를 붙여 "[그룹명] [L1] [이름]" 형태를 완성한다.
+        var tags = new List<string>();
+        if (!string.IsNullOrEmpty(payload.Prefix)) tags.Add(BadgeTag(payload));
+        if (!string.IsNullOrEmpty(payload.Badge)) tags.Add(Badge2Tag(payload));
+        if (!string.IsNullOrEmpty(payload.Layer)) tags.Add($"{payload.Layer}] ");
+
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < tags.Count; i++)
+        {
+            if (i > 0) sb.Append('[');
+            sb.Append(tags[i]);
+        }
+        if (tags.Count > 0) sb.Append('[');
         string colorTag = string.IsNullOrEmpty(payload.Color) ? "" : $"<color={payload.Color}>";
         string closeTag = string.IsNullOrEmpty(payload.Color) ? "" : "</color>";
-        return $"{badgeTag}{layerTag}{innerBracket}{colorTag}{payload.Speaker}{closeTag}";
+        sb.Append(colorTag);
+        sb.Append(payload.Speaker);
+        sb.Append(closeTag);
+        return sb.ToString();
     }
 
     // 배지 렌더 — "<color>D</color>] " (클라이언트가 앞 '['를 붙여 "[D] " 완성).
@@ -70,5 +104,13 @@ public static class ChatRelay
         string colorTag = string.IsNullOrEmpty(payload.PrefixColor) ? "" : $"<color={payload.PrefixColor}>";
         string closeTag = string.IsNullOrEmpty(payload.PrefixColor) ? "" : "</color>";
         return $"{colorTag}{payload.Prefix}{closeTag}] ";
+    }
+
+    // 두 번째 배지 렌더 — Discord 그룹 채팅의 "D" 배지.
+    private static string Badge2Tag(ChatPayload payload)
+    {
+        string colorTag = string.IsNullOrEmpty(payload.BadgeColor) ? "" : $"<color={payload.BadgeColor}>";
+        string closeTag = string.IsNullOrEmpty(payload.BadgeColor) ? "" : "</color>";
+        return $"{colorTag}{payload.Badge}{closeTag}] ";
     }
 }

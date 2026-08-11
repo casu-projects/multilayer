@@ -55,6 +55,10 @@ public sealed class OrchestratorConfig
     // 인스턴스는 유휴 시 종료되지 않고 레이어 초기화 후 대기한다.
     public int[] PrewarmLayer { get; set; } = Array.Empty<int>();
 
+    // 그룹 시스템 상한 — 최대 그룹 수 / 그룹당 최대 멤버 수.
+    public int MaxGroups { get; set; } = 32;
+    public int MaxGroupMembers { get; set; } = 16;
+
     public void Save(string path)
     {
         File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));

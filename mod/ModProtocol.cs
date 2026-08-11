@@ -57,11 +57,17 @@ public sealed class PlayerKeyPayload
 public sealed class ChatPayload
 {
     public string Speaker { get; set; } = "";
+    public string Message { get; set; } = "";
     public string Color { get; set; } = "";
     public string Layer { get; set; } = "";
+    public string Mode { get; set; } = "";
+    public string PlayerKey { get; set; } = "";
+    public string[] Targets { get; set; } = Array.Empty<string>();
     public string Prefix { get; set; } = "";
     public string PrefixColor { get; set; } = "";
-    public string Message { get; set; } = "";
+    // 두 번째 배지 — Discord 그룹 채팅의 "D" (파란색).
+    public string Badge { get; set; } = "";
+    public string BadgeColor { get; set; } = "";
 }
 
 public sealed class ListResultPayload
@@ -102,6 +108,43 @@ public sealed class KickPlayerPayload
 public sealed class VerbosePayload
 {
     public bool On { get; set; }
+}
+
+public sealed class GroupRequestPayload
+{
+    public string PlayerKey { get; set; } = "";
+    public string Action { get; set; } = "";
+    public string Name { get; set; } = "";
+}
+
+public sealed class GroupResultPayload
+{
+    public string PlayerKey { get; set; } = "";
+    public string[] Lines { get; set; } = Array.Empty<string>();
+}
+
+public sealed class GroupInvitePayload
+{
+    public string PlayerKey { get; set; } = "";
+    public string GroupName { get; set; } = "";
+    public string CallerName { get; set; } = "";
+}
+
+public sealed class ChatModeRequestPayload
+{
+    public string PlayerKey { get; set; } = "";
+    public string Mode { get; set; } = "";
+}
+
+public sealed class ChatModeResultPayload
+{
+    public string PlayerKey { get; set; } = "";
+    public bool Ok { get; set; }
+}
+
+public sealed class ChatModeResetPayload
+{
+    public string PlayerKey { get; set; } = "";
 }
 
 public static class KeyUtil

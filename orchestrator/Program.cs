@@ -175,7 +175,7 @@ internal static class Program
             // 투표 확정 — 전 인스턴스 VOTE_RESULT + Discord + 가결 시 효과 적용 (밴/런).
             if (votes.TryFinalize(DateTime.UtcNow, out VoteCoordinator.VoteFinalizeResult voteResult))
             {
-                FinalizeVote(hub, banList, discordBot, voteResult);
+                FinalizeVote(hub, banList, voteResult);
             }
             // 유휴 정리 계수 (2026-08-02): 마이그레이션 중인 플레이어(Migrating, InstanceId=출발지)와
             // 도착 대기 중인 목적지(tx.TargetInstance)도 인원으로 계산 — FREEZE/READY 대기 중
@@ -600,7 +600,7 @@ internal static class Program
             case "VOTE_START":
                 if (msg.PayloadAs<VoteStartMarker>() is { } voteStart)
                 {
-                    HandleVoteStart(hub, sessions, votes, discordBot, conn, voteStart);
+                    HandleVoteStart(hub, sessions, votes, conn, voteStart);
                 }
                 break;
             case "VOTE_TALLY":
@@ -626,9 +626,9 @@ internal static class Program
     // ── 크로스 인스턴스 투표 (VOTE_START 처리) ──
 
     /// <summary>VOTE_START 수신 — ban 대상 해석(온라인 세션) + 활성 투표 검증 후 전 인스턴스
-    /// VOTE_RUN 브로드캐스트 + Discord 공지. 거부 시 VOTE_REJECTED로 발신자 개인 회신.</summary>
+    /// VOTE_RUN 브로드캐스트. 거부 시 VOTE_REJECTED로 발신자 개인 회신.</summary>
     private static void HandleVoteStart(ControlHub hub, PlayerSessionStore sessions, VoteCoordinator votes,
-        DiscordBot discordBot, ControlHub.ClientConnection conn, VoteStartMarker marker)
+        ControlHub.ClientConnection conn, VoteStartMarker marker)
     {
         string? callerClientId = marker.Payload.GetValueOrDefault("callerClientId");
 
@@ -638,7 +638,7 @@ internal static class Program
             string targetQuery = marker.Payload.GetValueOrDefault("targetQuery", "");
             if (!TryResolveOnlinePlayer(sessions, targetQuery, out string resolvedKey, out string resolvedName))
             {
-                RejectVote(hub, discordBot, conn, marker, callerClientId,
+                RejectVote(hub, conn, marker, callerClientId,
                     $"플레이어를 찾을 수 없습니다: {targetQuery}");
                 return;
             }
@@ -654,7 +654,7 @@ internal static class Program
 
         if (!votes.TryStart(marker, expected))
         {
-            RejectVote(hub, discordBot, conn, marker, callerClientId,
+            RejectVote(hub, conn, marker, callerClientId,
                 "이미 진행 중인 투표가 있습니다. 잠시 후 다시 시도해주세요.");
             return;
         }
@@ -672,18 +672,15 @@ internal static class Program
                 payload = marker.Payload,
             });
         }
-
-        _ = discordBot.SendVoteStartAsync(marker.Kind, marker.Title, marker.PromptBody, marker.TimeoutSeconds);
     }
 
-    private static void RejectVote(ControlHub hub, DiscordBot discordBot, ControlHub.ClientConnection conn,
+    private static void RejectVote(ControlHub hub, ControlHub.ClientConnection conn,
         VoteStartMarker marker, string? callerClientId, string reason)
     {
         if (!string.IsNullOrEmpty(callerClientId))
         {
             hub.SendNoAck(conn, "VOTE_REJECTED", new { callerClientId, reason });
         }
-        _ = discordBot.SendVoteRejectedAsync(marker.Kind, marker.Title, reason);
     }
 
     /// <summary>온라인 세션에서 대상 해석 — 이름(대소문자 무시) 또는 PlayerKey 일치.</summary>
@@ -704,9 +701,9 @@ internal static class Program
         return true;
     }
 
-    /// <summary>투표 확정 처리 — VOTE_RESULT 브로드캐스트 + Discord 결과 + 가결 시 효과:
+    /// <summary>투표 확정 처리 — VOTE_RESULT 브로드캐스트 + 가결 시 효과:
     /// ban → 밴 파일 + 게이트웨이 즉시 차단/킥.</summary>
-    private static void FinalizeVote(ControlHub hub, BanList banList, DiscordBot discordBot,
+    private static void FinalizeVote(ControlHub hub, BanList banList,
         VoteCoordinator.VoteFinalizeResult voteResult)
     {
         foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
@@ -724,11 +721,6 @@ internal static class Program
 
         int totalVotes = voteResult.Yes + voteResult.No + voteResult.Ignore;
         bool votePassed = totalVotes > 0 && (float)voteResult.Yes / totalVotes > 0.5f;
-        string? title = voteResult.Payload.GetValueOrDefault("key")
-            ?? voteResult.Payload.GetValueOrDefault("targetName")
-            ?? "";
-        _ = discordBot.SendVoteResultAsync(voteResult.Kind, title,
-            voteResult.Yes, voteResult.No, voteResult.Ignore, votePassed, null);
 
         if (!votePassed) return;
 

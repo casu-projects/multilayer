@@ -283,64 +283,7 @@ internal sealed class DiscordBot
         }
     }
 
-    /// <summary>투표 시작 알림.</summary>
-    internal async Task SendVoteStartAsync(string kind, string title, string promptBody, float timeoutSeconds)
-    {
-        if (!IsConnected || _channelId == 0) return;
-        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
-        if (channel == null) return;
-
-        var embed = new EmbedBuilder()
-            .WithTitle($"🗳️ {title}")
-            .WithDescription(promptBody)
-            .WithColor(Color.Gold)
-            .WithCurrentTimestamp()
-            .Build();
-
-        await channel.SendMessageAsync(embed: embed);
-    }
-
-    /// <summary>투표 결과 알림.</summary>
-    internal async Task SendVoteResultAsync(string kind, string title, int yes, int no, int ignore,
-        bool passed, string? detail)
-    {
-        if (!IsConnected || _channelId == 0) return;
-        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
-        if (channel == null) return;
-
-        string verdict = passed ? "✅ 가결" : "❌ 부결";
-        var embed = new EmbedBuilder()
-            .WithTitle($"🗳️ {title} — {verdict}")
-            .WithDescription($"{title} 투표 결과")
-            .AddField("찬성", yes.ToString(), inline: true)
-            .AddField("반대", no.ToString(), inline: true)
-            .AddField("기권", ignore.ToString(), inline: true)
-            .WithColor(passed ? Color.Green : Color.Red)
-            .WithCurrentTimestamp()
-            .Build();
-
-        await channel.SendMessageAsync(embed: embed);
-    }
-
-    /// <summary>투표 거부 알림.</summary>
-    internal async Task SendVoteRejectedAsync(string kind, string title, string reason)
-    {
-        if (!IsConnected || _channelId == 0) return;
-        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
-        if (channel == null) return;
-
-        var embed = new EmbedBuilder()
-            .WithTitle($"🗳️ {title} 거부")
-            .WithDescription($"**{title}**\n사유: {reason}")
-            .WithColor(Color.LightGrey)
-            .WithCurrentTimestamp()
-            .Build();
-
-        await channel.SendMessageAsync(embed: embed);
-    }
-
     // ── Steam Avatar ────────────────────────────────────────────────────
-
     private async Task<string?> FetchAvatarAsync(ulong steamId)
     {
         if (_avatarCache.TryGetValue(steamId, out string? cached))

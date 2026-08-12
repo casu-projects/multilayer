@@ -4,9 +4,9 @@ using System.Text;
 
 namespace CasuMpAgent;
 
-// 제어 채널 (오케스트레이터 ↔ 에이전트) - TCP JSON 라인.
-// 에이전트가 오케스트레이터에 연결하는 방향. 재연결 시 보류 보고/로그가 flush된다.
-// 명령은 read 루프에서 수신 -> (msg, ack) 쌍으로 inbound 큐, ACK/보고/로그는 write 루프가 전송.
+// 제어 채널 (오케스트레이터 ↔ 에이전트) - TCP JSON 라인
+// 에이전트가 오케스트레이터에 연결하는 방향. 재연결 시 보류 보고/로그가 flush된다
+// 명령은 read 루프에서 수신 -> (msg, ack) 쌍으로 inbound 큐, ACK/보고/로그는 write 루프가 전송
 public sealed class ControlChannel
 {
     private readonly AgentConfig _config;
@@ -23,10 +23,10 @@ public sealed class ControlChannel
         _inbound = inbound;
     }
 
-    // ACK 전송 (read 루프가 명령과 함께 넘긴 콜백에서 호출).
+    // ACK 전송 (read 루프가 명령과 함께 넘긴 콜백에서 호출)
     public void Ack(ControlMessage ack) => _outboundAcks.Enqueue(ack);
 
-    // 보고 메시지 전송 (연결 수립 시 flush - 재연결 후 재전송).
+    // 보고 메시지 전송 (연결 수립 시 flush - 재연결 후 재전송)
     public void Report(ControlMessage msg) => _outboundReports.Enqueue(msg);
 
     public async Task RunAsync(CancellationToken ct)
@@ -45,7 +45,7 @@ public sealed class ControlChannel
             catch (Exception ex)
             {
                 // 연결 오류는 릴레이 없이 자체 stdout에만 - 재시도 루프가 오케스트레이터
-                // 콘솔을 도배하지 않도록 한다 (정상 연결 로그는 릴레이됨).
+                // 콘솔을 도배하지 않도록 한다 (정상 연결 로그는 릴레이됨)
                 Logger.Local($"오케스트레이터 연결 오류: {ex.Message}");
             }
             await Task.Delay(delay, ct);

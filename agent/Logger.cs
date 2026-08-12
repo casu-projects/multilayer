@@ -28,7 +28,7 @@ public static class Logger
         if (Verbose) Info(message, suffix);
     }
 
-    // 콘솔 전용 - 릴레이 없음 (연결 오류 등 오케스트레이터 콘솔 도배 방지).
+    // 콘솔 전용 - 릴레이 없음 (연결 오류 등 오케스트레이터 콘솔 도배 방지)
     public static void Local(string message) => System.Console.WriteLine(message);
 
     private static void Enqueue(string message, string source)

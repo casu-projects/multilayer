@@ -3,11 +3,11 @@ using System.Text.Json.Serialization;
 
 namespace CasuMpAgent;
 
-// 제어 프로토콜 메시지 - 오케스트레이터와 동일 규약 (JSON 라인 + seq-ack).
+// 제어 프로토콜 메시지 - 오케스트레이터와 동일 규약 (JSON 라인 + seq-ack)
 public sealed class ControlMessage
 {
     // 직렬화 하드닝 : AllowNamedFloatingPointLiterals - NaN/Infinity 포함 페이로드도
-    // 예외 없이 "NaN"/"Infinity" 리터럴로 왕복 (잘못된 값 하나가 채널 연결을 끊는 것 방지).
+    // 예외 없이 "NaN"/"Infinity" 리터럴로 왕복 (잘못된 값 하나가 채널 연결을 끊는 것 방지)
     private static readonly JsonSerializerOptions ParseOptions = new()
     {
         PropertyNameCaseInsensitive = true,

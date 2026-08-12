@@ -5,13 +5,10 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>
-/// 서버의 액체에 관련한 계산 범위를 플레이중인 유저 주변으로 옮김.
-///
-/// 이전 코드에서는 유저 한명마다 많은 영역을 FixedUpdate의 시간마다 다시 계산했는데
-/// 이러면 다수의 유저가 한곳에 모이면 같은 액체의 이동과 계산을 인원수만큼 여러번 반복 계산하는 방식이라 서버 렉이걸려요
-/// 그래서 유저의 계산 범위가 겹치거나 맞닿은 범위를 먼저 합친 뒤, 서로 떨어진 영역에 대해서만 SimulationStep을 한 번씩 호출하게 변경했어요.
-/// </summary>
+// 서버의 액체에 관련한 계산 범위를 플레이중인 유저 주변으로 옮김.
+// 이전 코드에서는 유저 한명마다 많은 영역을 FixedUpdate의 시간마다 다시 계산했는데
+// 이러면 다수의 유저가 한곳에 모이면 같은 액체의 이동과 계산을 인원수만큼 여러번 반복 계산하는 방식이라 서버 렉이걸려요
+// 그래서 유저의 계산 범위가 겹치거나 맞닿은 범위를 먼저 합친 뒤, 서로 떨어진 영역에 대해서만 SimulationStep을 한 번씩 호출하게 변경했어요.
 [HarmonyPatch(typeof(FluidManager), "FixedUpdate")]
 internal static class FluidSimRangeFollowPlayersPatch
 {
@@ -65,7 +62,7 @@ internal static class FluidSimRangeFollowPlayersPatch
 
     private static void AddAndMerge(SimulationArea area)
     {
-        // 유저들의 계산 구역을 합친 뒤 다른 영역과 새로 겹칠 수도 있으니 처음부터 다시 검사.
+ // 유저들의 계산 구역을 합친 뒤 다른 영역과 새로 겹칠 수도 있으니 처음부터 다시 검사.
         for (int i = 0; i < Areas.Count;)
         {
             if (!CanMergeWithoutExtraWork(Areas[i], area))

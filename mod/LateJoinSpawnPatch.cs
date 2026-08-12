@@ -4,10 +4,10 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>바닐라 late-join 스폰(다른 생존 플레이어 위에 겹쳐 스폰 — ServerMain.LateSpawnLocation의
-/// GetPlayerBodyHostOrAnyoneAlive 분기)을 레이어 표준 스폰(spawnlocation)으로 교체 (이전 모드 이식).
-/// 모든 위치는 바닥 위 검증(OverlapBox 미충돌 + 3f 아래 바닥 Raycast) — 공중/구덩이 스폰 방지.
-/// 재접속자는 did_give_spawn_location_from_a_save 플래그로 이 경로를 타지 않는다.</summary>
+// 바닐라 late-join 스폰(다른 생존 플레이어 위에 겹쳐 스폰 - ServerMain.LateSpawnLocation의
+// GetPlayerBodyHostOrAnyoneAlive 분기)을 레이어 표준 스폰(spawnlocation)으로 교체 (이전 모드 이식).
+// 모든 위치는 바닥 위 검증(OverlapBox 미충돌 + 3f 아래 바닥 Raycast) - 공중/구덩이 스폰 방지.
+// 재접속자는 did_give_spawn_location_from_a_save 플래그로 이 경로를 타지 않는다.
 [HarmonyPatch(typeof(ServerMain), nameof(ServerMain.LateSpawnLocation))]
 internal static class LateJoinSpawnPatch
 {

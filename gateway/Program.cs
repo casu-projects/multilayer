@@ -15,7 +15,7 @@ internal static class Program
 
         var core = new GatewayCore(config);
         Log.Core = core;
-        // 오케스트레이터 종료 신호 → 메인 루프 종료 (전 세션 Kick은 ApplyShutdown이 수행)
+ // 오케스트레이터 종료 신호 -> 메인 루프 종료 (전 세션 Kick은 ApplyShutdown이 수행)
         core.ShutdownRequested += () => cts.Cancel();
 
         var direct = new DirectIpAdapter(config, core);
@@ -43,7 +43,7 @@ internal static class Program
             Log.Info("종료 신호 수신.");
         };
 
-        // 메인 루프 — 모든 NetManager 접근은 이 스레드에서만 (LiteNetLib 스레드 안전성).
+ // 메인 루프 - 모든 NetManager 접근은 이 스레드에서만 (LiteNetLib 스레드 안전성).
         while (!cts.IsCancellationRequested)
         {
             direct.PollEvents();

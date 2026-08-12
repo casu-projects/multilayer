@@ -9,11 +9,9 @@ using LiteNetLib.Utils;
 
 namespace CasuMod;
 
-/// <summary>채팅 명령 시스템 — "!" 접두사 명령 라우터.
-/// Chat.Server_PlayerChatMessageSend(10099 수신기)를 Prefix로 가로채 명령이면 원본
-/// (브로드캐스트/릴레이 이벤트)을 스킵하고 레지스트리 등록 핸들러로 처리한다. 비명령 채팅은
-/// reader 위치를 복원해 원본이 정상 동작하도록 한다. 크로스 인스턴스가 필요한 명령
-/// (!list/!calladmin)은 오케스트레이터로 요청을 보내고 결과를 개인 회신한다.</summary>
+// 채팅 명령 시스템 - "!" 접두사 라우터. Chat.Server_PlayerChatMessageSend(10099)를 Prefix로
+// 가로채 명령이면 레지스트리 핸들러로 처리하고 브로드캐스트를 스킵한다 (비명령 채팅은 reader
+// 위치 복원으로 원본 동작). 크로스 인스턴스 명령(!list/!calladmin)은 오케스트레이터 경유.
 public static class ChatCommands
 {
     private const string CommandPrefix = "!";
@@ -25,7 +23,7 @@ public static class ChatCommands
         RegisterCommands();
     }
 
-    /// <summary>내장 명령 등록 — !help는 레지스트리에서 자동 생성된다.</summary>
+ // 내장 명령 등록 - !help는 레지스트리에서 자동 생성된다.
     private static void RegisterCommands()
     {
         _registry.Register("help", "도움말 표시", HelpCommand.Cmd);
@@ -63,7 +61,7 @@ public static class ChatCommands
             string[] argv = command.Trim().Split(' ');
             if (argv.Length > 0)
             {
-                // 레지스트리 디스패치 — 명령 이름은 대소문자 무시.
+ // 레지스트리 디스패치 - 명령 이름은 대소문자 무시.
                 string cmdName = argv[0].ToLowerInvariant();
                 if (_registry.TryGet(cmdName, out ChatCommand? registered))
                 {
@@ -78,7 +76,7 @@ public static class ChatCommands
                     return false;
                 }
 
-                // 게임 어드민 명령 dict 폴백 (대소문자 구분 — 바닐라 dict 동작 유지).
+ // 게임 어드민 명령 dict 폴백 (대소문자 구분 - 바닐라 dict 동작 유지).
                 var cmdDict = AccessTools.Field(typeof(ServerMain), "ServerClientCustomCommandsDict")
                     ?.GetValue(null) as Dictionary<string, Action<NetPlayer, string, string[]>>;
                 if (cmdDict != null && cmdDict.ContainsKey(argv[0]))
@@ -95,9 +93,9 @@ public static class ChatCommands
         }
     }
 
-    /// <summary>10098 패킷 type 2 (name="*", tag="") — 특정 플레이어에게만 보이는 개인 채팅.
-    /// 표시: "[*]: 메시지" (ChatMsgContainer.Compile이 이름을 대괄호로 감쌈).
-    /// AnnounceRelay.SendChatAnnouncementTo와 동일 포맷 — 위임 (2026-08-03 통일).</summary>
+ // 10098 패킷 type 2 (name="*", tag="") - 특정 플레이어에게만 보이는 개인 채팅.
+ // 표시: "[*]: 메시지" (ChatMsgContainer.Compile이 이름을 대괄호로 감쌈).
+ // AnnounceRelay.SendChatAnnouncementTo와 동일 포맷 - 위임 ( 통일).
     internal static class ChatPrivateReply
     {
         internal static void SendToPlayer(NetPlayer plr, string message)
@@ -113,8 +111,8 @@ public static class ChatCommands
         Local,
     }
 
-    /// <summary>!chatmode — 채팅 공유 범위 토글 (기본 Global, 마이그레이션 시 목적지 인스턴스에서
-    /// 자연 리셋 — 인메모리 dict가 인스턴스별이므로). 릴레이(ChatRelay)가 참조한다.</summary>
+ // !chatmode - 채팅 공유 범위 토글 (기본 Global, 마이그레이션 시 목적지 인스턴스에서
+ // 자연 리셋 - 인메모리 dict가 인스턴스별이므로). 릴레이(ChatRelay)가 참조한다.
     internal static class ChatModeCommand
     {
         private static readonly Dictionary<knetid, ChatMode> ModeByClientId = new();
@@ -135,7 +133,7 @@ public static class ChatCommands
         }
     }
 
-    /// <summary>!help — 레지스트리 기반 자동 생성 (이름순).</summary>
+ // !help - 레지스트리 기반 자동 생성 (이름순).
     internal static class HelpCommand
     {
         internal static void Cmd(NetPlayer caller, string[] argv)
@@ -149,7 +147,7 @@ public static class ChatCommands
         }
     }
 
-    /// <summary>!list — 접속 중인 플레이어 목록 (오케스트레이터가 전 레이어 기준으로 회신).</summary>
+ // !list - 접속 중인 플레이어 목록 (오케스트레이터가 전 레이어 기준으로 회신).
     internal static class PlayerListCommand
     {
         internal static void Cmd(NetPlayer caller, string[] argv)
@@ -159,7 +157,7 @@ public static class ChatCommands
         }
     }
 
-    /// <summary>!calladmin — 관리자 호출 (오케스트레이터가 Discord로 전파).</summary>
+ // !calladmin - 관리자 호출 (오케스트레이터가 Discord로 전파).
     internal static class CallAdminCommand
     {
         internal static void Cmd(NetPlayer caller, string[] argv)
@@ -170,8 +168,8 @@ public static class ChatCommands
         }
     }
 
-    /// <summary>!discord — 디스코드 서버 초대 URL 표시. URL은 오케스트레이터가 단일 소유자
-    /// (orchestrator.json DiscordUrl) — 요청 시점에 회신받아 개인 채팅 2줄로 표시한다.</summary>
+ // !discord - 디스코드 서버 초대 URL 표시. URL은 오케스트레이터가 단일 소유자
+ // (orchestrator.json DiscordUrl) - 요청 시점에 회신받아 개인 채팅 2줄로 표시한다.
     internal static class DiscordCommand
     {
         internal static void Cmd(NetPlayer caller, string[] argv)
@@ -181,10 +179,9 @@ public static class ChatCommands
         }
     }
 
-    /// <summary>!respawn — 완전 신규 리스폰 (바디/스킬/인벤토리 초기화 + 레이어 1 + 보급품).
-    /// 사망 시에만 사용 가능. 레이어 1은 무로딩 인플레이스 리셋 (게임 내장 Server_RespawnCharacter
-    /// 경로 — RegrowAllLimbs로 절단 포함 전 필드 초기화), 레이어 N은 오케스트레이터 하향
-    /// 마이그레이션 (로딩 동반). 세이브 폐기/세션 프레시화는 오케스트레이터가 담당 (단일 소유자).</summary>
+    // !respawn - 완전 신규 리스폰 (바디/스킬/인벤토리 초기화 + 레이어 1 + 보급품), 사망 시 전용.
+    // 레이어 1은 무로딩 인플레이스 리셋, 레이어 N은 오케스트레이터 하향 마이그레이션 (로딩 동반).
+    // 세이브 폐기/세션 프레시화는 오케스트레이터가 담당.
     internal static class RespawnCommand
     {
         internal static void Cmd(NetPlayer caller, string[] argv)
@@ -220,23 +217,23 @@ public static class ChatCommands
             }
         }
 
-        /// <summary>Case B — 무로딩 인플레이스 리스폰. 세이브 폐기/세션 프레시화는 RESPAWN
-        /// 이벤트로 오케스트레이터에 비동기 전달 (로컬 리셋과 독립 — 순서 무관).</summary>
+ // Case B - 무로딩 인플레이스 리스폰. 세이브 폐기/세션 프레시화는 RESPAWN
+ // 이벤트로 오케스트레이터에 비동기 전달 (로컬 리셋과 독립 - 순서 무관).
         private static void RespawnLocally(NetPlayer caller)
         {
             string pid = caller.GetPersistentId();
             OrchestratorClient.Instance.SendEvent("RESPAWN", new { playerKey = pid, fromDepth = 1 });
 
-            // 인벤토리/착용 파괴 (드랍 아님 — FREEZE와 동일 정책, 유령 아이템 원천 차단).
-            // 주의 1: slots[i]=null 금지 — slots는 InventorySlot[] (컴포넌트 배열)이라 참조를
-            // 깨뜨리면 살아있는 바디의 HoldingItem/PickUpItem 등에서 NRE가 발생한다.
-            // 주의 2: Object.Destroy는 프레임 말에 실제 반영 — 보급품 지급은 그 이후로 지연한다
-            // (아래 DelayCallLambda — 구 RespawnCommand의 ScheduleDelayedRespawn과 동일 원리).
-            // 주의 3: 컨테이너는 파괴 시 내용물을 월드에 드랍(unload)하므로 자식부터 파괴한다.
+ // 인벤토리/착용 파괴 (드랍 아님 - FREEZE와 동일 정책, 유령 아이템 원천 차단).
+ // 주의 1: slots[i]=null 금지 - slots는 InventorySlot[] (컴포넌트 배열)이라 참조를
+ // 깨뜨리면 살아있는 바디의 HoldingItem/PickUpItem 등에서 NRE가 발생한다.
+ // 주의 2: Object.Destroy는 프레임 말에 실제 반영 - 보급품 지급은 그 이후로 지연한다
+ // (아래 DelayCallLambda - 구 RespawnCommand의 ScheduleDelayedRespawn과 동일 원리).
+ // 주의 3: 컨테이너는 파괴 시 내용물을 월드에 드랍(unload)하므로 자식부터 파괴한다.
             try
             {
                 var all = new List<Item>(caller.body.GetAllItemsThorough());
-                all.Reverse(); // 컨테이너 내용물(자식) → 컨테이너(부모) 순으로 파괴
+                all.Reverse(); // 컨테이너 내용물(자식) -> 컨테이너(부모) 순으로 파괴
                 foreach (Item item in all)
                 {
                     if (item == null) continue;
@@ -247,8 +244,8 @@ public static class ChatCommands
                     if (wearable == null) continue;
                     NetObjectRegistry.SafeDestroyObject(wearable.gameObject);
                 }
-                // 슬롯 직결 아이템 안전망 — 게임과 동일한 접근(HoldingItem: GetChild(0))으로
-                // 파괴 (thorough가 놓친 항목 커버).
+ // 슬롯 직결 아이템 안전망 - 게임과 동일한 접근(HoldingItem: GetChild(0))으로
+ // 파괴 (thorough가 놓친 항목 커버).
                 foreach (InventorySlot slot in caller.body.slots)
                 {
                     if (slot == null || slot.transform.childCount == 0) continue;
@@ -263,16 +260,16 @@ public static class ChatCommands
 
             try
             {
-                // 게임 내장 무로딩 리스폰 경로: CreateCharacter(바디 재사용) → ResetHealth
-                // (RegrowAllLimbs — 절단 복원 + 힌지 재연결, 림브/바디 전 필드 100/0)
-                // → StopPiggyback → ForceStand → Server_TeleportCharacter(spawnlocation).
-                // level_transition:false — 드랍 경로 없음 (위에서 이미 파괴 — 중첩 안전).
-                caller.body.ResetMind(); // RespawnKeepSkills 규칙 무관 — 무조건 초기화
+ // 게임 내장 무로딩 리스폰 경로: CreateCharacter(바디 재사용) -> ResetHealth
+ // (RegrowAllLimbs - 절단 복원 + 힌지 재연결, 림브/바디 전 필드 100/0)
+ // > StopPiggyback -> ForceStand -> Server_TeleportCharacter(spawnlocation).
+ // level_transition:false - 드랍 경로 없음 (위에서 이미 파괴 - 중첩 안전).
+                caller.body.ResetMind(); // RespawnKeepSkills 규칙 무관 - 무조건 초기화
                 caller.Server_RespawnCharacter(Body_PlaceBody_MultiplayerPatch.spawnlocation, level_transition: false);
                 ChatPrivateReply.SendToPlayer(caller, "리스폰했습니다.");
 
-                // Object.Destroy는 프레임 말에 실제 반영 — 파괴가 끝나 슬롯이 비워진 뒤에
-                // 보급품을 지급한다 (같은 프레임 지급 시 옛 아이템 때문에 바닥에 드랍됨).
+ // Object.Destroy는 프레임 말에 실제 반영 - 파괴가 끝나 슬롯이 비워진 뒤에
+ // 보급품을 지급한다 (같은 프레임 지급 시 옛 아이템 때문에 바닥에 드랍됨).
                 KrokoshaCasualtiesUtils.Util.DelayCallLambda(0.6f, (Action)(() =>
                 {
                     if (caller == null || caller.body == null) return;
@@ -294,7 +291,7 @@ public static class ChatCommands
         }
     }
 
-    // ── 결과 수신 (오케스트레이터 → 모드) ──
+ // 결과 수신 (오케스트레이터 -> 모드)
 
     internal static void HandleListResult(ControlMessage msg)
     {
@@ -302,7 +299,7 @@ public static class ChatCommands
         if (payload == null || payload.Lines == null) return;
         NetPlayer plr = FindByPersistentId(payload.PlayerKey);
         if (plr == null) return;
-        // 레이어당 한 줄씩 별도의 개인 채팅으로 표시 ("[*] [L1]: player1111" 형태).
+ // 레이어당 한 줄씩 별도의 개인 채팅으로 표시 ("[*] [L1]: player1111" 형태).
         foreach (string line in payload.Lines)
         {
             ChatPrivateReply.SendToPlayer(plr, line);

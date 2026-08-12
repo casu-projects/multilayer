@@ -1,11 +1,9 @@
 namespace CasuMpOrchestrator;
 
-/// <summary>크로스 인스턴스 투표 조정 (구 시스템 VoteCoordinator 이식 — 2026-08-03, 허브 기반).
-/// VOTE_START(모드) → 전 인스턴스 VOTE_RUN 브로드캐스트, tally 합산 후 VOTE_RESULT 확정.
-/// 활성 투표 중 새 투표 시작 거부. 가결 기준은 각 인스턴스/최종 판정 공통: yes/total > 50%.</summary>
+// 크로스 인스턴스 투표 시스템
+// VOTE_START(모드) -> VOTE_RUN 브로드캐스트 -> VOTE_TALLY 통해 합산 -> VOTE_RESULT 확정
 public sealed class VoteCoordinator
 {
-    /// <summary>최종 집계 결과 (판정/효과 적용은 호출자가 수행).</summary>
     public readonly record struct VoteFinalizeResult(
         string VoteId, string Kind, int Yes, int No, int Ignore,
         Dictionary<string, string> Payload);
@@ -35,7 +33,6 @@ public sealed class VoteCoordinator
         get { lock (_lock) { return _active != null; } }
     }
 
-    /// <summary>새 투표 시작 — 활성 투표가 있으면 거부.</summary>
     public bool TryStart(VoteStartMarker marker, IReadOnlyCollection<string> expectedInstanceKeys)
     {
         lock (_lock)
@@ -66,7 +63,6 @@ public sealed class VoteCoordinator
         }
     }
 
-    /// <summary>매 틱 호출 — 전 인스턴스 보고 완료 또는 timeout+유예 경과 시 최종 결과 반환.</summary>
     public bool TryFinalize(DateTime nowUtc, out VoteFinalizeResult result)
     {
         lock (_lock)
@@ -98,7 +94,7 @@ public sealed class VoteCoordinator
     }
 }
 
-/// <summary>VOTE_START (mod → orchestrator).</summary>
+// VOTE_START (mod -> orchestrator)
 public sealed class VoteStartMarker
 {
     public string VoteId { get; set; } = "";
@@ -109,7 +105,7 @@ public sealed class VoteStartMarker
     public Dictionary<string, string> Payload { get; set; } = new();
 }
 
-/// <summary>VOTE_TALLY (mod → orchestrator).</summary>
+// VOTE_TALLY (mod -> orchestrator)
 public sealed class VoteTallyMarker
 {
     public string VoteId { get; set; } = "";

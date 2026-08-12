@@ -3,8 +3,8 @@ using LiteNetLib.Utils;
 
 namespace CasuMpGateway;
 
-/// <summary>직접연결(DirectIpAdapter) — LiteNetLib 리스너 (G2). 클라이언트 피어 → 세션 매핑을
-/// 어댑터가 소유한다. 신원은 username (G1-5).</summary>
+// 직접연결(DirectIpAdapter) - LiteNetLib 리스너 . 클라이언트 피어 -> 세션 매핑을
+// 어댑터가 소유한다. 신원은 username .
 public sealed class DirectIpAdapter : INetEventListener
 {
     private readonly GatewayConfig _config;
@@ -45,7 +45,7 @@ public sealed class DirectIpAdapter : INetEventListener
             return;
         }
 
-        // 인원 제한 — 접속 시도 단계에서 차단 (AUTH_INFO로 수신한 최대 인원 기준)
+ // 인원 제한 - 접속 시도 단계에서 차단 (AUTH_INFO로 수신한 최대 인원 기준)
         if (_core.SessionCount >= _core.MaxPlayers)
         {
             Reject(request, "Server is full.");
@@ -61,8 +61,8 @@ public sealed class DirectIpAdapter : INetEventListener
             return;
         }
 
-        // 서버 비밀번호 검증 (오케스트레이터 AUTH_INFO 사본 — 조기 거부, 게임이 최종 검증).
-        // 파싱 실패로 password가 비어도 게임 서버가 다시 검증하므로 안전.
+ // 서버 비밀번호 검증 (오케스트레이터 AUTH_INFO 사본 - 조기 거부, 게임이 최종 검증).
+ // 파싱 실패로 password가 비어도 게임 서버가 다시 검증하므로 안전.
         if (!_core.ValidatePassword(password))
         {
             Reject(request, "Wrong password.");

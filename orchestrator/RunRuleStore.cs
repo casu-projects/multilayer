@@ -2,9 +2,9 @@ using System.Text.Json;
 
 namespace CasuMpOrchestrator;
 
-/// <summary>런/규칙 설정 중앙 스토어 — run.json/rule.json (운영자 편집 정본).
-/// 시작 시 로드해 인메모리 보관, MOD_HELLO 시 인스턴스에 전송(RUN_RULES_STATE),
-/// 콘솔 변경 시 파일 재기록 + 전체 인스턴스 PUSH.</summary>
+// 런/규칙 설정 중앙 스토어 - run.json/rule.json (운영자 편집 정본).
+// 시작 시 로드해 인메모리 보관, MOD_HELLO 시 인스턴스에 전송(RUN_RULES_STATE),
+// 콘솔 변경 시 파일 재기록 + 전체 인스턴스 PUSH.
 public sealed class RunRuleStore
 {
     private readonly string _runPath;
@@ -30,7 +30,7 @@ public sealed class RunRuleStore
         get { lock (_lock) { return new Dictionary<string, string>(_rules); } }
     }
 
-    /// <summary>런 설정 변경 — 파일 재기록 (운영자 콘솔 `run` 명령).</summary>
+ // 런 설정 변경 - 파일 재기록 (운영자 콘솔 `run` 명령).
     public void SetRun(string key, string value)
     {
         lock (_lock)
@@ -40,7 +40,7 @@ public sealed class RunRuleStore
         }
     }
 
-    /// <summary>규칙 변경 — 파일 재기록 (운영자 콘솔 `rule` 명령).</summary>
+ // 규칙 변경 - 파일 재기록 (운영자 콘솔 `rule` 명령).
     public void SetRule(string key, string value)
     {
         lock (_lock)
@@ -50,13 +50,13 @@ public sealed class RunRuleStore
         }
     }
 
-    /// <summary>런 설정 존재 여부 — 없는 키의 변경을 거부하기 위한 검증.</summary>
+ // 런 설정 존재 여부 - 없는 키의 변경을 거부하기 위한 검증.
     public bool ContainsRun(string key)
     {
         lock (_lock) { return _run.ContainsKey(key); }
     }
 
-    /// <summary>규칙 존재 여부 — 없는 키의 변경을 거부하기 위한 검증.</summary>
+ // 규칙 존재 여부 - 없는 키의 변경을 거부하기 위한 검증.
     public bool ContainsRule(string key)
     {
         lock (_lock) { return _rules.ContainsKey(key); }

@@ -19,12 +19,12 @@ public sealed class PlayerState
     public PlayerSessionState Session { get; set; } = PlayerSessionState.Offline;
     public bool IsReturning { get; set; }
 
-    /// <summary>접속 시 표시 이름 (게이트웨이 SESSION_CONNECTED의 username — !list 등 표시용).</summary>
+ // 접속 시 표시 이름 (게이트웨이 SESSION_CONNECTED의 username - !list 등 표시용).
     public string? Username { get; set; }
 }
 
-/// <summary>플레이어 세션/라우팅 원본 (O6-3) — LayerRouter + ClientIdRegistry 통합.
-/// 게이트웨이에 TABLE_SNAPSHOT/ROUTE_UPDATE 전송. 모든 접근은 메인 스레드 전용.</summary>
+// 플레이어 세션/라우팅 원본 - LayerRouter + ClientIdRegistry 통합.
+// 게이트웨이에 TABLE_SNAPSHOT/ROUTE_UPDATE 전송. 모든 접근은 메인 스레드 전용.
 public sealed class PlayerSessionStore
 {
     private readonly OrchestratorConfig _config;
@@ -52,12 +52,12 @@ public sealed class PlayerSessionStore
 
     public IReadOnlyCollection<PlayerState> All => _players.Values.ToList();
 
-    // ── 게이트웨이 세션 이벤트 ──
+ // 게이트웨이 세션 이벤트
 
-    /// <summary>SESSION_CONNECTED 처리 — 상태 확정 + 인스턴스 배정.
-    /// ROUTE-ON-READY: 웜 인스턴스(READY/IDLE)면 즉시 라우팅, 콜드 인스턴스면
-    /// INSTANCE_READY 수신 시 PushRoutesForInstance가 라우팅한다 (게이트웨이의
-    /// 월드젠 거절 폴링 제거 — 2026-08-02).</summary>
+ // SESSION_CONNECTED 처리 - 상태 확정 + 인스턴스 배정.
+ // ROUTE-ON-READY: 웜 인스턴스(READY/IDLE)면 즉시 라우팅, 콜드 인스턴스면
+ // INSTANCE_READY 수신 시 PushRoutesForInstance가 라우팅한다 (게이트웨이의
+ // 월드젠 거절 폴링 제거).
     public void OnSessionConnected(PlayerKey key, string? username = null)
     {
         if (!_players.TryGetValue(key, out PlayerState? state))
@@ -76,7 +76,7 @@ public sealed class PlayerSessionStore
         state.Session = PlayerSessionState.Connecting;
         Console.WriteLine($"{key} 접속 — 레이어 {state.Depth} 배정.");
 
-        // 인스턴스 보장 (부팅 중이면 READY 대기 — ROUTE-ON-READY)
+ // 인스턴스 보장 (부팅 중이면 READY 대기 - ROUTE-ON-READY)
         string? backendAddr = _instances.EnsureInstance(state.Depth);
         if (backendAddr == null)
         {
@@ -95,13 +95,13 @@ public sealed class PlayerSessionStore
         }
         else
         {
-            // 콜드 인스턴스 — READY 도착 시 푸시 라우팅. 게이트웨이는 Routing 대기 상태로
-            // 유지되고, 오케스트레이터가 PushRoutesForInstance로 들여보낸다.
+ // 콜드 인스턴스 - READY 도착 시 푸시 라우팅. 게이트웨이는 Routing 대기 상태로
+ // 유지되고, 오케스트레이터가 PushRoutesForInstance로 들여보낸다.
             Console.WriteLine($"{key} 접속 — {instance?.Key} 준비 대기 (ROUTE-ON-READY).");
         }
     }
 
-    /// <summary>플레이어 1명의 ROUTE_UPDATE 전송 (웜 인스턴스 즉시 / READY 푸시 공통).</summary>
+ // 플레이어 1명의 ROUTE_UPDATE 전송 (웜 인스턴스 즉시 / READY 푸시 공통).
     private void SendRouteUpdate(PlayerState state)
     {
         var instance = state.InstanceId != null ? _instances.Find(state.InstanceId) : null;
@@ -118,8 +118,8 @@ public sealed class PlayerSessionStore
         });
     }
 
-    /// <summary>ROUTE-ON-READY: 인스턴스 READY 전환 시 해당 인스턴스에 배정된 대기 세션을
-    /// 일괄 라우팅한다 (INSTANCE_READY 디스패치에서 호출).</summary>
+ // ROUTE-ON-READY: 인스턴스 READY 전환 시 해당 인스턴스에 배정된 대기 세션을
+ // 일괄 라우팅한다 (INSTANCE_READY 디스패치에서 호출).
     public void PushRoutesForInstance(string instanceKey)
     {
         int pushed = 0;
@@ -152,9 +152,9 @@ public sealed class PlayerSessionStore
         Console.WriteLine($"{key} 오프라인.");
     }
 
-    /// <summary>인스턴스 종료 — 해당 인스턴스에 배정된 Connecting(백엔드 미연결) 세션을
-    /// 재배정한다 (유휴 정지/Stopping 창에 재접속한 플레이어 복구 — INSTANCE_EXITED가
-    /// 도착하면 EnsureInstance가 재스폰하고 새 주소로 ROUTE_UPDATE가 나간다).</summary>
+ // 인스턴스 종료 - 해당 인스턴스에 배정된 Connecting(백엔드 미연결) 세션을
+ // 재배정한다 (유휴 정지/Stopping 창에 재접속한 플레이어 복구 - INSTANCE_EXITED가
+ // 도착하면 EnsureInstance가 재스폰하고 새 주소로 ROUTE_UPDATE가 나간다).
     public void OnInstanceExited(string instanceKey)
     {
         foreach (PlayerState state in _players.Values.Where(p =>
@@ -164,10 +164,10 @@ public sealed class PlayerSessionStore
         }
     }
 
-    /// <summary>세션 상태 영속화 (코디네이터 등 외부 갱신 후 호출).</summary>
+ // 세션 상태 영속화 (코디네이터 등 외부 갱신 후 호출).
     public void Persist(PlayerState state) => SaveOne(state);
 
-    /// <summary>마이그레이션 커밋 시 라우팅 갱신 (코디네이터 호출).</summary>
+ // 마이그레이션 커밋 시 라우팅 갱신 (코디네이터 호출).
     public void CommitMigration(PlayerKey key, int newDepth, string? instanceId)
     {
         if (!_players.TryGetValue(key, out PlayerState? state))
@@ -183,8 +183,8 @@ public sealed class PlayerSessionStore
         Console.WriteLine($"{key} 마이그레이션 커밋 → 레이어 {newDepth}.");
     }
 
-    /// <summary>종료 시 전 세션 Offline 영속화 — 재시작 시 클린 상태 (스테일 온라인 복원 방지).
-    /// 마이그레이션 중이던 세션도 Offline으로 기록되지만, WAL 복구가 목적지/상태를 재설정한다.</summary>
+ // 종료 시 전 세션 Offline 영속화 - 재시작 시 클린 상태 (스테일 온라인 복원 방지).
+ // 마이그레이션 중이던 세션도 Offline으로 기록되지만, WAL 복구가 목적지/상태를 재설정한다.
     public void PersistAllOffline()
     {
         foreach (PlayerState state in _players.Values)
@@ -195,11 +195,11 @@ public sealed class PlayerSessionStore
         Console.WriteLine($"전 세션 Offline 영속화 ({_players.Count}명).");
     }
 
-    /// <summary>리스폰 데이터 계층 (P5): 플레이어를 완전 신규 접속자 상태로 리셋 —
-    /// depth=1, 라우팅 배정 해제, isReturning=false. 세이브 폐기는 PlayerDataStore.DeleteSave가
-    /// 담당 (단일 소유자 규칙). keepOnline: 레이어 1 인플레이스 리스폰은 플레이어가 계속
-    /// 접속 중이므로 Session/InstanceId(라우팅)를 보존한다 — 해제하면 이후 LAYER_END가
-    /// "오프라인"으로 무시되어 상향 마이그레이션이 막힌다.</summary>
+ // 리스폰 데이터 계층 : 플레이어를 완전 신규 접속자 상태로 리셋
+ // depth=1, 라우팅 배정 해제, isReturning=false. 세이브 폐기는 PlayerDataStore.DeleteSave가
+ // 담당 (단일 소유자 규칙). keepOnline: 레이어 1 인플레이스 리스폰은 플레이어가 계속
+ // 접속 중이므로 Session/InstanceId(라우팅)를 보존한다 - 해제하면 이후 LAYER_END가
+ // "오프라인"으로 무시되어 상향 마이그레이션이 막힌다.
     public void ResetToFresh(PlayerKey key, bool keepOnline = false)
     {
         if (!_players.TryGetValue(key, out PlayerState? state))
@@ -217,9 +217,9 @@ public sealed class PlayerSessionStore
         SaveOne(state);
     }
 
-    /// ROUTE-ON-READY: READY/IDLE 인스턴스의 라우트만 미러한다 — 부팅/월드젠 중인
-    /// 인스턴스는 라우팅 대상이 아니므로 스냅샷에서 제외 (게이트웨이가 월드젠 거절
-    /// 폴링을 하지 않도록).</summary>
+ // ROUTE-ON-READY: READY/IDLE 인스턴스의 라우트만 미러한다 - 부팅/월드젠 중인
+ // 인스턴스는 라우팅 대상이 아니므로 스냅샷에서 제외 (게이트웨이가 월드젠 거절
+ // 폴링을 하지 않도록).
     public void PushTableSnapshot()
     {
         var entries = _players.Values
@@ -244,7 +244,7 @@ public sealed class PlayerSessionStore
         _hub.SendNoAck(_hub.GatewayConnection, "TABLE_SNAPSHOT", new { entries });
     }
 
-    // ── 영속화 ──
+ // 영속화
 
     private ushort AllocateClientId()
     {

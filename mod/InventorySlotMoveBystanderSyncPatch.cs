@@ -6,14 +6,10 @@ using UnityEngine;
 
 namespace CasuMod;
 
-/// <summary>
-/// 같은 캐릭터 안에서 아이템 슬롯을 옮길 때, 다른 유저 화면에도 이동 과정이 제대로 보이게 수정
-///
-/// KrokMP는 같은 틱에 처리된 drop과 pickup을 마지막 상태 하나로 합칠 수 있는데
-/// 그렇다고 모든 CoolSync 시스템을 강제로 두번 갱신하면 상관없는 아이템에까지 패킷을 만들어내니
-/// 그건 해결책이라기보다 서버에 렉을 더 만드는 셈이에요.
-/// 여기서는 실제 슬롯 교환이 사용하는 DropItem(int)만 기록하고, 같은 몸으로 돌아오는 pickup만 다음 서버 틱에 가깝게 미뤄 두 상태를 자연스럽게 분리한다.
-/// </summary>
+// 같은 캐릭터 안에서 아이템 슬롯 이동이 다른 유저 화면에도 보이도록:
+// KrokMP는 같은 틱의 drop과 pickup을 마지막 상태 하나로 합칠 수 있다. 모든 CoolSync 시스템을
+// 강제 갱신하면 무관한 아이템까지 패킷이 늘어나므로, 실제 슬롯 교환이 쓰는 DropItem(int)만
+// 기록하고 같은 몸으로 돌아오는 pickup을 다음 서버 틱으로 미뤄 두 상태를 분리한다.
 internal static class InventorySlotMoveBystanderSyncPatch
 {
     private const float SameBodyMoveWindowSeconds = 0.15f;
@@ -81,7 +77,7 @@ internal static class InventorySlotMoveBystanderSyncPatch
             int slot = __1;
             bool pickupFlag = __2;
 
-            // 전체 동기화를 강제로 돌리지 않고, drop을 서버에 먼저 전송될 시간을 조금 준다.
+ // 전체 동기화를 강제로 돌리지 않고, drop을 서버에 먼저 전송될 시간을 조금 준다.
             KrokoshaCasualtiesUtils.Util.DelayCallLambda(DeferredPickupSeconds, (Action)(() =>
             {
                 if (body == null || item == null) return;

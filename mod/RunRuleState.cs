@@ -2,8 +2,8 @@ using System.Collections.Generic;
 
 namespace CasuMod;
 
-/// <summary>오케스트레이터로부터 수신한 런/규칙 설정 (RUN_RULES_STATE).
-/// PreRunScript.StartRun 시 RunSettingsBootstrap/RuleBootstrap이 소비한다.</summary>
+// 오케스트레이터로부터 수신한 런/규칙 설정 (RUN_RULES_STATE).
+// PreRunScript.StartRun 시 RunSettingsBootstrap/RuleBootstrap이 소비한다.
 public static class RunRuleState
 {
     private static readonly object _lock = new();
@@ -18,9 +18,9 @@ public static class RunRuleState
             _rules = new Dictionary<string, string>(payload?.Rules ?? new());
         }
 
-        // R3 — 실시간 반영: 오케스트레이터 `rule`/`run` 명령 푸시가 즉시 적용된다.
-        // 월드 생성 전 수신(WorldGeneration.runSettings null 등)은 가드로 no-op —
-        // 기존 StartRun 부트스트랩(RuleBootstrap/RunSettingsBootstrap)이 담당한다.
+ // 실시간 반영: 오케스트레이터 `rule`/`run` 명령 푸시가 즉시 적용된다.
+ // 월드 생성 전 수신(WorldGeneration.runSettings null 등)은 가드로 no-op
+ // 기존 StartRun 부트스트랩(RuleBootstrap/RunSettingsBootstrap)이 담당한다.
         RuleApplier.ApplyRulesNow();
         RuleApplier.ApplyRunSettingsNow();
     }

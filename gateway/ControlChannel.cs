@@ -3,9 +3,9 @@ using System.Text;
 
 namespace CasuMpGateway;
 
-/// <summary>제어 채널 (오케스트레이터 ↔ 게이트웨이) — TCP JSON 라인 (G12-R1).
-/// 게이트웨이가 오케스트레이터에 연결하는 방향. 재연결 시 테이블 재동기화 + 활성 세션 재보고 (R4).
-/// 명령은 read 루프에서 수신 → 코어 큐, ACK/보고는 write 루프가 전송.</summary>
+// 제어 채널 (오케스트레이터 ↔ 게이트웨이) - TCP JSON 라인 .
+// 게이트웨이가 오케스트레이터에 연결하는 방향. 재연결 시 테이블 재동기화 + 활성 세션 재보고 .
+// 명령은 read 루프에서 수신 -> 코어 큐, ACK/보고는 write 루프가 전송.
 public sealed class ControlChannel
 {
     private readonly GatewayConfig _config;
@@ -32,8 +32,8 @@ public sealed class ControlChannel
             }
             catch (Exception ex)
             {
-                // 연결 오류는 릴레이 없이 자체 stdout에만 — 재시도 루프가 오케스트레이터
-                // 콘솔을 도배하지 않도록 한다 (정상 연결 로그는 릴레이됨).
+ // 연결 오류는 릴레이 없이 자체 stdout에만 - 재시도 루프가 오케스트레이터
+ // 콘솔을 도배하지 않도록 한다 (정상 연결 로그는 릴레이됨).
                 Console.WriteLine($"연결 오류: {ex.Message}");
             }
             await Task.Delay(reconnectDelay, ct);
@@ -51,7 +51,7 @@ public sealed class ControlChannel
         using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
         using var reader = new StreamReader(stream, new UTF8Encoding(false));
 
-        // R4: 연결 직후 HELLO + 활성 세션 재보고 → 오케스트레이터가 TABLE_SNAPSHOT 전송.
+ // : 연결 직후 HELLO + 활성 세션 재보고 -> 오케스트레이터가 TABLE_SNAPSHOT 전송.
         writer.WriteLine(ControlMessage.Report(_core.NextSeq(), "GATEWAY_HELLO",
             new { version = 1 }).Serialize());
         _core.ReportActiveSessions();

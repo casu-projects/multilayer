@@ -2,8 +2,8 @@ using System.Text;
 
 namespace CasuMpGateway;
 
-/// <summary>플레이어 식별 키 — 오케스트레이터와 동일 규칙 (G1-5: Steam 경로는 실 SteamID,
-/// 직접연결은 username — 스푸핑 가능 수용).</summary>
+// 플레이어 식별 키 - 오케스트레이터와 동일 규칙 ( Steam 경로는 실 SteamID,
+// 직접연결은 username - 스푸핑 가능 수용).
 public readonly record struct PlayerKey(string Value)
 {
     public override string ToString() => Value;

@@ -84,7 +84,8 @@ internal static class GunDamageServerReplayPatch
                 if (!limbId.TryGetNetBodyAndLimbSafe(out NetBody nb, out Limb limb)) continue;
                 if (!nb.is_player || pb.CanAttackThisGuy(nb.body))
                 {
-                    if (!hitLimbs.Contains(limb)) hitLimbs.Add(limb);
+                    // 샷건 같은 총은 팔이나 다리에 여러 데미지를 줄수 있는데, 중복 제거하면 화면에는 여러 발인데 피해는 한 발만 계산하게 되요.
+                    hitLimbs.Add(limb);
                 }
             }
             var hitBuildings = new List<SyncInfo>();
@@ -94,7 +95,7 @@ internal static class GunDamageServerReplayPatch
                 MyLiteNetLibExtensions.Get(reader, out knetid syncId);
                 if (NetObjectRegistry.TryGetSyncInfo(syncId, out SyncInfo si2)
                     && si2.IsBuilding() && NetObjectRegistry.IsObjectDynamic(si2.go)
-                    && !si2.building.cantHit && !hitBuildings.Contains(si2))
+                    && !si2.building.cantHit)
                 {
                     hitBuildings.Add(si2);
                 }

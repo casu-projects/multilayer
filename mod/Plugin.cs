@@ -13,8 +13,8 @@ public class Plugin : BaseUnityPlugin
     public static ManualLogSource Log;
     internal static Harmony HarmonyInstance;
 
- // 디버그 로그 표시 여부 - 오케스트레이터 VERBOSE 메시지로 설정된다.
- // false면 루틴 트레이스가 숨겨지고, 명령 결과/실패성 경고/오류는 항상 표시된다.
+    // 디버그 로그 표시 여부 - 오케스트레이터 VERBOSE 메시지로 설정된다
+    // false면 루틴 트레이스가 숨겨지고, 명령 결과/실패성 경고/오류는 항상 표시된다
     internal static bool VerboseLogging;
 
     private void Awake()

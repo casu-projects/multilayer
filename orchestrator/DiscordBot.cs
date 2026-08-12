@@ -7,8 +7,8 @@ using Discord.WebSocket;
 namespace CasuMpOrchestrator;
 
 // Discord 관리 봇 - 단일 채널(DiscordChannelId)에 접속/퇴장·마이그레이션·관리자 호출·
-// 사망/리스폰·채팅을 알림하고, 채널 메시지를 게임 채팅으로 전달한다 (speaker="관리자").
-// 토큰/채널 미설정 시 비활성. 아바타/프로필 링크는 steamId != 0일 때만 동작한다.
+// 사망/리스폰·채팅을 알림하고, 채널 메시지를 게임 채팅으로 전달한다 (speaker="관리자")
+// 토큰/채널 미설정 시 비활성. 아바타/프로필 링크는 steamId != 0일 때만 동작한다
 internal sealed class DiscordBot
 {
     private readonly DiscordSocketClient _client;
@@ -20,18 +20,18 @@ internal sealed class DiscordBot
     private readonly Action<string, string>? _onDiscordChat;   // 채팅 채널 -> 게임 (유저명, 텍스트 - Program.cs가 브로드캐스트)
     private readonly Action<string>? _onConsoleCommand;   // 콘솔 채널 -> 서버 콘솔 명령
 
- // Ready 전이 시 콜백 (채널 주제 초기 동기화 등). 생성 후 설정 - Ready는
- // StartAsync 이후 비동기로 발화하므로 생성 전 참조 문제가 없다.
+    // Ready 전이 시 콜백 (채널 주제 초기 동기화 등). 생성 후 설정 - Ready는
+    // StartAsync 이후 비동기로 발화하므로 생성 전 참조 문제가 없다
     internal Action? OnReady { get; set; }
     private readonly Dictionary<ulong, string> _avatarCache = new();
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
 
- // 서버 닉네임 캐시 - (guildId, userId) -> 닉네임 + 조회시각 (REST 폴백 결과 재사용)
+    // 서버 닉네임 캐시 - (guildId, userId) -> 닉네임 + 조회시각 (REST 폴백 결과 재사용)
     private const int NicknameCacheTtlSeconds = 300;
     private const int NicknameCacheCap = 500;
     private readonly Dictionary<(ulong GuildId, ulong UserId), (string? Nick, DateTime Fetched)> _nicknameCache = new();
 
- // 콘솔 로그 릴레이 - 전체 콘솔 로그를 콘솔 채널로 배치 전송
+    // 콘솔 로그 릴레이 - 전체 콘솔 로그를 콘솔 채널로 배치 전송
     private const int ConsoleLogBatchChars = 1900;   // Discord 메시지 한도 여유
     private const int ConsoleLogQueueCap = 500;      // 오버플로 시 폐기 기준 (라인 수)
     private readonly ConcurrentQueue<string> _consoleLogQueue = new();
@@ -74,8 +74,8 @@ internal sealed class DiscordBot
 
     internal bool IsConnected => _client.ConnectionState == ConnectionState.Connected;
 
- // 전체 콘솔 로그 라인 접수 (TimestampedConsoleWriter.OnConsoleLine - 접두사 포함).
- // 빈 줄 제외, 큐 오버플로 시 오래된 라인 폐기 + 생략 카운터 누적.
+    // 전체 콘솔 로그 라인 접수 (TimestampedConsoleWriter.OnConsoleLine - 접두사 포함)
+    // 빈 줄 제외, 큐 오버플로 시 오래된 라인 폐기 + 생략 카운터 누적
     internal void EnqueueConsoleLog(string line)
     {
         if (_consoleChannelId == 0) return;
@@ -88,8 +88,8 @@ internal sealed class DiscordBot
         _consoleLogQueue.Enqueue(line);
     }
 
- // 콘솔 로그 배치 전송 루프 - 1초 주기로 큐를 비워 최대 1900자 단위 메시지로
- // 콘솔 채널에 전송한다 (연결 전 라인은 큐에 쌓였다가 연결 후 일괄 전송).
+    // 콘솔 로그 배치 전송 루프 - 1초 주기로 큐를 비워 최대 1900자 단위 메시지로
+    // 콘솔 채널에 전송한다 (연결 전 라인은 큐에 쌓였다가 연결 후 일괄 전송)
     private async Task ConsoleLogSenderLoopAsync()
     {
         var pending = new List<string>();
@@ -103,7 +103,7 @@ internal sealed class DiscordBot
                 var channel = await _client.GetChannelAsync(_consoleChannelId) as IMessageChannel;
                 if (channel == null) continue;
 
- // 생략 마커 선행 (누적된 경우).
+                // 생략 마커 선행 (누적된 경우)
                 int dropped = Interlocked.Exchange(ref _consoleLogDropped, 0);
                 if (dropped > 0)
                 {
@@ -113,7 +113,7 @@ internal sealed class DiscordBot
                 while (_consoleLogQueue.TryDequeue(out string? line))
                 {
                     if (line == null) continue;
- // 개별 라인이 한도 초과 시 잘라서 전송 (경계 안전).
+                    // 개별 라인이 한도 초과 시 잘라서 전송 (경계 안전)
                     if (line.Length > ConsoleLogBatchChars)
                         line = line[..ConsoleLogBatchChars] + " …";
 
@@ -137,7 +137,7 @@ internal sealed class DiscordBot
         }
     }
 
- // 접속/퇴장 알림 - Steam 아바타 + 프로필 링크 (steamId ≠ 0일 때만).
+    // 접속/퇴장 알림 - Steam 아바타 + 프로필 링크 (steamId ≠ 0일 때만)
     internal async Task SendJoinLeaveAsync(string playerName, ulong steamId, bool joined)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -159,7 +159,7 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
- // 서버 시작/종료 알림 (메시지 채널) - "서버가 켜졌습니다."/"서버가 꺼졌습니다.".
+    // 서버 시작/종료 알림 (메시지 채널) - "서버가 켜졌습니다."/"서버가 꺼졌습니다."
     internal async Task SendServerStatusAsync(bool started)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -174,7 +174,7 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
- // 락다운(점검 모드) 시작/종료 알림 (메시지 채널).
+    // 락다운(점검 모드) 시작/종료 알림 (메시지 채널)
     internal async Task SendLockdownAsync(bool started)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -189,7 +189,7 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
- // 레이어 이동(마이그레이션 커밋) 알림 - L{from} > L{to}.
+    // 레이어 이동(마이그레이션 커밋) 알림 - L{from} > L{to}
     internal async Task SendMigrationAsync(string playerName, ulong steamId, int fromDepth, int toDepth)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -210,9 +210,9 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
- // 관리자 호출 알림 - DiscordAdminUserId가 설정된 경우 멘션.
- // 설정 ID가 길드 역할이면 역할 멘션(&lt;@&amp;id&gt;), 아니면 사용자 멘션(&lt;@id&gt;) - 자동 감지
- // (Discord ID는 전역 유일 네임스페이스라 모호성 없음, 역할은 인텐트와 무관하게 항상 캐시).
+    // 관리자 호출 알림 - DiscordAdminUserId가 설정된 경우 멘션
+    // 설정 ID가 길드 역할이면 역할 멘션(&lt;@&amp;id&gt;), 아니면 사용자 멘션(&lt;@id&gt;) - 자동 감지
+    // (Discord ID는 전역 유일 네임스페이스라 모호성 없음, 역할은 인텐트와 무관하게 항상 캐시)
     internal async Task SendCallAdminAsync(string playerName, ulong steamId)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -223,7 +223,7 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync($"🚨 **{playerName}**의 호출!{mention}");
     }
 
- // 관리자 멘션 문자열 생성 - 역할 ID면 &lt;@&amp;id&gt;, 사용자 ID면 &lt;@id&gt;.
+    // 관리자 멘션 문자열 생성 - 역할 ID면 &lt;@&amp;id&gt;, 사용자 ID면 &lt;@id&gt;
     private string BuildAdminMention()
     {
         if (_adminUserId == 0) return "";
@@ -231,7 +231,7 @@ internal sealed class DiscordBot
         return isRole ? $" <@&{_adminUserId}>" : $" <@{_adminUserId}>";
     }
 
- // 사망/리스폰 알림.
+    // 사망/리스폰 알림
     internal async Task SendDeathRespawnAsync(string playerName, ulong steamId, bool died, string layer)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -252,7 +252,7 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
- // 게임 채팅 -> Discord - "[L{n}] **이름**: 메시지".
+    // 게임 채팅 -> Discord - "[L{n}] **이름**: 메시지"
     internal async Task SendChatAsync(string playerName, string message, string layer, string colorHex)
     {
         if (!IsConnected) return;
@@ -262,8 +262,8 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(text: $"[{layer}] **{playerName}**: {message}");
     }
 
- // 채널 주제(description) 갱신 - 접속 인원 실시간 표시.
- // 중복 방지: 현재 주제와 같으면 스킵 (수동 수정은 1회 유지).
+    // 채널 주제(description) 갱신 - 접속 인원 실시간 표시
+    // 중복 방지: 현재 주제와 같으면 스킵 (수동 수정은 1회 유지)
     internal async Task UpdatePlayerCountTopicAsync(string text)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -281,7 +281,7 @@ internal sealed class DiscordBot
         }
     }
 
- // Steam Avatar
+    // Steam Avatar
     private async Task<string?> FetchAvatarAsync(ulong steamId)
     {
         if (_avatarCache.TryGetValue(steamId, out string? cached))
@@ -321,10 +321,10 @@ internal sealed class DiscordBot
         return null;
     }
 
- // Event Handlers
+    // Event Handlers
 
- // 봇 자체 로그 - 표준 콘솔 규격 "[HH:mm:ss orch:bot] ..."으로 출력하고
- // 릴레이 라인으로도 수집되므로 콘솔 채널 로그 릴레이에 자연히 포함된다.
+    // 봇 자체 로그 - 표준 콘솔 규격 "[HH:mm:ss orch:bot] ..."으로 출력하고
+    // 릴레이 라인으로도 수집되므로 콘솔 채널 로그 릴레이에 자연히 포함된다
     private static void Log(string message)
     {
         if (TimestampedConsoleWriter.Instance != null)
@@ -360,9 +360,9 @@ internal sealed class DiscordBot
                 Log($"경고: 콘솔 채널 {_consoleChannelId}을(를) 찾을 수 없습니다.");
         }
 
- // 이전에 등록된 슬래시 명령 정리 (legacy cleanup) - 글로벌 + 봇이 속한 모든 길드.
- // 길드 명령만 지우던 구 코드는 글로벌 명령을 영구히 남겨 과거 슬래시 명령이 서버에
- // 잔존하는 문제를 유발했다 (사용 시 "응답 없음" - 상호작용 핸들러가 없으므로).
+        // 이전에 등록된 슬래시 명령 정리 (legacy cleanup) - 글로벌 + 봇이 속한 모든 길드
+        // 길드 명령만 지우던 구 코드는 글로벌 명령을 영구히 남겨 과거 슬래시 명령이 서버에
+        // 잔존하는 문제를 유발했다 (사용 시 "응답 없음" - 상호작용 핸들러가 없으므로)
         try
         {
             int deleted = 0;
@@ -387,7 +387,7 @@ internal sealed class DiscordBot
             Log($"슬래시 명령어 정리 실패: {ex.Message}");
         }
 
- // 채널 주제 초기 동기화 (접속 인원 표시 등 - Program.cs가 세션 데이터로 갱신).
+        // 채널 주제 초기 동기화 (접속 인원 표시 등 - Program.cs가 세션 데이터로 갱신)
         try
         {
             OnReady?.Invoke();
@@ -406,7 +406,7 @@ internal sealed class DiscordBot
         string text = msg.Content.Trim();
         if (string.IsNullOrEmpty(text)) return Task.CompletedTask;
 
- // 콘솔 채널 우선 - 채널이 동일하게 설정된 경우 콘솔 명령 경로가 승리한다.
+        // 콘솔 채널 우선 - 채널이 동일하게 설정된 경우 콘솔 명령 경로가 승리한다
         if (_consoleChannelId != 0 && msg.Channel.Id == _consoleChannelId)
         {
             _onConsoleCommand?.Invoke(text);
@@ -420,15 +420,15 @@ internal sealed class DiscordBot
         return Task.CompletedTask;
     }
 
- // Discord 채팅 -> 게임 - 서버 닉네임 해석 후 릴레이 (닉네임 REST 폴백 포함).
+    // Discord 채팅 -> 게임 - 서버 닉네임 해석 후 릴레이 (닉네임 REST 폴백 포함)
     private async Task RelayDiscordChatAsync(SocketMessage msg)
     {
         string name = await ResolveDisplayNameAsync(msg.Author, msg.Channel);
         _onDiscordChat?.Invoke(name, msg.Content.Trim());
     }
 
- // 서버 닉네임 해석 - SocketGuildUser.Nickname 우선, 없으면 REST 조회 폴백.
- // 봇에 GUILD_MEMBERS 인텐트가 없어도 REST(GetUserAsync)는 닉네임을 반환한다.
+    // 서버 닉네임 해석 - SocketGuildUser.Nickname 우선, 없으면 REST 조회 폴백
+    // 봇에 GUILD_MEMBERS 인텐트가 없어도 REST(GetUserAsync)는 닉네임을 반환한다
     private async Task<string> ResolveDisplayNameAsync(SocketUser author, ISocketMessageChannel channel)
     {
         string? nick = (author as SocketGuildUser)?.Nickname;
@@ -448,7 +448,7 @@ internal sealed class DiscordBot
             }
             catch
             {
- // 조회 실패 - 사용자명으로 폴백.
+            // 조회 실패 - 사용자명으로 폴백
             }
         }
         return author.Username;

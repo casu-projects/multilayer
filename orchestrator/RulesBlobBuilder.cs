@@ -1,18 +1,15 @@
 namespace CasuMpOrchestrator;
 
-// rule.json -> Steam 로비 EXTRADATA용 KrokoshaMultiplayerGameRules 이진 레이아웃 재구성.
-// rule.json이 단일 정본. 100바이트: int deathcounter(4) + 구조체(96) - 구조체 오프셋은
-// 구 시스템 검증값을 그대로 사용한다 (게임 업데이트 시 재검증 필요).
+// 스팀 P2P 로비 등록 시 쓰이는 EXTRADATA를 위한 KrokoshaMultiplayerGameRules 이진 레이아웃 구성
+// 총 100 바이트 (deathcounter[4] + KrokoshaMultiplayerGameRules[96])
 internal static class RulesBlobBuilder
 {
     internal static byte[] Build(Dictionary<string, string> data)
     {
- // 100 bytes: int deathcounter (4) + KrokoshaMultiplayerGameRules (96)
         var buf = new byte[100];
         var span = new Span<byte>(buf);
 
- // deathcounter at offset 0 (default 0)
- // rules start at offset 4
+        // offset 4: rules
         const int R = 4;
         SetBool(span, R + 0, data, "sv_cheats", false);
         SetBool(span, R + 1, data, "AllowClientCheatCommands", false);
@@ -48,7 +45,7 @@ internal static class RulesBlobBuilder
         SetBool(span, R + 34, data, "AllowPush", true);
         SetBool(span, R + 35, data, "AlwaysAllowCarry", false);
         SetByte(span, R + 36, data, "PiggybackMaxStack", 1);
- // padding 37-39
+        // offset 37-39: padding #1
         SetFloat(span, R + 40, data, "PiggybackWeightMultiplier", 0.8f);
         SetBool(span, R + 44, data, "SpectateWhileUnconscious", false);
         SetBool(span, R + 45, data, "EnableMP3Sync", true);
@@ -64,12 +61,12 @@ internal static class RulesBlobBuilder
         SetBool(span, R + 64, data, "LateJoinAllowed", true);
         SetBool(span, R + 65, data, "LateJoinSpectate", false);
         SetBool(span, R + 66, data, "AmputateHealthyPlayers", true);
- // padding 67
+        // offset 67: padding #2
         SetFloat(span, R + 68, data, "AdditionalBrainRegen", 1f);
         SetFloat(span, R + 72, data, "AdditionalHealthRegen", 1f);
         SetFloat(span, R + 76, data, "AdditionalHealthDecay", 1f);
         SetBool(span, R + 80, data, "LastStandAllowed", true);
- // padding 81-83
+        // offset 81-83: padding #3
         SetFloat(span, R + 84, data, "SelfharmWitnessMoodDebuff", 3f);
         SetBool(span, R + 88, data, "SavePlayerState", true);
         SetBool(span, R + 89, data, "SavePlayerInventory", true);

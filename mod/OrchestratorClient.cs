@@ -178,9 +178,6 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "LIST_RESULT":
                 ChatCommands.HandleListResult(msg);
                 break;
-            case "CURRENT_RESULT":
-                ChatCommands.HandleCurrentResult(msg);
-                break;
             case "DISCORD_RESULT":
                 ChatCommands.HandleDiscordResult(msg);
                 break;

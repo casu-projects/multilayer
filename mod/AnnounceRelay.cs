@@ -115,7 +115,7 @@ public static class AnnounceRelay
     /// <summary>10098 채팅 공지 타겟 전송 — [*] 시스템 메시지 통일 (type 2, name="*").
     /// type 1(이름 없음)은 클라이언트가 [*SERVER*]로 렌더링하므로, 시스템 메시지는 전부
     /// type 2 name="*" — "[*]: 메시지" (ChatMsgContainer.Compile이 이름을 대괄호로 감쌈).
-    /// !list/!currentrun 개인 회신(ChatPrivateReply)과 동일 포맷 (2026-08-03 통일).</summary>
+    /// !list 개인 회신(ChatPrivateReply)과 동일 포맷 (2026-08-03 통일).</summary>
     internal static void SendChatAnnouncementTo(string message, List<knetid> targets)
     {
         if (targets.Count == 0) return;

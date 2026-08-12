@@ -175,7 +175,7 @@ internal static class Program
             // 투표 확정 — 전 인스턴스 VOTE_RESULT + Discord + 가결 시 효과 적용 (밴/런).
             if (votes.TryFinalize(DateTime.UtcNow, out VoteCoordinator.VoteFinalizeResult voteResult))
             {
-                FinalizeVote(hub, sessions, runRules, banList, discordBot, voteResult);
+                FinalizeVote(hub, banList, discordBot, voteResult);
             }
             // 유휴 정리 계수 (2026-08-02): 마이그레이션 중인 플레이어(Migrating, InstanceId=출발지)와
             // 도착 대기 중인 목적지(tx.TargetInstance)도 인원으로 계산 — FREEZE/READY 대기 중
@@ -564,14 +564,6 @@ internal static class Program
                     hub.SendNoAck(conn, "LIST_RESULT", new { playerKey = listReq.PlayerKey, lines });
                 }
                 break;
-            case "CURRENT_REQUEST":
-                // !currentrun [key] — RunRuleStore 단일 소유자 조회.
-                if (msg.PayloadAs<CurrentRequestPayload>() is { } curReq)
-                {
-                    string text = BuildRunSettingsText(runRules, curReq.Key);
-                    hub.SendNoAck(conn, "CURRENT_RESULT", new { playerKey = curReq.PlayerKey, text });
-                }
-                break;
             case "DISCORD_REQUEST":
                 // !discord — 설정된 디스코드 서버 초대 URL 회신 (모드가 개인 채팅 2줄로 표시).
                 if (msg.PayloadAs<DiscordRequestPayload>() is { } discReq)
@@ -713,9 +705,9 @@ internal static class Program
     }
 
     /// <summary>투표 확정 처리 — VOTE_RESULT 브로드캐스트 + Discord 결과 + 가결 시 효과:
-    /// ban → 밴 파일 + 게이트웨이 즉시 차단/킥, run → run.json 즉시 반영 (RUN_RULES_STATE 푸시).</summary>
-    private static void FinalizeVote(ControlHub hub, PlayerSessionStore sessions, RunRuleStore runRules,
-        BanList banList, DiscordBot discordBot, VoteCoordinator.VoteFinalizeResult voteResult)
+    /// ban → 밴 파일 + 게이트웨이 즉시 차단/킥.</summary>
+    private static void FinalizeVote(ControlHub hub, BanList banList, DiscordBot discordBot,
+        VoteCoordinator.VoteFinalizeResult voteResult)
     {
         foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
         {
@@ -748,18 +740,6 @@ internal static class Program
                 banList.Toggle(targetKey, true);
                 hub.Send(hub.GatewayConnection, "BAN", new { playerKey = targetKey, banned = true });
                 Console.WriteLine($"[Vote] 투표 가결 — {targetKey} 밴 처리 (파일 + 게이트웨이 차단/킥).");
-            }
-        }
-        else if (voteResult.Kind == "run")
-        {
-            string? key = voteResult.Payload.GetValueOrDefault("key");
-            string? rawValue = voteResult.Payload.GetValueOrDefault("rawValue");
-            if (!string.IsNullOrEmpty(key) && rawValue != null)
-            {
-                runRules.SetRun(key, rawValue);   // run.json 재기록 (정본)
-                PushRunRulesToInstances(hub, runRules);
-                PushLobbyMetadata(hub, runRules, sessions, force: true);
-                Console.WriteLine($"[Vote] 투표 가결 — {key} = {rawValue} 즉시 적용 (전 인스턴스).");
             }
         }
     }
@@ -833,19 +813,6 @@ internal static class Program
         _ = discordBot.UpdatePlayerCountTopicAsync(BuildPlayerCountText(sessions));
     }
 
-    /// <summary>!currentrun 응답 텍스트 — 키 조회 또는 전체 목록 (RunRuleStore가 정본).</summary>
-    private static string BuildRunSettingsText(RunRuleStore runRules, string key)
-    {
-        var snapshot = runRules.RunSnapshot;
-        if (!string.IsNullOrEmpty(key))
-        {
-            return snapshot.TryGetValue(key, out string? value)
-                ? $"{key}: {value}"
-                : $"설정을 찾을 수 없습니다: {key}";
-        }
-        return string.Join("\n", snapshot.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}: {kv.Value}"));
-    }
-
     // ── payload 모델 ──
 
     private sealed class HelloVersion { public int Version { get; set; } }
@@ -876,13 +843,6 @@ internal static class Program
     private sealed class ListRequestPayload
     {
         public string PlayerKey { get; set; } = "";
-    }
-
-    /// <summary>!currentrun 요청 (mod → orchestrator).</summary>
-    private sealed class CurrentRequestPayload
-    {
-        public string PlayerKey { get; set; } = "";
-        public string Key { get; set; } = "";
     }
 
     /// <summary>!discord 요청 (mod → orchestrator).</summary>

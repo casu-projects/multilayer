@@ -96,12 +96,6 @@ public static class VoteRelay
     {
         switch (kind)
         {
-            case "run":
-                if (payload.TryGetValue("key", out string key) && payload.TryGetValue("rawValue", out string rawValue))
-                {
-                    Chat.Server_ChatAnnouncement($"Run 설정이 변경되었습니다: {key} = {rawValue} (서버 전체 즉시 적용).");
-                }
-                break;
             case "ban":
                 if (payload.TryGetValue("targetName", out string targetName))
                 {

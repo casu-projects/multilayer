@@ -13,7 +13,7 @@ namespace CasuMod;
 /// Chat.Server_PlayerChatMessageSend(10099 수신기)를 Prefix로 가로채 명령이면 원본
 /// (브로드캐스트/릴레이 이벤트)을 스킵하고 레지스트리 등록 핸들러로 처리한다. 비명령 채팅은
 /// reader 위치를 복원해 원본이 정상 동작하도록 한다. 크로스 인스턴스가 필요한 명령
-/// (!list/!currentrun/!calladmin)은 오케스트레이터로 요청을 보내고 결과를 개인 회신한다.</summary>
+/// (!list/!calladmin)은 오케스트레이터로 요청을 보내고 결과를 개인 회신한다.</summary>
 public static class ChatCommands
 {
     private const string CommandPrefix = "!";
@@ -31,11 +31,9 @@ public static class ChatCommands
         _registry.Register("help", "도움말 표시", HelpCommand.Cmd);
         _registry.Register("chatmode", "채팅 공유 범위 전환", ChatModeCommand.Cmd);
         _registry.Register("list", "접속 중인 플레이어 목록", PlayerListCommand.Cmd);
-        _registry.Register("currentrun", "현재 Run 설정 보기 (생략 시 전체 목록)", "[key]", CurrentRunCommand.Cmd);
         _registry.Register("calladmin", "관리자 호출", CallAdminCommand.Cmd);
         _registry.Register("discord", "디스코드 서버 초대 링크", DiscordCommand.Cmd);
         _registry.Register("respawn", "사망 시 레이어 1에서 새 캐릭터로 리스폰", RespawnCommand.Cmd);
-        _registry.Register("runvote", "Run 설정 변경 투표", "<설정> <값>", VoteCommands.CmdRunVote);
         _registry.Register("banvote", "플레이어 영구 차단 투표", "<이름>", VoteCommands.CmdBanVote);
     }
 
@@ -158,17 +156,6 @@ public static class ChatCommands
         {
             OrchestratorClient.Instance?.SendEvent("LIST_REQUEST",
                 new { playerKey = caller.GetPersistentId() });
-        }
-    }
-
-    /// <summary>!currentrun — 현재 Run 설정 보기 (오케스트레이터 회신).</summary>
-    internal static class CurrentRunCommand
-    {
-        internal static void Cmd(NetPlayer caller, string[] argv)
-        {
-            string key = argv.Length > 1 ? argv[1] : "";
-            OrchestratorClient.Instance?.SendEvent("CURRENT_REQUEST",
-                new { playerKey = caller.GetPersistentId(), key });
         }
     }
 
@@ -320,14 +307,6 @@ public static class ChatCommands
         {
             ChatPrivateReply.SendToPlayer(plr, line);
         }
-    }
-
-    internal static void HandleCurrentResult(ControlMessage msg)
-    {
-        var payload = msg.PayloadAs<CurrentResultPayload>();
-        if (payload == null) return;
-        NetPlayer plr = FindByPersistentId(payload.PlayerKey);
-        if (plr != null) ChatPrivateReply.SendToPlayer(plr, payload.Text);
     }
 
     internal static void HandleDiscordResult(ControlMessage msg)

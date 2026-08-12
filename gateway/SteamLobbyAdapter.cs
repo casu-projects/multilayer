@@ -28,7 +28,7 @@ public sealed class SteamLobbyAdapter
     {
         _config = config;
         _core = core;
-        _lobby = new SteamLobby(config.SteamSessionPath, config.SteamVersionTag, core);
+        _lobby = new SteamLobby(config.SteamSessionPath, config.SteamVersionTag, core, config.Motd);
     }
 
     public void Start()

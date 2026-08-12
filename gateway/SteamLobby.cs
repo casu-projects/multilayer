@@ -56,14 +56,16 @@ public sealed class SteamLobby
     private int _happinessSum;
     private ulong[] _steamIds = Array.Empty<ulong>();
     private byte[]? _rulesBytes;
+    private readonly string[] _motd;
 
     public bool Initialized { get; private set; }
 
-    public SteamLobby(string sessionPath, string versionTag, GatewayCore core)
+    public SteamLobby(string sessionPath, string versionTag, GatewayCore core, string[] motd)
     {
         _sessionPath = sessionPath;
         _versionTag = versionTag;
         _core = core;
+        _motd = motd ?? Array.Empty<string>();
     }
 
     // 오케스트레이터 LOBBY_METADATA 명령 적용 (인스턴스 리포트는 오케스트레이터가 수집)
@@ -283,10 +285,10 @@ public sealed class SteamLobby
         var inner = new NetDataWriter();
         inner.Put(_rulesBytes);
         inner.PutArray(allSteamIds);
-        // mod 목록은 전송하지 않음 - 클라이언트가 항상 읽는 bool + 배열은 빈 값으로 고정
-        // (enforceModList=false -> 모드리스트 잠금 없음)
+        // modlist 채널에 MOTD 전달 - enforceModList=false 유지 (클라이언트가 서버 브라우저의
+        // Mods 버튼 툴팁으로 줄바꿈 표시, 접속 검증에는 영향 없음)
         inner.Put(false);
-        inner.PutArray(Array.Empty<string>());
+        inner.PutArray(_motd);
 
         byte[] compressed;
         using (var outStream = new MemoryStream())

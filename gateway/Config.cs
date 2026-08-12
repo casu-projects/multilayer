@@ -16,6 +16,9 @@ public sealed class GatewayConfig
 
     public string SteamVersionTag { get; set; } = "7.0.1_MPv4.0.1";
 
+    // 서버 브라우저 Mods 버튼 툴팁으로 표시할 MOTD 라인 (EXTRADATA modlist로 전달)
+    public string[] Motd { get; set; } = Array.Empty<string>();
+
     public double BackendRetryIntervalSeconds { get; set; } = 0.5;
 
     // 백엔드 연결 최대 재시도 (0.5s x 600 = 5분 - 콜드 인스턴스 부팅+월드젠 동안 거절 반복)

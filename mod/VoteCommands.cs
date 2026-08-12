@@ -7,27 +7,13 @@ namespace CasuMod;
 
 /// <summary>채팅 투표 명령 !runvote / !banvote (구 시스템 ChatOnlyVoteCommands 이식 — 2026-08-03).
 /// 로컬 검증 후 VOTE_START를 오케스트레이터로 발신 — VoteCoordinator가 전 인스턴스에
-/// 투표를 릴레이하고 tally를 합산한다 (바닐라 VoteSystem.Server_AnnounceVote UI 재사용).</summary>
+/// 투표를 릴레이하고 tally를 합산한다 (바닐라 VoteSystem.Server_AnnounceVote UI 재사용).
+/// 두 명령은 ChatCommandRegistry에 개별 등록된다.</summary>
 internal static class VoteCommands
 {
     private const float VoteTimeSeconds = 30f;
 
-    internal static bool TryHandle(NetPlayer caller, string[] argv)
-    {
-        if (caller == null || argv.Length == 0) return false;
-        switch (argv[0])
-        {
-            case "runvote":
-                HandleRunVote(caller, argv);
-                return true;
-            case "banvote":
-                HandleBanVote(caller, argv);
-                return true;
-        }
-        return false;
-    }
-
-    private static void HandleRunVote(NetPlayer caller, string[] argv)
+    internal static void CmdRunVote(NetPlayer caller, string[] argv)
     {
         if (VoteSystem.Server_ActiveVote != null)
         {
@@ -97,7 +83,7 @@ internal static class VoteCommands
             promptBody, VoteTimeSeconds, payload);
     }
 
-    private static void HandleBanVote(NetPlayer caller, string[] argv)
+    internal static void CmdBanVote(NetPlayer caller, string[] argv)
     {
         if (VoteSystem.Server_ActiveVote != null)
         {

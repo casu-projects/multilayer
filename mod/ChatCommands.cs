@@ -9,14 +9,35 @@ using LiteNetLib.Utils;
 
 namespace CasuMod;
 
-/// <summary>채팅 명령 시스템 (Phase 2) — "!" 접두사 명령 라우터.
+/// <summary>채팅 명령 시스템 — "!" 접두사 명령 라우터.
 /// Chat.Server_PlayerChatMessageSend(10099 수신기)를 Prefix로 가로채 명령이면 원본
-/// (브로드캐스트/릴레이 이벤트)을 스킵하고 로컬 핸들러로 처리한다. 비명령 채팅은
+/// (브로드캐스트/릴레이 이벤트)을 스킵하고 레지스트리 등록 핸들러로 처리한다. 비명령 채팅은
 /// reader 위치를 복원해 원본이 정상 동작하도록 한다. 크로스 인스턴스가 필요한 명령
 /// (!list/!currentrun/!calladmin)은 오케스트레이터로 요청을 보내고 결과를 개인 회신한다.</summary>
 public static class ChatCommands
 {
     private const string CommandPrefix = "!";
+
+    private static readonly ChatCommandRegistry _registry = new();
+
+    static ChatCommands()
+    {
+        RegisterCommands();
+    }
+
+    /// <summary>내장 명령 등록 — !help는 레지스트리에서 자동 생성된다.</summary>
+    private static void RegisterCommands()
+    {
+        _registry.Register("help", "도움말 표시", HelpCommand.Cmd);
+        _registry.Register("chatmode", "채팅 공유 범위 전환", ChatModeCommand.Cmd);
+        _registry.Register("list", "접속 중인 플레이어 목록", PlayerListCommand.Cmd);
+        _registry.Register("currentrun", "현재 Run 설정 보기 (생략 시 전체 목록)", "[key]", CurrentRunCommand.Cmd);
+        _registry.Register("calladmin", "관리자 호출", CallAdminCommand.Cmd);
+        _registry.Register("discord", "디스코드 서버 초대 링크", DiscordCommand.Cmd);
+        _registry.Register("respawn", "사망 시 레이어 1에서 새 캐릭터로 리스폰", RespawnCommand.Cmd);
+        _registry.Register("runvote", "Run 설정 변경 투표", "<설정> <값>", VoteCommands.CmdRunVote);
+        _registry.Register("banvote", "플레이어 영구 차단 투표", "<이름>", VoteCommands.CmdBanVote);
+    }
 
     [HarmonyPatch(typeof(Chat), "Server_PlayerChatMessageSend")]
     internal static class Chat_CommandRouterPatch
@@ -44,30 +65,32 @@ public static class ChatCommands
             string[] argv = command.Trim().Split(' ');
             if (argv.Length > 0)
             {
-                if (HelpCommand.TryHandle(plr, argv)
-                    || ChatModeCommand.TryHandle(plr, argv)
-                    || PlayerListCommand.TryHandle(plr, argv)
-                    || CurrentRunCommand.TryHandle(plr, argv)
-                    || CallAdminCommand.TryHandle(plr, argv)
-                    || DiscordCommand.TryHandle(plr, argv)
-                    || RespawnCommand.TryHandle(plr, argv)
-                    || VoteCommands.TryHandle(plr, argv))
+                // 레지스트리 디스패치 — 명령 이름은 대소문자 무시.
+                string cmdName = argv[0].ToLowerInvariant();
+                if (_registry.TryGet(cmdName, out ChatCommand? registered))
                 {
+                    try
+                    {
+                        registered.Handler(plr, argv);
+                    }
+                    catch (Exception ex)
+                    {
+                        Plugin.Log.LogWarning($"[ChatCmd] !{cmdName} 처리 오류: {ex.Message}");
+                    }
                     return false;
                 }
 
-                // 게임 어드민 명령 dict 폴백
-                string cmdName = argv[0];
+                // 게임 어드민 명령 dict 폴백 (대소문자 구분 — 바닐라 dict 동작 유지).
                 var cmdDict = AccessTools.Field(typeof(ServerMain), "ServerClientCustomCommandsDict")
                     ?.GetValue(null) as Dictionary<string, Action<NetPlayer, string, string[]>>;
-                if (cmdDict != null && cmdDict.ContainsKey(cmdName))
+                if (cmdDict != null && cmdDict.ContainsKey(argv[0]))
                 {
                     AccessTools.Method(typeof(ServerMain), "RunClientCustomCommand")
                         ?.Invoke(null, new object[] { command, plr });
                 }
                 else
                 {
-                    ChatPrivateReply.SendToPlayer(plr, $"알 수 없는 명령어: {cmdName}");
+                    ChatPrivateReply.SendToPlayer(plr, $"알 수 없는 명령어: {argv[0]}");
                 }
             }
             return false; // 명령은 브로드캐스트/릴레이에서 제외
@@ -96,16 +119,13 @@ public static class ChatCommands
     /// 자연 리셋 — 인메모리 dict가 인스턴스별이므로). 릴레이(ChatRelay)가 참조한다.</summary>
     internal static class ChatModeCommand
     {
-        private const string CommandName = "chatmode";
         private static readonly Dictionary<knetid, ChatMode> ModeByClientId = new();
 
         internal static ChatMode GetMode(knetid clientId) =>
             ModeByClientId.TryGetValue(clientId, out ChatMode mode) ? mode : ChatMode.Global;
 
-        internal static bool TryHandle(NetPlayer caller, string[] argv)
+        internal static void Cmd(NetPlayer caller, string[] argv)
         {
-            if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
-
             ChatMode current = GetMode(caller.clientId);
             ChatMode next = current == ChatMode.Global ? ChatMode.Local : ChatMode.Global;
             ModeByClientId[caller.clientId] = next;
@@ -114,73 +134,52 @@ public static class ChatCommands
                 ? "<color=#87CEEB>모든 레이어</color>"
                 : "<color=#FFFF00>이 레이어</color>";
             ChatPrivateReply.SendToPlayer(caller, $"채팅 모드 토글 : {label}");
-            return true;
         }
     }
 
+    /// <summary>!help — 레지스트리 기반 자동 생성 (이름순).</summary>
     internal static class HelpCommand
     {
-        private const string CommandName = "help";
-
-        internal static bool TryHandle(NetPlayer caller, string[] argv)
+        internal static void Cmd(NetPlayer caller, string[] argv)
         {
-            if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
-
             ChatPrivateReply.SendToPlayer(caller, "사용 가능한 명령어:");
-            ChatPrivateReply.SendToPlayer(caller, "!help - 도움말 표시");
-            ChatPrivateReply.SendToPlayer(caller, "!chatmode - 채팅 공유 범위 전환 (전체 레이어/현재 레이어)");
-            ChatPrivateReply.SendToPlayer(caller, "!list - 접속 중인 플레이어 목록");
-            ChatPrivateReply.SendToPlayer(caller, "!currentrun [key] - 현재 Run 설정 보기 (생략 시 전체 목록)");
-            ChatPrivateReply.SendToPlayer(caller, "!calladmin - 관리자 호출");
-            ChatPrivateReply.SendToPlayer(caller, "!discord - 디스코드 서버 초대 링크");
-            ChatPrivateReply.SendToPlayer(caller, "!respawn - 사망 시 레이어 1에서 새 캐릭터로 리스폰");
-            ChatPrivateReply.SendToPlayer(caller, "!runvote <설정> <값> - Run 설정 변경 투표 (전체 레이어)");
-            ChatPrivateReply.SendToPlayer(caller, "!banvote <이름> - 플레이어 영구 차단 투표 (전체 레이어)");
-            return true;
+            foreach (ChatCommand cmd in _registry.All.OrderBy(c => c.Name, StringComparer.Ordinal))
+            {
+                string usage = cmd.Usage.Length > 0 ? " " + cmd.Usage : "";
+                ChatPrivateReply.SendToPlayer(caller, $"!{cmd.Name}{usage} - {cmd.Description}");
+            }
         }
     }
 
+    /// <summary>!list — 접속 중인 플레이어 목록 (오케스트레이터가 전 레이어 기준으로 회신).</summary>
     internal static class PlayerListCommand
     {
-        private const string CommandName = "list";
-
-        internal static bool TryHandle(NetPlayer caller, string[] argv)
+        internal static void Cmd(NetPlayer caller, string[] argv)
         {
-            if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
-
             OrchestratorClient.Instance?.SendEvent("LIST_REQUEST",
                 new { playerKey = caller.GetPersistentId() });
-            return true;
         }
     }
 
+    /// <summary>!currentrun — 현재 Run 설정 보기 (오케스트레이터 회신).</summary>
     internal static class CurrentRunCommand
     {
-        private const string CommandName = "currentrun";
-
-        internal static bool TryHandle(NetPlayer caller, string[] argv)
+        internal static void Cmd(NetPlayer caller, string[] argv)
         {
-            if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
-
             string key = argv.Length > 1 ? argv[1] : "";
             OrchestratorClient.Instance?.SendEvent("CURRENT_REQUEST",
                 new { playerKey = caller.GetPersistentId(), key });
-            return true;
         }
     }
 
+    /// <summary>!calladmin — 관리자 호출 (오케스트레이터가 Discord로 전파).</summary>
     internal static class CallAdminCommand
     {
-        private const string CommandName = "calladmin";
-
-        internal static bool TryHandle(NetPlayer caller, string[] argv)
+        internal static void Cmd(NetPlayer caller, string[] argv)
         {
-            if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
-
             OrchestratorClient.Instance?.SendEvent("CALLADMIN",
                 new { playerKey = caller.GetPersistentId(), username = caller.playername });
             ChatPrivateReply.SendToPlayer(caller, "관리자에게 호출이 전송되었습니다.");
-            return true;
         }
     }
 
@@ -188,15 +187,10 @@ public static class ChatCommands
     /// (orchestrator.json DiscordUrl) — 요청 시점에 회신받아 개인 채팅 2줄로 표시한다.</summary>
     internal static class DiscordCommand
     {
-        private const string CommandName = "discord";
-
-        internal static bool TryHandle(NetPlayer caller, string[] argv)
+        internal static void Cmd(NetPlayer caller, string[] argv)
         {
-            if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
-
             OrchestratorClient.Instance?.SendEvent("DISCORD_REQUEST",
                 new { playerKey = caller.GetPersistentId() });
-            return true;
         }
     }
 
@@ -206,29 +200,25 @@ public static class ChatCommands
     /// 마이그레이션 (로딩 동반). 세이브 폐기/세션 프레시화는 오케스트레이터가 담당 (단일 소유자).</summary>
     internal static class RespawnCommand
     {
-        private const string CommandName = "respawn";
-
-        internal static bool TryHandle(NetPlayer caller, string[] argv)
+        internal static void Cmd(NetPlayer caller, string[] argv)
         {
-            if (argv.Length == 0 || argv[0] != CommandName || caller == null) return false;
-
             if (!caller.IsDead())
             {
                 ChatPrivateReply.SendToPlayer(caller, "사망한 상태에서만 사용할 수 있는 명령어입니다.");
-                return true;
+                return;
             }
 
             string pid = caller.GetPersistentId();
             if (MigrationModule.IsFrozen(pid))
             {
                 ChatPrivateReply.SendToPlayer(caller, "마이그레이션 중에는 리스폰할 수 없습니다.");
-                return true;
+                return;
             }
 
             if (OrchestratorClient.Instance == null)
             {
                 ChatPrivateReply.SendToPlayer(caller, "오케스트레이터 연결이 없어 리스폰할 수 없습니다.");
-                return true;
+                return;
             }
 
             if (OrchestratorClient.Instance.InstanceDepth == 1)
@@ -241,7 +231,6 @@ public static class ChatCommands
                     new { playerKey = pid, fromDepth = OrchestratorClient.Instance.InstanceDepth });
                 ChatPrivateReply.SendToPlayer(caller, "리스폰 — 레이어 1로 이동합니다.");
             }
-            return true;
         }
 
         /// <summary>Case B — 무로딩 인플레이스 리스폰. 세이브 폐기/세션 프레시화는 RESPAWN

@@ -18,12 +18,12 @@ internal static class Program
     {
         string configPath = args.Length > 0 ? args[0] : "agent.json";
         AgentConfig config = AgentConfig.Load(configPath);
-        Logger.Init(config.MachineId);
+        Logger.Init($"agent:{config.MachineId}");
 
         string localIp = DetectLocalIPv4();
         _localIp = localIp;
 
-        Console.WriteLine($"에이전트 {config.MachineId} (IP: {localIp})");
+        Logger.Local($"에이전트 {config.MachineId} (IP: {localIp})");
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -181,7 +181,7 @@ internal static class Program
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
-                Console.WriteLine($"오케스트레이터 연결 오류: {ex.Message}");
+                Logger.Local($"오케스트레이터 연결 오류: {ex.Message}");
             }
             await Task.Delay(delay, ct);
         }

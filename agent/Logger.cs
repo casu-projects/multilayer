@@ -15,18 +15,21 @@ public static class Logger
 
     public static bool Verbose;
 
-    public static void Init(string machineId) => _source = $"agent:{machineId}";
+    public static void Init(string source) => _source = source;
 
-    public static void Info(string message, string? sourceSuffix = null)
+    public static void Info(string message, string? suffix = null)
     {
-        string source = sourceSuffix == null ? _source : $"{_source}/{sourceSuffix}";
+        string source = suffix == null ? _source : $"{_source}/{suffix}";
         Enqueue(message, source);
     }
 
-    public static void Debug(string message, string? sourceSuffix = null)
+    public static void Debug(string message, string? suffix = null)
     {
-        if (Verbose) Info(message, sourceSuffix);
+        if (Verbose) Info(message, suffix);
     }
+
+    // 콘솔 전용 - 릴레이 없음 (연결 오류 등 오케스트레이터 콘솔 도배 방지).
+    public static void Local(string message) => System.Console.WriteLine(message);
 
     private static void Enqueue(string message, string source)
     {

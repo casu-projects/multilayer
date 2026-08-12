@@ -6,9 +6,8 @@ using SteamKit2.Internal;
 
 namespace CasuMpGateway;
 
-// SteamKit2 기반 로비 (PLAN.md 갭2 - 네트워크당 로비 1개).
-// 기존 오케스트레이터 SteamKitLobbyManager를 포팅한 것. P2P 데이터는 SteamLobbyAdapter가 처리하고,
-// 여기는 로비 생성/메타데이터/KICK 시그널만 담당한다.
+// SteamKit2 기반 로비 (네트워크당 로비 1개) - 기존 오케스트레이터 SteamKitLobbyManager 포팅
+// P2P 데이터는 SteamLobbyAdapter가 처리하고, 여기는 로비 생성/메타데이터/KICK 시그널만 담당한다
 public sealed class SteamLobby
 {
     private const uint AppId = 4576510;
@@ -26,8 +25,8 @@ public sealed class SteamLobby
     private const string KeyLocked = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_LOCKED";
     private const string KeyRunSettings = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_RUNSETTINGS";
 
- // Must always be present (even empty) - the client's parser reads this key
- // unconditionally and a missing key throws, hiding the whole lobby from search.
+    // Must always be present (even empty) - the client's parser reads this key
+    // unconditionally and a missing key throws, hiding the whole lobby from search
     private const string KeyExtraData = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_EXTRADATA";
 
     private readonly string _sessionPath;
@@ -40,10 +39,10 @@ public sealed class SteamLobby
     private SteamMatchmaking? _matchmaking;
     private SteamID? _lobbyId;
     private bool _lobbyCreated;
- // 로비 생성 요청 발신 후 콜백 대기 중 - Tick 재발화 방지 (실측:
- // CreateLobby는 비동기라 콜백 도착 전에 매 틱 재생성 -> 로비 무한 생성 21+개).
+    // 로비 생성 요청 발신 후 콜백 대기 중 - Tick 재발화 방지 (CreateLobby는 비동기라
+    // 콜백 도착 전 매 틱 재생성 -> 로비 무한 생성 21+개)
     private bool _lobbyCreationPending;
- // 생성 실패 시 재시도 최소 간격 (실패 시 틱마다 요청 폭주 방지).
+    // 생성 실패 시 재시도 최소 간격 (실패 시 틱마다 요청 폭주 방지)
     private DateTime _lobbyRetryAfterUtc;
     private bool _loggedOn;
     private bool _authWaitLogged;
@@ -51,8 +50,8 @@ public sealed class SteamLobby
     private DateTime _lastMetadataRefresh = DateTime.MinValue;
     private static readonly TimeSpan MetadataRefreshInterval = TimeSpan.FromSeconds(8);
 
- // 오케스트레이터의 LOBBY_METADATA 명령으로 갱신되는 동적 값 (플레이어 수는 코어 세션 수).
- // mod 목록은 전송하지 않는다 (EXTRADATA 와이어에는 빈 목록 + false 고정).
+    // 오케스트레이터의 LOBBY_METADATA 명령으로 갱신되는 동적 값 (플레이어 수는 코어 세션 수)
+    // mod 목록은 전송하지 않는다 (EXTRADATA 와이어에는 빈 목록 + false 고정)
     private int _livingCount;
     private int _happinessSum;
     private ulong[] _steamIds = Array.Empty<ulong>();
@@ -67,7 +66,7 @@ public sealed class SteamLobby
         _core = core;
     }
 
- // 오케스트레이터 LOBBY_METADATA 명령 적용 (PLAN.md - 인스턴스 리포트는 오케스트레이터가 수집).
+    // 오케스트레이터 LOBBY_METADATA 명령 적용 (인스턴스 리포트는 오케스트레이터가 수집)
     public void UpdateDynamicMetadata(GatewayCore.LobbyMetadataPayload payload)
     {
         _livingCount = payload.LivingCount;
@@ -81,7 +80,7 @@ public sealed class SteamLobby
             }
             catch (FormatException)
             {
-                Log.Info("LOBBY_METADATA RulesBase64 파싱 실패.");
+                Logger.Info("LOBBY_METADATA RulesBase64 파싱 실패.");
             }
         }
         RefreshDynamicMetadata();
@@ -91,7 +90,7 @@ public sealed class SteamLobby
     {
         if (!File.Exists(_sessionPath))
         {
-            Log.Info($"세션 파일이 없습니다: {_sessionPath} (Steam 로비 비활성).");
+            Logger.Info($"세션 파일이 없습니다: {_sessionPath} (Steam 로비 비활성).");
             return;
         }
 
@@ -104,7 +103,7 @@ public sealed class SteamLobby
         }
         catch (Exception ex)
         {
-            Log.Info($"세션 파일 읽기 실패: {ex.Message} (Steam 로비 비활성).");
+            Logger.Info($"세션 파일 읽기 실패: {ex.Message} (Steam 로비 비활성).");
             return;
         }
 
@@ -125,7 +124,7 @@ public sealed class SteamLobby
         _callbackManager.Subscribe<SteamUser.LoggedOnCallback>(OnLoggedOn);
         _callbackManager.Subscribe<SteamClient.DisconnectedCallback>(_ =>
         {
-            Log.Debug("CM 연결 끊김 - 재접속 시도.");
+            Logger.Debug("CM 연결 끊김 - 재접속 시도.");
             _lobbyCreated = false;
             _lobbyCreationPending = false;
             _steamClient?.Connect();
@@ -140,9 +139,8 @@ public sealed class SteamLobby
     {
         _callbackManager?.RunCallbacks();
 
- // 로비 생성 게이트 : SteamKit2 로그인 + 오케스트레이터 AUTH_INFO가 모두
- // 도착해야 생성한다 - AUTH_INFO 이전에는 서버명/인원/비밀번호 여부가 확정되지 않으므로
- // 로비를 만들지 않는다 (코어 기본값 레이스 원천 제거).
+        // 로비 생성 게이트: SteamKit2 로그인 + AUTH_INFO가 모두 도착해야 생성 - 그 전에는
+        // 서버명/인원/비밀번호 여부가 미확정 (코어 기본값 레이스 원천 제거)
         if (_loggedOn && !_lobbyCreated && !_lobbyCreationPending
             && DateTime.UtcNow >= _lobbyRetryAfterUtc)
         {
@@ -175,8 +173,8 @@ public sealed class SteamLobby
         _steamClient.Disconnect();
     }
 
- // 바닐라 클라이언트가 표시하는 KICK 사유 - 로비 소유자의 로비 채팅 메시지
- // "KICK:&lt;targetSteamId&gt;:&lt;reason&gt;" (KSteam.OnLobbyChatMsg - 소유자만 수용).
+    // 바닐라 클라이언트가 표시하는 KICK 사유 - 로비 소유자의 로비 채팅 메시지
+    // "KICK:&lt;targetSteamId&gt;:&lt;reason&gt;" (KSteam.OnLobbyChatMsg - 소유자만 수용)
     public void SendKickChatMessage(ulong targetSteamId, string reason)
     {
         if (!_lobbyCreated || _lobbyId == null || _matchmaking == null)
@@ -185,7 +183,7 @@ public sealed class SteamLobby
         }
 
         string text = $"KICK:{targetSteamId}:{reason}";
-        Log.Debug($"KICK 로비 채팅 메시지 전송: 내용=\"{text}\".");
+        Logger.Debug($"KICK 로비 채팅 메시지 전송: 내용=\"{text}\".");
         var msg = new ClientMsgProtobuf<CMsgClientMMSSendLobbyChatMsg>(EMsg.ClientMMSSendLobbyChatMsg)
         {
             Body =
@@ -203,13 +201,13 @@ public sealed class SteamLobby
     {
         if (callback.Result != EResult.OK)
         {
-            Log.Info($"로그온 실패: {callback.Result} / {callback.ExtendedResult}");
+            Logger.Info($"로그온 실패: {callback.Result} / {callback.ExtendedResult}");
             return;
         }
 
-        Log.Debug($"로그인 성공 (SteamID {_steamClient!.SteamID}).");
+        Logger.Debug($"로그인 성공 (SteamID {_steamClient!.SteamID}).");
         _loggedOn = true;
- // 로비 생성은 Tick의 게이트에서 (AUTH_INFO 수신 후) 수행한다.
+        // 로비 생성은 Tick의 게이트에서 (AUTH_INFO 수신 후) 수행한다
     }
 
     private void CreateLobbyNow()
@@ -225,14 +223,14 @@ public sealed class SteamLobby
         _lobbyCreationPending = false;
         if (callback.Result != EResult.OK)
         {
-            Log.Info($"로비 생성 실패: {callback.Result} — 10초 후 재시도.");
+            Logger.Info($"로비 생성 실패: {callback.Result} — 10초 후 재시도.");
             _lobbyRetryAfterUtc = DateTime.UtcNow.AddSeconds(10);
             return;
         }
 
         _lobbyId = callback.LobbySteamID;
         _lobbyCreated = true;
-        Log.Debug($"로비 생성 성공: {_lobbyId} (AppID {callback.AppID})");
+        Logger.Debug($"로비 생성 성공: {_lobbyId} (AppID {callback.AppID})");
         RefreshDynamicMetadata();
     }
 
@@ -271,8 +269,8 @@ public sealed class SteamLobby
         };
     }
 
- // EXTRADATA: gzip(rules + steamId[] + enforceModList + modListGuids[]), LiteNetLib
- // 길이 프리픽스 + base64 - 클라이언트가 기대하는 형식 그대로.
+    // EXTRADATA: gzip(rules + steamId[] + enforceModList + modListGuids[]), LiteNetLib
+    // 길이 프리픽스 + base64 - 클라이언트가 기대하는 형식 그대로
     private string BuildExtraData()
     {
         if (_rulesBytes == null || _rulesBytes.Length == 0)
@@ -285,8 +283,8 @@ public sealed class SteamLobby
         var inner = new NetDataWriter();
         inner.Put(_rulesBytes);
         inner.PutArray(allSteamIds);
- // mod 목록은 전송하지 않음 - 클라이언트가 항상 읽는 bool + 배열은 빈 값으로 고정
- // (enforceModList=false -> 모드리스트 잠금 없음).
+        // mod 목록은 전송하지 않음 - 클라이언트가 항상 읽는 bool + 배열은 빈 값으로 고정
+        // (enforceModList=false -> 모드리스트 잠금 없음)
         inner.Put(false);
         inner.PutArray(Array.Empty<string>());
 
@@ -306,7 +304,7 @@ public sealed class SteamLobby
     }
 }
 
-// tools/SteamLoginSetup가 저장하는 형식과 동일.
+// tools/SteamLoginSetup가 저장하는 형식과 동일
 internal sealed class SavedSteamSession
 {
     public string AccountName { get; set; } = "";

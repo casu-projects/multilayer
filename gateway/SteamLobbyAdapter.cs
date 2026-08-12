@@ -5,8 +5,8 @@ using Steamworks;
 namespace CasuMpGateway;
 
 // Steam P2P 수신 담당 - 클라이언트는 "로비 소유자"에게 P2P 접속(바닐라 고정)하므로,
-// Steamworks.NET 사용자 세션으로 P2P를 종단하고 SteamID64를 확보해 ClientSession에 넘긴다.
-// 로비(SteamKit2)는 SteamLobby가 담당, 인스턴스는 순수 LiteNetLib (tail v2로 신원 전달).
+// Steamworks.NET 사용자 세션으로 P2P를 종단하고 SteamID64를 확보해 ClientSession에 넘긴다
+// 로비(SteamKit2)는 SteamLobby가 담당, 인스턴스는 순수 LiteNetLib (tail v2로 신원 전달)
 public sealed class SteamLobbyAdapter
 {
     private static readonly TimeSpan PendingCloseDelay = TimeSpan.FromSeconds(1.5);
@@ -38,13 +38,13 @@ public sealed class SteamLobbyAdapter
             ESteamAPIInitResult initResult = SteamAPI.InitEx(out string initErrMsg);
             if (initResult != ESteamAPIInitResult.k_ESteamAPIInitResult_OK)
             {
-                Log.Info($"SteamAPI.InitEx() 실패: {initResult} — {initErrMsg} "
+                Logger.Info($"SteamAPI.InitEx() 실패: {initResult} — {initErrMsg} "
                     + "Steam P2P는 비활성화됩니다.");
                 return;
             }
 
             _initialized = true;
-            Log.Info("SteamAPI.InitEx() 성공.");
+            Logger.Info("SteamAPI.InitEx() 성공.");
 
             SteamNetworkingUtils.InitRelayNetworkAccess();
             _connectionStatusChanged = Callback<SteamNetConnectionStatusChangedCallback_t>.Create(OnConnectionStatusChanged);
@@ -52,11 +52,11 @@ public sealed class SteamLobbyAdapter
         }
         catch (DllNotFoundException ex)
         {
-            Log.Info($"Steam P2P 비활성화: {ex.Message}");
+            Logger.Info($"Steam P2P 비활성화: {ex.Message}");
         }
         catch (Exception ex)
         {
-            Log.Info($"Steam P2P 비활성화: {ex.Message}");
+            Logger.Info($"Steam P2P 비활성화: {ex.Message}");
         }
 
         _lobby.Start();
@@ -132,13 +132,12 @@ public sealed class SteamLobbyAdapter
         _lobby.Stop();
     }
 
- // 오케스트레이터 LOBBY_METADATA -> 로비 메타데이터 반영.
+    // 오케스트레이터 LOBBY_METADATA -> 로비 메타데이터 반영
     public void UpdateLobbyMetadata(GatewayCore.LobbyMetadataPayload payload) => _lobby.UpdateDynamicMetadata(payload);
 
- // 주기적 P2P 연결 품질 로그 (10초 간격) - direct/relay 여부는 연결 성립 시
- // 상세 상태(GetDetailedConnectionStatus - "transport" 라인)로, 실시간 품질은
- // GetConnectionRealTimeStatus(핑/품질/패킷률/백로그)로 관찰한다.
- // 릴레이 경유 유저 식별 + 손실/백로그 실측 - 동기화 문제의 데이터 기반 판단용.
+    // 주기적 P2P 연결 품질 로그 (10초 간격) - direct/relay 여부는 연결 성립 시 상세 상태
+    // ("transport" 라인), 실시간 품질은 GetConnectionRealTimeStatus(핑/패킷률/백로그)로 관찰
+    // 릴레이 경유 유저 식별 + 손실/백로그 - 동기화 문제의 데이터 기반 판단용
     private DateTime _nextQualityLogAtUtc = DateTime.MinValue;
 
     private void LogConnectionQuality()
@@ -156,7 +155,7 @@ public sealed class SteamLobbyAdapter
                     continue;
                 }
                 ulong sid = _connectionSteamIds.TryGetValue(conn, out ulong s) ? s : 0;
-                Log.Debug($"P2P 품질 steam={sid} ping={rt.m_nPing}ms "
+                Logger.Debug($"P2P 품질 steam={sid} ping={rt.m_nPing}ms "
                     + $"qual(L/R)={(int)Math.Round(rt.m_flConnectionQualityLocal * 100.0)}%"
                     + $"/{(int)Math.Round(rt.m_flConnectionQualityRemote * 100.0)}% "
                     + $"pps(out/in)={rt.m_flOutPacketsPerSec:F0}/{rt.m_flInPacketsPerSec:F0} "
@@ -165,7 +164,7 @@ public sealed class SteamLobbyAdapter
             }
             catch (Exception ex)
             {
-                Log.Debug($"P2P 품질 조회 실패: {ex.Message}");
+                Logger.Debug($"P2P 품질 조회 실패: {ex.Message}");
             }
         }
     }
@@ -177,16 +176,16 @@ public sealed class SteamLobbyAdapter
             int len = SteamNetworkingSockets.GetDetailedConnectionStatus(conn, out string detail, 2048);
             if (len > 0 && !string.IsNullOrEmpty(detail))
             {
-                Log.Debug($"P2P 상세 steam={steamId}:\n{detail}");
+                Logger.Debug($"P2P 상세 steam={steamId}:\n{detail}");
             }
         }
         catch (Exception ex)
         {
-            Log.Debug($"P2P 상세 조회 실패: {ex.Message}");
+            Logger.Debug($"P2P 상세 조회 실패: {ex.Message}");
         }
     }
 
- // Steam 세션 KICK: 로비 채팅 사유 전달 후 지연 종료 (채팅이 CM 왕복을 먼저 마치게).
+    // Steam 세션 KICK: 로비 채팅 사유 전달 후 지연 종료 (채팅이 CM 왕복을 먼저 마치게)
     internal void RequestClose(HSteamNetConnection conn, ulong steamId, string reason)
     {
         if (steamId != 0)
@@ -207,18 +206,18 @@ public sealed class SteamLobbyAdapter
                 {
                     _activeConnections.Add(callback.m_hConn);
                     _connectionSteamIds[callback.m_hConn] = callback.m_info.m_identityRemote.GetSteamID64();
-                    Log.Debug($"P2P 연결 수락: {callback.m_info.m_identityRemote.GetSteamID64()}");
+                    Logger.Debug($"P2P 연결 수락: {callback.m_info.m_identityRemote.GetSteamID64()}");
                 }
                 else
                 {
-                    Log.Info($"P2P 연결 수락 실패: {result}");
+                    Logger.Info($"P2P 연결 수락 실패: {result}");
                 }
                 break;
             }
             case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected:
             {
                 ulong sid = callback.m_info.m_identityRemote.GetSteamID64();
-                Log.Debug($"P2P 연결 성립: {sid}");
+                Logger.Debug($"P2P 연결 성립: {sid}");
                 LogDetailedConnectionStatus(callback.m_hConn, sid);
                 break;
             }
@@ -250,7 +249,7 @@ public sealed class SteamLobbyAdapter
                 return;
             }
 
- // Steam P2P wire: [payload][1-byte send flag] (bit 0x8 = ReliableOrdered).
+// Steam P2P wire: [payload][1-byte send flag] (bit 0x8 = ReliableOrdered)
             int payloadLength = message.m_cbSize - 1;
             var payload = new byte[payloadLength];
             Marshal.Copy(message.m_pData, payload, 0, payloadLength);
@@ -263,7 +262,7 @@ public sealed class SteamLobbyAdapter
             }
             else
             {
- // 첫 메시지 = 인트로 -> 세션 생성 -> 코어 라우팅.
+                // 첫 메시지 = 인트로 -> 세션 생성 -> 코어 라우팅
                 _connectionSteamIds.TryGetValue(conn, out ulong steamId64);
                 var newSession = new ClientSession(
                     new SteamClientSink(this, conn, steamId64),
@@ -274,7 +273,7 @@ public sealed class SteamLobbyAdapter
                 _core.AcceptSession(newSession);
                 if (newSession.Disposed)
                 {
- // 라우팅 직전 거부 (밴/유지보수 등) - 로비 채팅 사유는 RequestClose가 전달.
+                    // 라우팅 직전 거부 (밴/유지보수 등) - 로비 채팅 사유는 RequestClose가 전달
                     _pendingCloses.Add((conn, DateTime.UtcNow + PendingCloseDelay));
                     _activeConnections.Remove(conn);
                 }
@@ -291,8 +290,8 @@ public sealed class SteamLobbyAdapter
     }
 }
 
-// Steam P2P 클라이언트 싱크 - wire 형식([payload][1바이트 flag]) 인코딩.
-// DisconnectClient(reason)는 어댑터의 지연 종료 경로(로비 채팅 사유 전달)를 사용한다.
+// Steam P2P 클라이언트 싱크 - wire 형식([payload][1바이트 flag]) 인코딩
+// DisconnectClient(reason)는 어댑터의 지연 종료 경로(로비 채팅 사유 전달)를 사용한다
 public sealed class SteamClientSink : IClientSink
 {
     private readonly SteamLobbyAdapter _adapter;
@@ -321,7 +320,7 @@ public sealed class SteamClientSink : IClientSink
             EResult result = SteamNetworkingSockets.SendMessageToConnection(_connection, ptr, (uint)framed.Length, sendFlag, out long msgNumber);
             if (result != EResult.k_EResultOK && result != EResult.k_EResultNoConnection)
             {
-                Log.Info($"SendMessageToConnection 실패: {result} "
+                Logger.Info($"SendMessageToConnection 실패: {result} "
                     + $"(conn={_connection.m_HSteamNetConnection}, {framed.Length}바이트, msgNumber={msgNumber}).");
             }
         }
@@ -333,8 +332,8 @@ public sealed class SteamClientSink : IClientSink
 
     public void DisconnectClient(string reason)
     {
- // 원시 P2P 종료 사유는 Steam 클라이언트에 표시되지 않으므로, 로비 채팅 KICK으로 사유를
- // 전달한 뒤 1.5초 후 실제 종료 (채팅이 CM 왕복을 마칠 시간 확보).
+// 원시 P2P 종료 사유는 Steam 클라이언트에 표시되지 않으므로, 로비 채팅 KICK으로 사유를
+        // 전달한 뒤 1.5초 후 실제 종료 (채팅이 CM 왕복을 마칠 시간 확보)
         _adapter.RequestClose(_connection, _steamId, reason);
     }
 

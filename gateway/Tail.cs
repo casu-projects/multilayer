@@ -2,10 +2,10 @@ using LiteNetLib.Utils;
 
 namespace CasuMpGateway;
 
-// 백엔드 신원 전달 - tail v2 (PLAN.md /).
+// 백엔드 신원 전달 - tail v2
 // [클라 인트로 원본][Magic(2B) 0xC5A5][Ver(1B) 1][SteamID64(8B)][forcedClientId(2B)]
-// [isReturning(1B)][isMigratingArrival(1B)] - 총 15바이트 tail.
-// mod 쪽 ForwardRealSteamId가 매직+버전 검증 후 파싱한다 (불일치 시 접속 거부 - fail-fast).
+// [isReturning(1B)][isMigratingArrival(1B)] - 총 15바이트 tail
+// mod 쪽 ForwardRealSteamId가 매직+버전 검증 후 파싱한다 (불일치 시 접속 거부 - fail-fast)
 public static class TailV2
 {
     public const byte MagicHigh = 0xC5;
@@ -28,7 +28,7 @@ public static class TailV2
         return writer;
     }
 
- // connect data에서 tail 시작 오프셋을 찾는다. 실패 시 -1.
+    // connect data에서 tail 시작 오프셋을 찾는다. 실패 시 -1
     public static int FindTailOffset(byte[] rawData, int userDataOffset, int userDataSize)
     {
         int end = userDataOffset + userDataSize;

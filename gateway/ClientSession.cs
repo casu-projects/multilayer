@@ -47,6 +47,9 @@ public sealed class ClientSession : INetEventListener
     // 이 세션이 백엔드에 한 번이라도 연결 성공했는지 (재라우팅 대상 판정용)
     public bool HasEverConnectedToBackend => _hasEverConnectedToBackend;
 
+    // Steam 이름 보정 결과 - tail(Ver 2)에 실어 인스턴스 playername도 보정한다 (없으면 null)
+    private readonly string? _tailName;
+
     // 라우팅 대기 시작 시각 (Routing 상태 타임아웃용)
     public DateTime? RoutingWaitStartedAt { get; set; }
 
@@ -67,6 +70,19 @@ public sealed class ClientSession : INetEventListener
         State = SessionState.Accepted;
         _backendManager = new NetManager(this) { UnconnectedMessagesEnabled = false };
         Logger.Debug($"세션 생성: id={SessionId}, transport={Transport}, player={Player.Value}");
+
+        // Steam 접속 + 인트로 이름이 1바이트/문자 인코딩으로 깨진 경우(CJK) Steam 유저명으로
+        // 보정한다 - SESSION_CONNECTED username과 백엔드 tail(Ver 2)에 반영되어
+        // 오케스트레이터/인스턴스 표시가 정상화된다.
+        if (steamId is ulong sid && SteamNameResolver.IsBrokenName(Username))
+        {
+            string? steamName = SteamNameResolver.ResolveName(sid);
+            if (!string.IsNullOrEmpty(steamName))
+            {
+                Username = steamName;
+                _tailName = steamName;
+            }
+        }
     }
 
     // 라우팅 대기 진입 (모르는 유저 - 오케스트레이터 ROUTE_UPDATE 대기)
@@ -191,7 +207,7 @@ public sealed class ClientSession : INetEventListener
             var manager = new NetManager(this) { UnconnectedMessagesEnabled = false };
             manager.Start();
             NetDataWriter connectData = TailV2.BuildConnectData(
-                _intro, SteamId ?? 0UL, ForcedClientId, IsReturningPlayer, IsMigratingArrival);
+                _intro, SteamId ?? 0UL, ForcedClientId, IsReturningPlayer, IsMigratingArrival, _tailName);
             _backendPeer = manager.Connect(host, port, connectData);
             _backendManager = manager;
         }

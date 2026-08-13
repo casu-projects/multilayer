@@ -381,9 +381,9 @@ internal static class Program
                     // 접속 공지 (게이트웨이 실제 연결 기준 - 마이그레이션 SWAP은 세션이
                     // 유지되므로 이벤트가 없어 공지되지 않는다)
                     string joinName = GetUsername(msg) ?? connected.Value;
-                    foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                    foreach (var modConn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                     {
-                        hub.SendNoAck(conn, "ANNOUNCE", new
+                        hub.SendNoAck(modConn, "ANNOUNCE", new
                         {
                             kind = "join",
                             playerKey = connected.Value,
@@ -421,9 +421,9 @@ internal static class Program
                     var discState = sessions.Get(disc);
                     string discName = discState?.Username ?? disc.Value;
                     _ = discordBot.SendJoinLeaveAsync(discName, SteamIdOf(disc), joined: false);
-                    foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                    foreach (var modConn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                     {
-                        hub.SendNoAck(conn, "ANNOUNCE", new
+                        hub.SendNoAck(modConn, "ANNOUNCE", new
                         {
                             kind = "leave",
                             playerKey = disc.Value,

@@ -24,6 +24,9 @@ internal static class FluidSimRangeFollowPlayersPatch
 
     private static readonly List<SimulationArea> Areas = new();
 
+    // 클라이언트 FluidManager.SimulationRangeIndex와 동일한 밴드 순환 (0 -> 96, +16/프레임).
+    private static int simIndex;
+
     private static bool Prefix(FluidManager __instance)
     {
         if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
@@ -50,13 +53,20 @@ internal static class FluidSimRangeFollowPlayersPatch
 
         foreach (SimulationArea area in Areas)
         {
+            // x 범위는 영역 전체, y만 클라와 동일한 16행 밴드 (범위 밖은 클램프로 생략).
+            int bandMin = Mathf.Max(area.MinY, area.MinY + simIndex);
+            int bandMax = Mathf.Min(area.MaxY, area.MinY + simIndex + 16);
+            if (bandMin >= bandMax) continue;
+
             FluidManager_SimulationRangeIndex_MultiplayerPatch.forcenext = (
                 new RangeI(area.MinX, area.MaxX),
-                new RangeI(area.MinY, area.MaxY));
+                new RangeI(bandMin, bandMax));
             FluidManager_SimulationRangeIndex_MultiplayerPatch.forcenext_avaiable = true;
             __instance.SimulationStep();
         }
 
+        simIndex += 16;
+        if (simIndex >= 112) simIndex = 0;
         return false;
     }
 

@@ -3,7 +3,7 @@ using KrokoshaCasualtiesMP;
 
 namespace CasuMod;
 
-// 레이어 타이머 동결 — 서버의 layerTimeSpent를 매 프레임 0으로 고정한다.
+// 레이어 타이머 동결 - 서버의 layerTimeSpent를 매 프레임 0으로 고정한다.
 // 클라이언트 타이머 표시 = 로컬 maxTimePerLayer - 서버 동기화(layerTimeSpent)이므로
 // (WoundView.LayerTimerDisplay) 서버 동기화만 고정하면 클라이언트 수정 없이
 // 모든 클라이언트의 표시가 시작값에서 멈춘다. 방사선 라인 발동 조건

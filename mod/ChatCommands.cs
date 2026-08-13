@@ -6,6 +6,7 @@ using KrokoshaCasualtiesMP;
 using KrokoshaCasualtiesUtils;
 using LiteNetLib;
 using LiteNetLib.Utils;
+using UnityEngine;
 
 namespace CasuMod;
 
@@ -32,6 +33,7 @@ public static class ChatCommands
         _registry.Register("calladmin", "관리자 호출", CallAdminCommand.Cmd);
         _registry.Register("discord", "디스코드 서버 초대 링크", DiscordCommand.Cmd);
         _registry.Register("respawn", "사망 시 레이어 1에서 새 캐릭터로 리스폰", RespawnCommand.Cmd);
+        _registry.Register("pos", "현재 좌표 표시", PosCommand.Cmd);
         _registry.Register("banvote", "플레이어 영구 차단 투표", "<이름>", VoteCommands.CmdBanVote);
     }
 
@@ -288,6 +290,17 @@ public static class ChatCommands
                 Plugin.Log.LogWarning($"[Respawn] {caller.playername} 리스폰 실패: {ex.Message}");
                 ChatPrivateReply.SendToPlayer(caller, "리스폰 처리에 실패했습니다. 관리자에게 문의하세요.");
             }
+        }
+    }
+
+    // !pos - 실행한 유저의 현재 블록 좌표 (본인에게만 개인 회신)
+    internal static class PosCommand
+    {
+        internal static void Cmd(NetPlayer caller, string[] argv)
+        {
+            if (caller?.body == null) return;
+            Vector2Int pos = WorldGeneration.world.WorldToBlockPos(caller.body.transform.position);
+            ChatPrivateReply.SendToPlayer(caller, $"X: {pos.x} / Y: {pos.y}");
         }
     }
 

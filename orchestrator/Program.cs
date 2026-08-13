@@ -378,8 +378,23 @@ internal static class Program
                     _alive[connected] = true;
                     PushLobbyMetadata(hub, runRules, sessions, force: true);
 
+                    // 접속 공지 (게이트웨이 실제 연결 기준 - 마이그레이션 SWAP은 세션이
+                    // 유지되므로 이벤트가 없어 공지되지 않는다)
+                    string joinName = GetUsername(msg) ?? connected.Value;
+                    foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                    {
+                        hub.SendNoAck(conn, "ANNOUNCE", new
+                        {
+                            kind = "join",
+                            playerKey = connected.Value,
+                            name = joinName,
+                            fromDepth = 0,
+                            toDepth = 0,
+                        });
+                    }
+
                     // Discord 접속 알림
-                    _ = discordBot.SendJoinLeaveAsync(GetUsername(msg) ?? connected.Value,
+                    _ = discordBot.SendJoinLeaveAsync(joinName,
                         SteamIdOf(connected), joined: true);
                     RefreshPlayerCountTopic(discordBot, sessions);
                 }
@@ -399,12 +414,23 @@ internal static class Program
                         // 생존 상태 해제 + 로비 목록 즉시 갱신
                         _alive.Remove(disc);
                         PushLobbyMetadata(hub, runRules, sessions, force: true);
+                    }
 
-                        // Discord 퇴장 알림 (마이그레이션 중 퇴장은 마이그레이션 알림이
-                        // 별도로 발행되므로 중복 방지)
-                        var discState = sessions.Get(disc);
-                        _ = discordBot.SendJoinLeaveAsync(discState?.Username ?? disc.Value,
-                            SteamIdOf(disc), joined: false);
+                    // 퇴장 공지 (게이트웨이 실제 연결 해제 기준 - 마이그레이션 중 실퇴장도
+                    // 실제 끊김이므로 공지한다. 마이그레이션 공지와 별개로 표시)
+                    var discState = sessions.Get(disc);
+                    string discName = discState?.Username ?? disc.Value;
+                    _ = discordBot.SendJoinLeaveAsync(discName, SteamIdOf(disc), joined: false);
+                    foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                    {
+                        hub.SendNoAck(conn, "ANNOUNCE", new
+                        {
+                            kind = "leave",
+                            playerKey = disc.Value,
+                            name = discName,
+                            fromDepth = 0,
+                            toDepth = 0,
+                        });
                     }
 
                     // 접속 인원 변동 (마이그레이션 중 퇴장 분기 포함) - 채널 주제 갱신

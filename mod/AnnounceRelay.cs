@@ -28,30 +28,8 @@ public static class AnnounceRelay
         });
     }
 
-    // 완전 퇴장 공지 발신 (마이그레이션/동결은 이 경로를 타지 않음)
-    internal static void SendLeave(NetPlayer plr)
-    {
-        OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
-        {
-            kind = KindLeave,
-            playerKey = plr.GetPersistentId(),
-            name = plr.playername,
-        });
-    }
-
-    // 신규 접속 공지 발신 (마이그레이션/재접속 도착은 제외). playerKey는 본인 제외용 -
-    // 이름 해석 불가 시 빈 값으로 본인에게도 표시되는 폴백
-    internal static void SendJoin(string playerName, string playerKey)
-    {
-        OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
-        {
-            kind = KindJoin,
-            playerKey = playerKey,
-            name = playerName,
-        });
-    }
-
     // 오케스트레이터 ANNOUNCE 수신 처리 (메인 스레드) - 본인 제외 공지
+    // join/leave 공지는 게이트웨이 실제 연결 기준으로 오케스트레이터가 발신한다
     internal static void Handle(AnnouncePayload payload)
     {
         if (payload == null || string.IsNullOrEmpty(payload.Name)) return;

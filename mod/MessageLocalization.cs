@@ -5,14 +5,15 @@ using KrokoshaCasualtiesUtils;
 
 namespace CasuMod;
 
-// 내장 시스템 메시지 한글화/비활성화 - 접속/킥 공지 한글화("Host is starting game." 비활성화),
+// 내장 시스템 메시지 한글화/비활성화 - 킥 공지 한글화("Host is starting game." 비활성화),
 // 사망 공지(개인 + 전 레이어 ANNOUNCE 릴레이), 데디 자동 종료 비활성화
 // (인스턴스 수명은 오케스트레이터가 관리). 한글 문자열은 로케일 키가 아니므로 그대로 표시된다
+// 접속/퇴장 공지는 게이트웨이 실제 연결 기준으로 오케스트레이터가 전 레이어에 발신한다
 public static class MessageLocalization
 {
     // 채팅 공지 패턴 번역 - "[이름] just joined the game!" / "Kicked [이름]" /
     // "Host is starting game." 처리 후 false 반환(원본 스킵), 그 외 true
-    // subjectName: 접속 공지의 플레이어 이름 (크로스 레이어 ANNOUNCE 발신용), 그 외 null
+    // subjectName: 접속 공지의 플레이어 이름 (원본 억제 판정용 - 공지는 오케스트레이터 발신), 그 외 null
     internal static bool TryTranslateAnnouncement(string message, out string? translated,
         out bool suppress, out string? subjectName)
     {
@@ -77,11 +78,6 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
         if (!KrokoshaScavMultiplayer.is_dedicated_server)
             return true;
 
-        // 마이그레이션/재접속 도착 - 접속 공지 대체: 마이그레이션 "L1->L2 이동" 공지가
-        // 대체 표시하므로 join 공지를 억제한다
-        if (IsMigrationArrivalJoin(message))
-            return false;
-
         if (MessageLocalization.TryTranslateAnnouncement(message, out string? translated, out bool suppress,
                 out string? subjectName))
         {
@@ -92,19 +88,9 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
             {
                 if (subjectName != null)
                 {
-                    // 신규 접속 - 전 레이어 공지 (ANNOUNCE 에코가 발신 레이어 포함 표시)
-                    // 마이그레이션/재접속 도착은 위 IsMigrationArrivalJoin에서 억제됐다
-                    // playerKey - 접속자 본인 제외용 (이름 매칭 실패 시 빈 값 - 본인 표시 폴백)
-                    string joinPid = "";
-                    foreach (NetPlayer p in NetPlayer.ClientIdToPlayerDict.Values)
-                    {
-                        if (p.playername == subjectName)
-                        {
-                            joinPid = p.GetPersistentId();
-                            break;
-                        }
-                    }
-                    AnnounceRelay.SendJoin(subjectName, joinPid);
+                    // 접속 공지 - 게이트웨이 실제 연결 기준으로 오케스트레이터가 전 레이어
+                    // 공지하므로 (SESSION_CONNECTED) 원본만 억제한다.
+                    return false;
                 }
                 else
                 {
@@ -116,27 +102,6 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
             return false;
         }
         return true;
-    }
-
-    // join 공지가 마이그레이션 도착인지 판정 - MigrationArrivalTracker(마이그레이션
-    // 도착 - isMigratingArrival=true) 또는 FREEZE 상태면 억제 대상
-    // 퇴장 후 재접속(일반 isReturning)은 접속 공지를 표시한다 - 마이그레이션 시에만
-    // 접속/퇴장 메시지를 띄우지 않는 것이 목표
-    private static bool IsMigrationArrivalJoin(string message)
-    {
-        const string joinSuffix = " just joined the game!";
-        int idx = message.IndexOf(joinSuffix, System.StringComparison.Ordinal);
-        if (idx < 0) return false;
-        string name = message.Substring(0, idx);
-        if (string.IsNullOrEmpty(name)) return false;
-
-        foreach (NetPlayer plr in NetPlayer.ClientIdToPlayerDict.Values)
-        {
-            if (plr.playername != name) continue;
-            return MigrationModule.IsFrozen(plr.GetPersistentId())
-                || MigrationArrivalTracker.ClientIds.Contains(plr.clientId);
-        }
-        return false;
     }
 }
 

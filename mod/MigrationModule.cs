@@ -470,12 +470,8 @@ public sealed class MigrationModule : MonoBehaviour
                 OrchestratorClient.Instance?.SendEvent("PLAYER_LEFT",
                     new { playerKey = pid, epoch = FrozenEpoch(pid) });
             }
-            else
-            {
-                // 완전 퇴장(마이그레이션 아님) - 전 레이어 공지 (ANNOUNCE 릴레이)
-                // 마이그레이션은 frozen 상태로 PLAYER_LEFT만 보내므로 공지되지 않는다
-                AnnounceRelay.SendLeave(__instance);
-            }
+            // 완전 퇴장(실제 끊김) 공지는 게이트웨이 SESSION_DISCONNECTED 기준으로
+            // 오케스트레이터가 전 레이어에 발신한다 (여기서는 발신하지 않음).
         }
 
         private static void Postfix(NetPlayer __instance)

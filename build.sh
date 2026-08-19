@@ -47,8 +47,8 @@ echo "── mod 빌드..."
 cp "$ROOT/mod/bin/Release/CasuMod.dll" "$DIST/"
 
 # 3) run.json/rule.json — 정본 기본값 복사 (없을 때만 — 이후 __dist__에서 편집)
-[ -f "$DIST/run.json" ]  || cp "$ROOT/../assets/default-jsons/run.json"  "$DIST/"
-[ -f "$DIST/rule.json" ] || cp "$ROOT/../assets/default-jsons/rule.json" "$DIST/"
+[ -f "$DIST/run.json" ]  || cp "$ROOT/../../assets/default-jsons/run.json"  "$DIST/"
+[ -f "$DIST/rule.json" ] || cp "$ROOT/../../assets/default-jsons/rule.json" "$DIST/"
 
 # 4) 프로젝트 bin/obj 정리 — 빌드 산출물은 __dist__로 이동됨 (소스 트리 깔끔 유지,
 #    재빌드는 항상 전체 빌드)

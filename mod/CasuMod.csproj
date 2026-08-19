@@ -30,35 +30,35 @@
   <!-- 게임/모드 어셈블리 — 수정하지 않는 원본 참조 -->
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
-      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/Assembly-CSharp.dll</HintPath>
+      <HintPath>../../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine">
-      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.dll</HintPath>
+      <HintPath>../../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
-      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
+      <HintPath>../../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.Physics2DModule">
-      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.Physics2DModule.dll</HintPath>
+      <HintPath>../../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.Physics2DModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.TilemapModule">
-      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.TilemapModule.dll</HintPath>
+      <HintPath>../../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/UnityEngine.TilemapModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json">
-      <HintPath>../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/Newtonsoft.Json.dll</HintPath>
+      <HintPath>../../../assets/casualties-unknown/CasualtiesUnknown_Data/Managed/Newtonsoft.Json.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="KrokoshaCasualtiesMP">
-      <HintPath>../../assets/casualties-together/KrokoshaCasualtiesMP.dll</HintPath>
+      <HintPath>../../../assets/casualties-together/KrokoshaCasualtiesMP.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="LiteNetLib">
-      <HintPath>../../assets/casualties-together/LiteNetLib.dll</HintPath>
+      <HintPath>../../../assets/casualties-together/LiteNetLib.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

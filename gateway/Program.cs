@@ -27,10 +27,27 @@ internal static class Program
             steam = new SteamLobbyAdapter(config, core);
             steam.Start();
             core.OnLobbyMetadata = steam.UpdateLobbyMetadata;
+            // 진단 연동 - 오케스트레이터 LOBBY_STATUS 요청에 현재 로비 상태 응답
+            core.LobbyStatusProvider = () => new GatewayCore.LobbyStatusSnapshot
+            {
+                SteamEnabled = true,
+                State = steam.LobbyState.ToString(),
+                LobbyId = steam.LobbyId,
+                LoggedOn = steam.LobbyLoggedOn,
+                AuthInfoReceived = core.AuthInfoReceived,
+                SteamApiInitialized = steam.SteamApiInitialized,
+            };
         }
         else
         {
             Logger.Info("Steam 비활성화 (steamEnabled=false).");
+            core.LobbyStatusProvider = () => new GatewayCore.LobbyStatusSnapshot
+            {
+                SteamEnabled = false,
+                State = "Disabled",
+                AuthInfoReceived = core.AuthInfoReceived,
+                SteamApiInitialized = false,
+            };
         }
 
         var control = new ControlChannel(config, core);

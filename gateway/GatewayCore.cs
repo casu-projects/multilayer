@@ -71,6 +71,21 @@ public sealed class GatewayCore
     // 오케스트레이터 LOBBY_METADATA 명령 -> Steam 어댑터 전달 (없으면 무시)
     public Action<LobbyMetadataPayload>? OnLobbyMetadata { get; set; }
 
+    // 로비 상태 조회 (LOBBY_STATUS 응답용) - Program이 SteamLobbyAdapter로 배선.
+    // Steam 비활성 시 null -> 응답에 steamEnabled=false 반영
+    public Func<LobbyStatusSnapshot?>? LobbyStatusProvider { get; set; }
+
+    // 로비 상태 스냅샷 (진단 연동 - 오케스트레이터 LOBBY_STATUS 응답 payload)
+    public sealed class LobbyStatusSnapshot
+    {
+        public bool SteamEnabled { get; set; }
+        public string State { get; set; } = "";
+        public string? LobbyId { get; set; }
+        public bool LoggedOn { get; set; }
+        public bool AuthInfoReceived { get; set; }
+        public bool SteamApiInitialized { get; set; }
+    }
+
     // 제어 채널 (ControlChannel)
 
     public void EnqueueCommand(ControlMessage msg) => _inbound.Enqueue(msg);
@@ -250,6 +265,9 @@ public sealed class GatewayCore
                     break;
                 case "LOBBY_METADATA":
                     ApplyLobbyMetadata(msg);
+                    break;
+                case "LOBBY_STATUS":
+                    ApplyLobbyStatusRequest(msg);
                     break;
                 default:
                     ok = false;
@@ -448,6 +466,22 @@ public sealed class GatewayCore
         var payload = msg.PayloadAs<LobbyMetadataPayload>() ?? throw new InvalidDataException("payload 없음");
         _lastLobbyMetadata = payload;
         OnLobbyMetadata?.Invoke(payload);
+    }
+
+    // LOBBY_STATUS 요청 -> 현재 로비 상태 스냅샷 응답 (진단용 - 자가 치유는 게이트웨이 내부
+    // Tick의 SteamLobby가 독립 수행하므로 여기선 조회/표시만 담당)
+    private void ApplyLobbyStatusRequest(ControlMessage msg)
+    {
+        var snap = LobbyStatusProvider?.Invoke();
+        Report("LOBBY_STATUS_RESPONSE", new
+        {
+            state = snap?.State ?? "Disabled",
+            lobbyId = snap?.LobbyId,
+            loggedOn = snap?.LoggedOn ?? false,
+            authInfoReceived = snap?.AuthInfoReceived ?? AuthInfoReceived,
+            steamEnabled = snap?.SteamEnabled ?? false,
+            steamApiInitialized = snap?.SteamApiInitialized ?? false,
+        });
     }
 
     private void RemoveSession(ClientSession session, string reason)

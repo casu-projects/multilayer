@@ -135,6 +135,16 @@ public sealed class SteamLobbyAdapter
     // 오케스트레이터 LOBBY_METADATA -> 로비 메타데이터 반영
     public void UpdateLobbyMetadata(GatewayCore.LobbyMetadataPayload payload) => _lobby.UpdateDynamicMetadata(payload);
 
+    // 로비 상태 노출 (진단 연동 - LOBBY_STATUS 응답용). Steam P2P(SteamAPI)와 로비(SteamKit2)는
+    // 별개 연결이므로, 로비 상태는 SteamKit2 쪽만 반영한다. LobbyId는 SteamKit2 SteamID의
+    // 문자열 표현 (진단용 - 어댑터를 SteamKit2 타입과 분리)
+    public SteamLobby.LobbyState LobbyState => _lobby.State;
+    public string? LobbyId => _lobby.LobbyId?.ConvertToUInt64().ToString();
+    public bool LobbyLoggedOn => _lobby.LoggedOn;
+
+    // SteamAPI(P2P) 초기화 성공 여부 - 진단용
+    public bool SteamApiInitialized => _initialized;
+
     // 주기적 P2P 연결 품질 로그 (10초 간격) - direct/relay 여부는 연결 성립 시 상세 상태
     // ("transport" 라인), 실시간 품질은 GetConnectionRealTimeStatus(핑/패킷률/백로그)로 관찰
     // 릴레이 경유 유저 식별 + 손실/백로그 - 동기화 문제의 데이터 기반 판단용

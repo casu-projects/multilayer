@@ -95,6 +95,7 @@ public sealed class OperatorConsole
         _registry.Register("exec", "모든 인스턴스에 게임 콘솔 명령을 실행합니다", "<command...>", CmdExec);
         _registry.Register("rule", "rule.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)", "<이름> <값>", CmdRule);
         _registry.Register("run", "run.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)", "<설정> <값>", CmdRun);
+        _registry.Register("lobby", "게이트웨이 스팀 로비 상태 조회 (자가 치유 진단용)", "status", CmdLobby);
     }
 
     public void Start()
@@ -425,6 +426,22 @@ public sealed class OperatorConsole
     }
 
     private void CmdClear(string[] args) => ConsoleIO.ClearScreen();
+
+    // lobby status - 게이트웨이에 LOBBY_STATUS 요청 발신. 응답(LOBBY_STATUS_RESPONSE)은
+    // Program.DispatchGateway가 수신해 콘솔에 출력한다 (비동기)
+    private void CmdLobby(string[] args)
+    {
+        var gateway = _hub.GatewayConnection;
+        if (gateway == null)
+        {
+            Console.WriteLine("게이트웨이 미연결 — 로비 상태 조회 불가.");
+            return;
+        }
+        _hub.Send(gateway, "LOBBY_STATUS", null, (ok, reason) =>
+        {
+            if (!ok) Console.WriteLine($"LOBBY_STATUS 요청 실패: {reason}");
+        });
+    }
 
     private void CmdExec(string[] args) => HandleRun(string.Join(" ", args));
 

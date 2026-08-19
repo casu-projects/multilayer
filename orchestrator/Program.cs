@@ -448,6 +448,18 @@ internal static class Program
                 if (TryPlayerKey(msg, out var sf) && msg.PayloadAs<SwapFailedPayload>() is { } sfPayload)
                     migrations.OnSwapFailed(sf, sfPayload.Reason ?? "unknown");
                 break;
+            case "LOBBY_STATUS_RESPONSE":
+                // lobby status 명령 응답 - 게이트웨이 스팀 로비 상태 표시 (자가 치유 진단용)
+                if (msg.PayloadAs<LobbyStatusResponsePayload>() is { } lobbyStatus)
+                {
+                    Console.WriteLine($"Steam 로비:   {(lobbyStatus.SteamEnabled ? "활성" : "비활성")}");
+                    Console.WriteLine($"상태:         {lobbyStatus.State}");
+                    Console.WriteLine($"로비 SteamID: {(lobbyStatus.LobbyId ?? "(없음)")}");
+                    Console.WriteLine($"로그온:       {(lobbyStatus.LoggedOn ? "성공" : "실패")}");
+                    Console.WriteLine($"AUTH_INFO:    {(lobbyStatus.AuthInfoReceived ? "수신" : "미수신")}");
+                    Console.WriteLine($"SteamAPI(P2P):{(lobbyStatus.SteamApiInitialized ? "초기화 성공" : "초기화 실패")}");
+                }
+                break;
             default:
                 break;
         }
@@ -848,6 +860,17 @@ internal static class Program
     private sealed class PlayerKeyPayload { public string? PlayerKey { get; set; } }
     private sealed class InstancePayload { public string InstanceId { get; set; } = ""; }
     private sealed class SwapFailedPayload { public string? Reason { get; set; } }
+
+    // LOBBY_STATUS_RESPONSE (게이트웨이 -> 오케스트레이터 - lobby status 명령 응답)
+    private sealed class LobbyStatusResponsePayload
+    {
+        public string State { get; set; } = "";
+        public string? LobbyId { get; set; }
+        public bool LoggedOn { get; set; }
+        public bool AuthInfoReceived { get; set; }
+        public bool SteamEnabled { get; set; }
+        public bool SteamApiInitialized { get; set; }
+    }
 
     // 크로스 인스턴스 채팅 payload (mod -> orchestrator -> mod)
     private sealed class ChatPayload

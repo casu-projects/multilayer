@@ -22,6 +22,11 @@ public static class SaveModule
 
     private static readonly ConcurrentDictionary<string, (float X, float Y, int Layer)> PendingPositions = new();
 
+    // 퇴장 시 저장된 드랍 아이템 - 재접속 시 LateSpawnLocation(스폰 위치 확정)에서 드랍한다.
+    // 도착 시퀀스 게이트를 동일하게 적용해 직전 방문의 잔존물 오염을 차단한다.
+    private static readonly ConcurrentDictionary<string, JArray> PendingDrops = new();
+    private static readonly ConcurrentDictionary<string, long> DropSeq = new();
+
     // 데이터 수명주기 - 모든 푸시/위치 큐 쓰기는 로컬 단조 시퀀스(_seq)로 스탬프하고,
     // 접속(CreateNetPlayerWithPeer) 시 OnPlayerArrival이 도착 시퀀스를 기록한다
     // 직전 방문의 잔존물(seq <= 도착)은 소비 게이트에서 스킵·제거되고, 이번 방문의
@@ -42,6 +47,8 @@ public static class SaveModule
         PendingSeq.TryRemove(persistentId, out _);
         PositionSeq.TryRemove(persistentId, out _);
         PendingPositions.TryRemove(persistentId, out _);
+        DropSeq.TryRemove(persistentId, out _);
+        PendingDrops.TryRemove(persistentId, out _);
     }
 
     // 푸시 저장 (도착 스탬프 포함). RESUME/RESPONSE 공용
@@ -109,6 +116,7 @@ public static class SaveModule
             ["bodyComponents"] = SerializeComponents(body.gameObject),
             ["limbComponents"] = new JArray(body.limbs.Select(l => l != null ? SerializeComponents(l.gameObject) : new JObject())),
             ["inventory"] = SerializeInventory(body),
+            ["droppedItems"] = SerializeDroppedItems(body),
             ["savedRecipeData"] = SerializeRecipes(),
             ["charIdentity"] = SerializeCharIdentity(),
             ["lastHappiness"] = body.lastHappiness != null ? new JArray(body.lastHappiness) : new JArray(),
@@ -173,6 +181,7 @@ public static class SaveModule
             RestoreCharIdentity(root["charIdentity"]);
             RestoreMisc(root);
             QueuePosition(body, plr, root["position"]);
+            QueueDroppedItems(plr, root["droppedItems"]);
         }
         catch (System.Exception ex)
         {
@@ -378,6 +387,69 @@ public static class SaveModule
         return e;
     }
 
+    // 유저 퇴장 시: 바디 근처(반경 10 블럭)에 드랍된 월드 아이템(transform.parent == null)을
+    // 직렬화해 저장하고 원본을 파괴한다. 재접속 시 중복 생성을 막기 위해 저장 후 월드에서
+    // 제거한다. 누가 드랍했든 관계없이 범위 내 모든 드랍 아이템을 대상으로 한다.
+    private const float DropItemCaptureRadius = 10f;
+
+    private static JArray SerializeDroppedItems(Body body)
+    {
+        var items = new JArray();
+        if (body == null) return items;
+
+        Collider2D[] hits;
+        try
+        {
+            hits = Physics2D.OverlapCircleAll(body.transform.position, DropItemCaptureRadius);
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.Log.LogWarning($"[Save] 드랍 아이템 수집 실패: {ex.Message}");
+            return items;
+        }
+
+        foreach (Collider2D hit in hits)
+        {
+            if (hit == null) continue;
+            Item item = hit.GetComponent<Item>();
+            if (item == null) continue;
+            // 월드에 독립적으로 떠 있는 드랍 아이템만 (인벤토리/컨테이너/착용 제외)
+            if (item.transform.parent != null) continue;
+
+            try
+            {
+                var e = new JObject
+                {
+                    ["id"] = item.id,
+                    ["condition"] = item.condition,
+                    ["favourited"] = item.favourited,
+                    ["components"] = SerializeComponents(item.gameObject),
+                    ["x"] = item.transform.position.x,
+                    ["y"] = item.transform.position.y,
+                };
+
+                var contents = new JArray();
+                foreach (Transform child in item.transform)
+                {
+                    Item ci = child.GetComponent<Item>();
+                    if (ci == null) continue;
+                    contents.Add(BuildItemEntry(ci, -1, null));
+                }
+                if (contents.Count > 0) e["contents"] = contents;
+
+                items.Add(e);
+
+                // 저장 후 월드에서 제거 - 재접속 시 중복 생성 방지
+                NetObjectRegistry.SafeDestroyObject(item.gameObject);
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogWarning($"[Save] 드랍 아이템 '{item.id}' 직렬화 실패: {ex.Message}");
+            }
+        }
+        return items;
+    }
+
     private static void RestoreInventory(Body body, JToken token)
     {
         if (token is not JArray items) return;
@@ -529,6 +601,33 @@ public static class SaveModule
         PositionSeq[plr.GetPersistentId()] = Interlocked.Increment(ref _seq);
     }
 
+    // 퇴장 시 저장된 드랍 아이템 큐잉 (RestorePlayer에서 호출 - 스폰 위치 확정 시 소비)
+    private static void QueueDroppedItems(NetPlayer plr, JToken token)
+    {
+        if (token is not JArray drops) return;
+        string pid = plr.GetPersistentId();
+        PendingDrops[pid] = new JArray(drops);
+        DropSeq[pid] = Interlocked.Increment(ref _seq);
+    }
+
+    // 신선한 드랍 아이템 큐만 소비 (직전 방문 잔존물은 게이트로 제거)
+    private static bool TryTakePendingDrops(string persistentId, out JArray drops)
+    {
+        drops = null;
+        if (!ArrivalSeq.TryGetValue(persistentId, out long arrival)) arrival = long.MinValue;
+        if (!PendingDrops.TryGetValue(persistentId, out var queued)) return false;
+        if (!DropSeq.TryGetValue(persistentId, out long seq) || seq <= arrival)
+        {
+            PendingDrops.TryRemove(persistentId, out _);
+            DropSeq.TryRemove(persistentId, out _);
+            return false;
+        }
+        PendingDrops.TryRemove(persistentId, out _);
+        DropSeq.TryRemove(persistentId, out _);
+        drops = queued;
+        return drops != null && drops.Count > 0;
+    }
+
     // 저장 위치 적용 - 바닐라 스폰 위치 전송(LateSpawnLocation) 시점에 호출되어
     // 클라이언트가 처음 받는 스폰 위치가 저장 위치가 되게 한다 (기존 10168 지연 적용은
     // 바닐라 스폰 전송 이후라 클라이언트에 반영되지 않았다). 성공 시 true - 호출부가
@@ -576,6 +675,72 @@ public static class SaveModule
                 return false;
             }
             return true;
+        }
+    }
+
+    // 퇴장 시 저장된 드랍 아이템을 스폰 위치 확정 후 드랍한다. LateSpawnLocation은 재접속/
+    // 마이그레이션/신규 모두에서 첫 스폰 시 1회 호출되고, 이 시점에 b.body.transform.position이
+    // 최종 확정되며(저장 위치 복원 or 기본 스폰) 클라이언트 스폰 위치 전송(ServerMain.cs:227)
+    // 이전이므로 드랍 아이템이 클라이언트 로드 시 함께 보인다.
+    [HarmonyPatch(typeof(ServerMain), nameof(ServerMain.LateSpawnLocation))]
+    internal static class ServerMain_LateSpawnLocation_DroppedItemsRestorePatch
+    {
+        private static void Postfix(NetBody b)
+        {
+            if (!KrokoshaScavMultiplayer.is_dedicated_server || b == null || b.plr == null) return;
+            if (!TryTakePendingDrops(b.plr.GetPersistentId(), out JArray drops)) return;
+
+            Vector2 spawnPos = b.body != null ? (Vector2)b.body.transform.position : Vector2.zero;
+            foreach (JObject entry in drops.OfType<JObject>())
+            {
+                try
+                {
+                    SpawnDroppedItem(entry, spawnPos);
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.Log.LogWarning($"[Save] 드랍 아이템 '{entry.Value<string>("id")}' 복원 실패: {ex.Message}");
+                }
+            }
+        }
+    }
+
+    // 저장된 드랍 아이템 엔트리를 월드에 스폰한다 (상태/컨테이너/컴포넌트 복원)
+    private static void SpawnDroppedItem(JObject entry, Vector2 basePos)
+    {
+        string id = entry.Value<string>("id");
+        if (string.IsNullOrEmpty(id)) return;
+
+        // 스폰 위치 주변에 약간 퍼뜨려 겹침 방지
+        Vector2 pos = basePos + UnityEngine.Random.insideUnitCircle * 0.5f;
+        GameObject obj = Utils.Create(id, pos, 0f);
+        if (obj == null) return;
+        Item item = obj.GetComponent<Item>();
+        if (item == null) { UnityEngine.Object.Destroy(obj); return; }
+
+        item.condition = entry.Value<float?>("condition") ?? 1f;
+        item.favourited = entry.Value<bool?>("favourited") ?? false;
+        ApplyComponents(obj, entry["components"]);
+        ApplyDroppedContents(item, entry["contents"]);
+    }
+
+    // 드랍 아이템의 컨테이너 내용물 복원 (BuildItemEntry의 contents 역순)
+    private static void ApplyDroppedContents(Item item, JToken token)
+    {
+        if (token is not JArray contents || contents.Count == 0) return;
+        Container container = item.GetComponent<Container>();
+        if (container == null) return;
+        foreach (JObject entry in contents.OfType<JObject>())
+        {
+            string cid = entry.Value<string>("id");
+            if (string.IsNullOrEmpty(cid)) continue;
+            GameObject cobj = Utils.Create(cid, item.transform.position, 0f);
+            if (cobj == null) continue;
+            Item citem = cobj.GetComponent<Item>();
+            if (citem == null) { UnityEngine.Object.Destroy(cobj); continue; }
+            citem.condition = entry.Value<float?>("condition") ?? 1f;
+            ApplyComponents(cobj, entry["components"]);
+            container.LoadItem(citem);
         }
     }
 

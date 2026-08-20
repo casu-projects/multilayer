@@ -125,28 +125,51 @@ internal static class Program
         TimestampedConsoleWriter.Instance!.OnConsoleLine = line => discordBot.EnqueueConsoleLog(line);
 
         // 마이그레이션 커밋 -> Discord 알림 (L{from} > L{to}) + 로비 메타데이터 갱신 + 인게임 공지
-        migrations.MigrationCommitted += (player, fromDepth, toDepth) =>
+        // 리스폰 트랜잭션(isRespawn)은 "리스폰" 알림으로, 일반 마이그레이션은 "레이어 이동"으로 표시한다
+        migrations.MigrationCommitted += (player, fromDepth, toDepth, isRespawn) =>
         {
             var state = sessions.Get(player);
-            _ = discordBot.SendMigrationAsync(state?.Username ?? player.Value, SteamIdOf(player),
-                fromDepth, toDepth);
-            PushLobbyMetadata(hub, runRules, sessions, force: true);
-
-            // 인게임 공지 - 본인 제외 전 인스턴스 ({이름}님이 L{from}에서 L{to}로 이동합니다)
             string name = state?.Username ?? player.Value;
-            foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+            ulong steamId = SteamIdOf(player);
+
+            if (isRespawn)
             {
-                hub.SendNoAck(conn, "ANNOUNCE", new
+                // 리스폰 - "리스폰했습니다" 알림 (레이어 1 인플레이스 리스폰과 동일 형태)
+                _ = discordBot.SendDeathRespawnAsync(name, steamId, died: false, layer: "");
+
+                // 인게임 공지 - 본인 제외 전 인스턴스
+                foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
-                    kind = "migration",
-                    playerKey = player.Value,
-                    name,
-                    fromDepth,
-                    toDepth,
-                });
+                    hub.SendNoAck(conn, "ANNOUNCE", new
+                    {
+                        kind = "respawn",
+                        playerKey = player.Value,
+                        name,
+                        fromDepth = 0,
+                        toDepth = 0,
+                    });
+                }
+            }
+            else
+            {
+                _ = discordBot.SendMigrationAsync(name, steamId, fromDepth, toDepth);
+                PushLobbyMetadata(hub, runRules, sessions, force: true);
+
+                // 인게임 공지 - 본인 제외 전 인스턴스 ({이름}님이 L{from}에서 L{to}로 이동합니다)
+                foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                {
+                    hub.SendNoAck(conn, "ANNOUNCE", new
+                    {
+                        kind = "migration",
+                        playerKey = player.Value,
+                        name,
+                        fromDepth,
+                        toDepth,
+                    });
+                }
             }
 
-            // 레이어 이동으로 인한 레이어별 인원 변동 - 채널 주제 갱신
+            // 레이어 이동/리스폰으로 인한 레이어별 인원 변동 - 채널 주제 갱신
             RefreshPlayerCountTopic(discordBot, sessions);
         };
 
@@ -591,6 +614,24 @@ internal static class Program
                             TryPlayerKey(deathEvent.PlayerKey, out var evKey3) ? SteamIdOf(evKey3) : 0,
                             died: msg.Type == "DIED",
                             deathEvent.Layer ?? "");
+
+                        // 리스폰(RESPAWNED) - 인플레이스(레이어 1) 리스폰의 인게임 공지
+                        // (하향 리스폰은 MigrationCommitted 핸들러에서 처리). 본인 제외 전 인스턴스 에코
+                        if (msg.Type == "RESPAWNED")
+                        {
+                            string respawnName = deathEvent.Username ?? deathEvent.PlayerKey ?? "?";
+                            foreach (var modConn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+                            {
+                                hub.SendNoAck(modConn, "ANNOUNCE", new
+                                {
+                                    kind = "respawn",
+                                    playerKey = deathEvent.PlayerKey,
+                                    name = respawnName,
+                                    fromDepth = 0,
+                                    toDepth = 0,
+                                });
+                            }
+                        }
                     }
                 }
                 break;

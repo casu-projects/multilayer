@@ -16,6 +16,7 @@ public static class AnnounceRelay
     public const string KindMigration = "migration";
     public const string KindLeave = "leave";
     public const string KindJoin = "join";
+    public const string KindRespawn = "respawn";
 
     // 사망 공지 발신 - 오케스트레이터가 전 인스턴스에 에코한다
     internal static void SendDeath(NetPlayer plr)
@@ -56,6 +57,11 @@ public static class AnnounceRelay
                 // 레이어 이동 - 하늘색
                 SendAnnouncementExcluding(payload.PlayerKey,
                     $"<color=#87CEEB>{payload.Name}님이 L{payload.FromDepth}에서 L{payload.ToDepth}로 이동합니다</color>");
+                break;
+            case KindRespawn:
+                // 리스폰 - 초록 (사망의 빨강과 대비)
+                SendAnnouncementExcluding(payload.PlayerKey,
+                    $"<color=#90EE90>{payload.Name}님이 리스폰했습니다.</color>");
                 break;
         }
     }

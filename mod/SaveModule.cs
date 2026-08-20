@@ -718,6 +718,15 @@ public static class SaveModule
         Item item = obj.GetComponent<Item>();
         if (item == null) { UnityEngine.Object.Destroy(obj); return; }
 
+        // 월드 생성이 아직 완료되지 않은 시점(LateSpawnLocation)에 생성될 수 있어,
+        // 중력을 무시해 아래로 떨어지지 않도록 고정한다. 월드 생성 후 물리가 활성화된다.
+        if (item.rb != null)
+        {
+            item.rb.gravityScale = 0f;
+            item.rb.velocity = Vector2.zero;
+            item.rb.simulated = false;
+        }
+
         item.condition = entry.Value<float?>("condition") ?? 1f;
         item.favourited = entry.Value<bool?>("favourited") ?? false;
         ApplyComponents(obj, entry["components"]);
@@ -738,6 +747,11 @@ public static class SaveModule
             if (cobj == null) continue;
             Item citem = cobj.GetComponent<Item>();
             if (citem == null) { UnityEngine.Object.Destroy(cobj); continue; }
+            if (citem.rb != null)
+            {
+                citem.rb.gravityScale = 0f;
+                citem.rb.simulated = false;
+            }
             citem.condition = entry.Value<float?>("condition") ?? 1f;
             ApplyComponents(cobj, entry["components"]);
             container.LoadItem(citem);

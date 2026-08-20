@@ -65,8 +65,9 @@ public sealed class MigrationCoordinator
     private readonly Dictionary<PlayerKey, WalEntry> _wal = new();
     private int _lastEpoch;
 
-    // 마이그레이션 커밋 완료 이벤트 (player, fromDepth, toDepth) - Discord 알림 등 외부 구독용
-    public event Action<PlayerKey, int, int>? MigrationCommitted;
+    // 마이그레이션 커밋 완료 이벤트 (player, fromDepth, toDepth, isRespawn) - Discord 알림 등 외부 구독용
+    // isRespawn: 리스폰 트랜잭션(IsRespawn=true) 여부 - 구독자가 "리스폰" vs "레이어 이동" 알림을 구분한다
+    public event Action<PlayerKey, int, int, bool>? MigrationCommitted;
 
     public MigrationCoordinator(OrchestratorConfig config, ControlHub hub,
         InstanceManager instances, PlayerSessionStore sessions, PlayerDataStore dataStore)
@@ -562,7 +563,7 @@ public sealed class MigrationCoordinator
         }
 
         VerboseState.Line($"{player}: COMMIT — 레이어 {tx.ToDepth} 완료 (epoch {tx.Epoch}).");
-        MigrationCommitted?.Invoke(player, tx.FromDepth, tx.ToDepth);
+        MigrationCommitted?.Invoke(player, tx.FromDepth, tx.ToDepth, tx.IsRespawn);
     }
 
     // 게이트웨이 SWAP_FAILED 보고 - 트랜잭션 중단

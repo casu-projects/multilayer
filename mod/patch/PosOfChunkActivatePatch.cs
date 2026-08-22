@@ -6,10 +6,10 @@ using UnityEngine.Tilemaps;
 
 namespace CasuMod.Patch;
 
-// 헤드리스 서버의 청크 활성화를 고정된 호스트의 카메라가 아니라 실제 플레이 중인 유저 기준으로 바꿈
-// 유저가 해당 청크를 지나가도 잠시 동안 유지해서 액체, 떨어지는 아이템이나 상자, AI가 멈추는 현상을 줄인다
+// 청크 활성화의 위치를 호스트의 카메라 대신 각 유저의 카메라 위치로 변경
+// 액체, 오브젝트, 몬스터 AI의 이동이 롤백되는 문제를 해결
 [HarmonyPatch]
-internal static class HeadlessChunkVisibilityPatch
+internal static class PosOfChunkActivatePatch
 {
     private const float RefreshIntervalSeconds = 0.2f;
     private const float ActiveLingerSeconds = 10f;

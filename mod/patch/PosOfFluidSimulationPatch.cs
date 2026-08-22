@@ -6,11 +6,9 @@ using UnityEngine;
 namespace CasuMod.Patch;
 
 // 서버의 액체에 관련한 계산 범위를 플레이중인 유저 주변으로 옮김
-// 이전 코드에서는 유저 한명마다 많은 영역을 FixedUpdate의 시간마다 다시 계산했는데
-// 이러면 다수의 유저가 한곳에 모이면 같은 액체의 이동과 계산을 인원수만큼 여러번 반복 계산하는 방식이라 서버 렉이걸려요
-// 그래서 유저의 계산 범위가 겹치거나 맞닿은 범위를 먼저 합친 뒤, 서로 떨어진 영역에 대해서만 SimulationStep을 한 번씩 호출하게 변경했어요
+// 각 유저별 계산 범위가 겹치거나 맞닿은 범위를 합치고, 그 외 영역에서만 SimulationStep을 호출
 [HarmonyPatch(typeof(FluidManager), "FixedUpdate")]
-internal static class FluidSimRangeFollowPlayersPatch
+internal static class PosOfFluidSimulationPatch
 {
     private const int RangeBlocks = 64;
 

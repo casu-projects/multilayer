@@ -5,8 +5,6 @@ using KrokoshaCasualtiesUtils;
 
 namespace CasuMod.Patch;
 
-// "X finished the layer" 채팅 알림 노이즈 제거 (이전 모드 이식) - 플레이어들이
-// 개별적으로 진행하므로 finishedLayer를 미리 설정해 원본의 감지 루프를 무력화한다
 [HarmonyPatch(typeof(ServerMain), "UpdateSyncClientsToClients")]
 internal static class DisableLayerFinishPatch
 {

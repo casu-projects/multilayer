@@ -6,9 +6,9 @@ using UnityEngine;
 
 namespace CasuMod.Patch;
 
-// 헤드리스 서버의 지진 파괴 중심을 안보이는 호스트의 카메라가 아니라 플레이 중인 유저로 바꾼다
+// 지진으로 인한 블럭 파괴의 위치를 호스트의 카메라 대신 각 유저의 카메라 위치로 변경
 [HarmonyPatch(typeof(WorldGeneration), "Update")]
-internal static class HeadlessEarthquakePatch
+internal static class PosOfEarthquakePatch
 {
     private const float QuakeDestructionRate = 16f;
 

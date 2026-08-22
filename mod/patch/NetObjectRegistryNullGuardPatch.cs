@@ -3,7 +3,7 @@ using HarmonyLib;
 using KrokoshaCasualtiesMP;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // NetObjectRegistry.TryGetSyncInfoOrRegister(Component) null 가드
 // TraderScript_TryPurchase_MultiplayerPatch.Server_Trader_TryPurchase(10163)가

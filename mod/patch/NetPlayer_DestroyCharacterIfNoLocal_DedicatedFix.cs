@@ -1,7 +1,7 @@
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 퇴장 시 바닐라 DestroyCharacterIfNoLocal의 인벤토리 드랍 방지 (데디서버 전용)
 // 바닐라는 퇴장 정리에서 Server_DropAllInventory를 호출해 인벤토리를 바닥에 드랍하는데,
@@ -13,9 +13,6 @@ internal static class NetPlayer_DestroyCharacterIfNoLocal_DedicatedFix
 {
     private static bool Prefix(NetPlayer __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server)
-            return true;
-
         // 로컬 placeholder 바디(PlayerCamera.main.body)는 유지한다
         if (__instance == null || __instance.is_local)
             return false;

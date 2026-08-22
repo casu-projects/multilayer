@@ -3,7 +3,7 @@ using System.Reflection;
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 마이그레이션 조용화 게이트 - 동결(FREEZE) 플레이어의 발신을 전면 중단하고, 그 바디/플레이어
 // 오브젝트를 타인에게 패킹하지 않는다. 두 가지 레이스를 결정적으로 차단한다:
@@ -42,7 +42,6 @@ internal static class QuiescencePatches
     {
         private static bool Prefix(NetPlayer plr, ref bool __result)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
             if (IsFrozenTarget(plr))
             {
                 __result = false;
@@ -62,7 +61,6 @@ internal static class QuiescencePatches
 
         private static bool Prefix(NetPlayer plr, ref bool __result)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
             if (IsFrozenTarget(plr))
             {
                 __result = false;
@@ -83,7 +81,6 @@ internal static class QuiescencePatches
 
         private static bool Prefix(NetPlayer plr, ref bool __result)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
             if (IsFrozenTarget(plr))
             {
                 __result = false;
@@ -107,7 +104,6 @@ internal static class QuiescencePatches
 
         private static bool Prefix(object obj, ref bool __result)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
             if (ShouldSkipSubject(obj))
             {
                 __result = false;
@@ -123,7 +119,6 @@ internal static class QuiescencePatches
     {
         private static bool Prefix(object obj, ref bool __result)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
             if (ShouldSkipSubject(obj))
             {
                 __result = false;

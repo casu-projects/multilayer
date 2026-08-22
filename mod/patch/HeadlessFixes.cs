@@ -1,7 +1,7 @@
 using HarmonyLib;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 헤드리스(-batchmode -nographics) 환경에서는 Screen.resolutions가 비어 있어
 // 바닐라 Settings.DefaultSettings가 IndexOutOfRangeException을 던지고, 이게 월드젠의

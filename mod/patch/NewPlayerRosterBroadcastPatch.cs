@@ -3,7 +3,7 @@ using System.Linq;
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 신규 플레이어 신원을 기존 클라이언트 전체에 즉시 브로드캐스트 (이전 모드 이식 + 레이스 수정)
 // 바닐라는 신원을 새 클라이언트에게만 보내고 기존 클라이언트는 스스로 10024 요청 왕복을 하길
@@ -23,7 +23,7 @@ internal static class NetPlayer_CreateCharacter_BroadcastNewPlayerPatch
 {
     private static void Prefix(NetPlayer __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server || __instance.is_local)
+        if (__instance.is_local)
             return;
 
         RosterBroadcast.SendIdentity(__instance, "CreateCharacter");
@@ -36,7 +36,7 @@ internal static class NetPlayer_Start_BroadcastNewPlayerPatch
 {
     private static void Postfix(NetPlayer __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server || __instance.is_local)
+        if (__instance.is_local)
             return;
 
         RosterBroadcast.SendIdentity(__instance, "Start");

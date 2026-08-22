@@ -6,7 +6,7 @@ using KrokoshaCasualtiesMP;
 using LiteNetLib;
 using LiteNetLib.Utils;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 수면 배속 중에는 서버의 주기적 체력 스냅샷을 수면 중인 유저에게 되돌려 보내지 않는다
 // 서버/클라이언트가 모두 수면 게이지를 진행시키며 약 0.9초마다 서버 값이 로컬에 덮어써지는데,
@@ -25,8 +25,7 @@ internal static class SleepHealthSyncOwnerFilterPatch
 
     private static bool Prefix(NetBody nb, bool force)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server
-            || nb == null
+        if (nb == null
             || !nb.is_player
             || nb.plr == null
             || nb.body == null

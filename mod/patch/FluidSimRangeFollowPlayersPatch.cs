@@ -3,7 +3,7 @@ using HarmonyLib;
 using KrokoshaCasualtiesMP;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 서버의 액체에 관련한 계산 범위를 플레이중인 유저 주변으로 옮김
 // 이전 코드에서는 유저 한명마다 많은 영역을 FixedUpdate의 시간마다 다시 계산했는데
@@ -29,7 +29,6 @@ internal static class FluidSimRangeFollowPlayersPatch
 
     private static bool Prefix(FluidManager __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
 
         WorldGeneration world = WorldGeneration.world;
         if (world == null || world.generatingWorld) return true;

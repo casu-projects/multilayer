@@ -22,7 +22,6 @@ public static class ChatRelay
     // 발신자의 닉네임 색상을 원본 유지하기 위해 NetPlayer.plrcolor를 HTML hex로 함께 보낸다
     private static void OnPlayerChat(NetPlayer plr, string message)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         if (plr == null || plr.playername == "" || string.IsNullOrEmpty(message)) return;
         if (OrchestratorClient.Instance == null) return;
         if (ChatCommands.ChatModeCommand.GetMode(plr.clientId) == ChatCommands.ChatMode.Local) return; // Local - 릴레이 제외

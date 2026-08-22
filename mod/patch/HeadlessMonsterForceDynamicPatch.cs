@@ -2,7 +2,7 @@ using HarmonyLib;
 using KrokoshaCasualtiesMP;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 헤드리스 서버에서 플레이 중인 유저의 근처 적들만 Dynamic 물리로 깨움
 // 하지만 적Ai를 전부 깨우면 CPU와 blockDamages 목록이 터지니, 그 부분은 방지
@@ -16,7 +16,7 @@ internal static class HeadlessMonsterForceDynamicPatch
 
     private static bool Prefix(Rigidbody2D rb)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server || rb == null) return true;
+        if (rb == null) return true;
         if (WorldGeneration.world == null || !WorldGeneration.world.worldExists) return true;
         if (WorldGeneration.world.generatingWorld) return true;
 

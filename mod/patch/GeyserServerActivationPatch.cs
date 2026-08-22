@@ -3,7 +3,7 @@ using HarmonyLib;
 using KrokoshaCasualtiesMP;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 서버측 geyser 발동 수정 ( 프로덕션 실측 기반)
 // 문제: 바닐라 GeyserScript.OnTriggerEnter2D의 발동 게이트가
@@ -18,7 +18,6 @@ internal static class GeyserServerActivationPatch
 {
     private static bool Prefix(GeyserScript __instance, Collider2D collision)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
 
         if (collision != null && collision.attachedRigidbody != null
             && collision.attachedRigidbody.bodyType == RigidbodyType2D.Dynamic
@@ -55,7 +54,6 @@ internal static class GeyserServerFillEmptyTilesPatch
 
     private static void Postfix(GeyserScript __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         if (__instance == null) return;
         if (Time.time - (float)ActivateTimeField.GetValue(__instance) >= 4.5f) return;
 

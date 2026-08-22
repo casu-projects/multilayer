@@ -13,7 +13,7 @@ internal static class PreRunScript_StartRun_RunSettingsBootstrapPatch
 {
     private static void Prefix(PreRunScript __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server || __instance == null || __instance.runSettings == null)
+        if (__instance == null || __instance.runSettings == null)
             return;
 
         var overrides = RunRuleState.RunSettingsSnapshot();

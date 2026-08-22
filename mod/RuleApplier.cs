@@ -16,9 +16,6 @@ public static class RuleApplier
     // 런 설정(run.json)과 겹치는 키는 런 설정 우선 스킵. 반환: 적용 건수
     public static int ApplyRulesNow()
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server)
-            return 0;
-
         var rules = RunRuleState.RulesSnapshot();
         var runSettings = RunRuleState.RunSettingsSnapshot();
         int applied = 0;

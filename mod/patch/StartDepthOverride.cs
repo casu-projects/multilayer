@@ -2,7 +2,7 @@ using System;
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // CASU_START_DEPTH 환경변수 -> 월드젠 시작 깊이 반영 (옛 모드 이식)
 // depth-2+ 인스턴스는 biomeDepth/totalTraveled를 깊이에 맞게 설정해야 레이어 전환이

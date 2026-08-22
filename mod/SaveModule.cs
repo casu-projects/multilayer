@@ -669,7 +669,7 @@ public static class SaveModule
     {
         private static bool Prefix(NetBody b)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server || b == null || b.plr == null) return true;
+            if (b == null || b.plr == null) return true;
             if (TryApplyPendingPosition(b.plr, b))
             {
                 return false;
@@ -687,7 +687,7 @@ public static class SaveModule
     {
         private static void Postfix(NetBody b)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server || b == null || b.plr == null) return;
+            if (b == null || b.plr == null) return;
             if (!TryTakePendingDrops(b.plr.GetPersistentId(), out JArray drops)) return;
 
             Vector2 spawnPos = b.body != null ? (Vector2)b.body.transform.position : Vector2.zero;
@@ -819,7 +819,6 @@ public static class SaveModule
         [HarmonyPriority(Priority.First)]
         private static void Prefix(Body __instance)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server || !KrokoshaScavMultiplayer.is_server) return;
             NetBody netBody = __instance.GetComponent<NetBody>();
             if (netBody == null || !netBody.is_player || netBody.plr == null) return;
             ServerMain.server_lastplayerstates.Remove(netBody.plr.GetPersistentId());
@@ -827,7 +826,6 @@ public static class SaveModule
 
         private static void Postfix(Body __instance)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
             if (!NetPlayer.BodyToPlayerDict.TryGetValue(__instance, out NetPlayer plr)) return;
             string pid = plr.GetPersistentId();
 
@@ -899,7 +897,6 @@ public static class SaveModule
     {
         private static void Prefix(NetPlayer __instance)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server || !KrokoshaScavMultiplayer.is_server) return;
             if (__instance == null) return;
             if (MigrationModule.IsFrozen(__instance.GetPersistentId())) return;
             if (__instance.body != null)

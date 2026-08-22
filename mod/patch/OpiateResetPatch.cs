@@ -4,7 +4,7 @@ using KrokoshaCasualtiesMP;
 using KrokoshaCasualtiesUtils;
 using LiteNetLib;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 리스폰 시 opiate 상태 초기화 - Server_RespawnCharacter
 // 바닐라 리스폰(Server_ReviveCharacter -> ResetHealth)이 서버측에서 Painkillers
@@ -20,7 +20,6 @@ internal static class NetPlayer_Server_RespawnCharacter_OpiateResetPatch
 {
     private static void Postfix(NetPlayer __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         if (__instance.playerbody == null) return;
 
         var writer = Net.CreateWriter(10128);
@@ -51,7 +50,6 @@ internal static class Body_ResetHealth_NeuralBoosterResetPatch
 
     private static void Postfix(Body body)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         if (body == null) return;
         body.usedNeuralBooster = false;
     }

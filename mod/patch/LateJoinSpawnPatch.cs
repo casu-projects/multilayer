@@ -2,7 +2,7 @@ using HarmonyLib;
 using KrokoshaCasualtiesMP;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 바닐라 late-join 스폰(다른 생존 플레이어 위에 겹쳐 스폰 - ServerMain.LateSpawnLocation의
 // GetPlayerBodyHostOrAnyoneAlive 분기)을 레이어 표준 스폰(spawnlocation)으로 교체 (이전 모드 이식)
@@ -17,11 +17,6 @@ internal static class LateJoinSpawnPatch
 
     private static bool Prefix(NetBody b)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server)
-        {
-            return true;
-        }
-
         WorldGeneration world = WorldGeneration.world;
         if (world == null)
         {

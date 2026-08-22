@@ -75,9 +75,6 @@ internal static class Chat_ServerChatAnnouncement_LocalizePatch
 
     private static bool Prefix(ref string message)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server)
-            return true;
-
         if (MessageLocalization.TryTranslateAnnouncement(message, out string? translated, out bool suppress,
                 out string? subjectName))
         {
@@ -114,8 +111,6 @@ internal static class ServerMain_OnPlayerDeath_LocalizedPatch
 {
     private static bool Prefix(NetPlayer plr)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server)
-            return true;
         if (plr == null)
             return true;
 
@@ -158,8 +153,6 @@ internal static class ServerMain_HandleDedicatedServerUpdate_DisablePatch
 {
     private static bool Prefix()
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server)
-            return true;
         return false;
     }
 }

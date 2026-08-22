@@ -114,7 +114,6 @@ public static class RunModule
     // 크래시 처리 -> 재스폰 폴백한다
     internal static void HandleReset()
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
 
         _pendingReset = true;
         _resetDeadline = Time.unscaledTime + 90f;
@@ -189,8 +188,7 @@ public static class RunModule
     {
         private static void Postfix()
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
-
+    
             if (WorldGeneration.world != null && WorldGeneration.world.totalTraveled <= 0)
             {
                 WorldGeneration.world.totalTraveled = 1;
@@ -208,8 +206,7 @@ public static class RunModule
     {
         private static void Postfix()
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
-
+    
             // 접속 거절 페이즈 종료 - 이후 접속은 announce(10021/10010)를 정상 수신한다
             PreWarmGenerating = false;
 
@@ -232,8 +229,7 @@ public static class RunModule
     {
         private static void Prefix(IReadOnlyList<knetid> to_who)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
-            WorldGeneration world = WorldGeneration.world;
+                WorldGeneration world = WorldGeneration.world;
             if (world == null) return;
             WorldGeneration_GenerateWorld_MultiplayerPatch.firstworldgenparams.totalTraveled = world.totalTraveled;
             WorldGeneration_GenerateWorld_MultiplayerPatch.firstworldgenparams.biomeDepth = (byte)world.biomeDepth;
@@ -251,7 +247,7 @@ public static class RunModule
     {
         private static bool Prefix(ref string reject_reason, ref bool __result)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server || !PreWarmGenerating) return true;
+            if (!PreWarmGenerating) return true;
 
             reject_reason = "Server is generating world, please try again.";
             __result = false;

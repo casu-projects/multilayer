@@ -2,7 +2,7 @@ using HarmonyLib;
 using KrokoshaCasualtiesMP;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 바닐라/베이스 모드 안정성 가드 이식 (구 모드 project/mod 이식)
 // NetPlayer.GetDistanceToNearestLivingPlayer NRE - 퇴장 후 sync 목록에 잔존하는

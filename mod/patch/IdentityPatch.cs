@@ -1,3 +1,4 @@
+using CasuMod;
 using System;
 using System.Reflection;
 using HarmonyLib;
@@ -5,7 +6,7 @@ using KrokoshaCasualtiesMP;
 using LiteNetLib;
 using LiteNetLib.Utils;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // tail v2/v3 (/): connect data 끝 [Magic C5A5][Ver 1|2][SteamID64 8B][clientId 2B]
 // [isReturning 1B][isMigratingArrival 1B] - Ver 2는 뒤에 [nameLen 1B][UTF-8 이름] 추가
@@ -134,7 +135,7 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
 {
     private static void Postfix(NetPlayer __result)
     {
-        if (__result == null || !KrokoshaScavMultiplayer.is_dedicated_server)
+        if (__result == null)
             return;
 
         ulong? steamId = OnConnectionRequest_TailV2Patch.TakeSteamId();
@@ -183,7 +184,7 @@ internal static class NetPlayer_GetPersistentId_PreferSteamIdPatch
 {
     private static bool Prefix(NetPlayer __instance, ref string __result)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server || __instance.steam_id == 0)
+        if (__instance.steam_id == 0)
             return true;
         __result = "STEAM_" + __instance.steam_id;
         return false;

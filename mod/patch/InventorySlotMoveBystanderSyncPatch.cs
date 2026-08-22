@@ -4,7 +4,7 @@ using HarmonyLib;
 using KrokoshaCasualtiesMP;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 /// 베이스 모드의 클라이언트 패킷 적용 로직은 "소유 바디/컨테이너가 실제로 바뀔 때만"
 /// 방관자 클라이언트의 아이템 슬롯을 갱신한다 - 같은 바디 내 슬롯 이동/교환은 소유자가
@@ -20,7 +20,7 @@ internal static class Body_DropItem_RecordForBystanderSlotSyncPatch
 
     private static void Postfix(Body __instance, Item item)
     {
-        if (!KrokoshaScavMultiplayer.is_server || item == null)
+        if (item == null)
         {
             return;
         }
@@ -54,7 +54,7 @@ internal static class Body_PickUpItem_ForceBystanderSlotSyncPatch
 
     private static bool Prefix(Body __instance, Item item, int slot)
     {
-        if (!KrokoshaScavMultiplayer.is_server || item == null || InFlightItems.Contains(item))
+        if (item == null || InFlightItems.Contains(item))
         {
             return true;
         }

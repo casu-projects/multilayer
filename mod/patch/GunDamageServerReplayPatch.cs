@@ -1,3 +1,4 @@
+using CasuMod;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -7,7 +8,7 @@ using LiteNetLib;
 using LiteNetLib.Utils;
 using UnityEngine;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 총기 데미지 서버 권위 처리 - 원본 Server_PlayerBodyShoot의 near-barrel SUS 검사가
 // Steam P2P 릴레이 지연으로 오탐해 발사 거부(롤백)를 유발하므로 대체한다
@@ -42,7 +43,6 @@ internal static class GunDamageServerReplayPatch
 
     private static bool Prefix(knetid clientId, ref NetDataReader reader)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
         try
         {
             // 파싱 - 총 syncId, 총구 위치, 방향, racked

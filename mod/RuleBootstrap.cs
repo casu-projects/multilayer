@@ -11,7 +11,7 @@ internal static class PreRunScript_StartRun_RuleBootstrapPatch
 {
     private static void Postfix(PreRunScript __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server || __instance?.runSettings == null)
+        if (__instance?.runSettings == null)
             return;
 
         int applied = RuleApplier.ApplyRulesNow();

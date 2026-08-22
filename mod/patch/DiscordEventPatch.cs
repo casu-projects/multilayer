@@ -1,7 +1,8 @@
+using CasuMod;
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 사망/리스폰 이벤트를 채팅 텍스트 파싱 대신 직접 훅해 오케스트레이터에 보고 (Discord 알림용)
 // 오케스트레이터는 마이그레이션 중 이벤트를 스킵해 마이그레이션 알림과의 중복을 방지한다
@@ -32,7 +33,6 @@ internal static class ServerMain_OnPlayerDeath_DiscordReportPatch
 {
     private static void Postfix(NetPlayer plr)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         DiscordEventReporter.Send("DIED", plr);
     }
 }
@@ -44,7 +44,6 @@ internal static class NetPlayer_Server_RespawnCharacter_DiscordReportPatch
 {
     private static void Postfix(NetPlayer __instance)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         DiscordEventReporter.Send("RESPAWNED", __instance);
     }
 }

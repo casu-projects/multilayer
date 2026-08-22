@@ -4,7 +4,7 @@ using KrokoshaCasualtiesMP;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 헤드리스 서버의 청크 활성화를 고정된 호스트의 카메라가 아니라 실제 플레이 중인 유저 기준으로 바꿈
 // 유저가 해당 청크를 지나가도 잠시 동안 유지해서 액체, 떨어지는 아이템이나 상자, AI가 멈추는 현상을 줄인다
@@ -83,7 +83,6 @@ internal static class HeadlessChunkVisibility_SharedMainUpdateHook
 
     private static void Prefix()
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         HeadlessChunkVisibilityPatch.RefreshPlayerInterest();
     }
 }
@@ -100,7 +99,6 @@ internal static class HeadlessChunkVisibility_UpdateChunkVisibilityHook
 
     private static bool Prefix()
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
         HeadlessChunkVisibilityPatch.RefreshPlayerInterest();
         return false;
     }

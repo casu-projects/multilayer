@@ -1,3 +1,4 @@
+using CasuMod.Patch;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -34,7 +35,6 @@ public sealed class MigrationModule : MonoBehaviour
 
     private void Update()
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
         if (!KrokoshaCasualtiesUtils.Util.IsWorldGenerated()) return;
         if (OrchestratorClient.Instance == null) return;
 
@@ -417,8 +417,7 @@ public sealed class MigrationModule : MonoBehaviour
     {
         private static void Postfix(knetid clientId)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
-            if (!NetPlayer.TryGetPlayerFromClientId(clientId, out NetPlayer plr)) return;
+                if (!NetPlayer.TryGetPlayerFromClientId(clientId, out NetPlayer plr)) return;
 
             try { RosterBarrier(plr); }
             catch (System.Exception ex) { Plugin.Log.LogWarning($"[Roster] 배리어 실패: {ex.Message}"); }
@@ -462,8 +461,7 @@ public sealed class MigrationModule : MonoBehaviour
     {
         private static void Prefix(NetPlayer __instance)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
-            if (__instance == null || __instance.is_local) return;
+                if (__instance == null || __instance.is_local) return;
             string pid = __instance.GetPersistentId();
             if (IsFrozen(pid))
             {
@@ -476,8 +474,7 @@ public sealed class MigrationModule : MonoBehaviour
 
         private static void Postfix(NetPlayer __instance)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
-            if (__instance == null || __instance.is_local) return;
+                if (__instance == null || __instance.is_local) return;
 
             // CharSync 바디 고아화 방지: 서버측 객체 제거 + 신뢰성 raw 10174 DELETE를
             // 남은 클라이언트 전체에 즉시 전송. Server_DeleteObject의 비신뢰 CharSync 채널은

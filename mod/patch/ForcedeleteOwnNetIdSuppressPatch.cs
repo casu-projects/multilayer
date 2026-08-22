@@ -6,7 +6,7 @@ using System.Reflection;
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // 도착/동결(마이그레이션) 플레이어의 forcedelete 큐에서 **본인 netId**를 제거
 // 문제: 목적지에 도착한 플레이어가 본인 CharSync 객체(netId==clientId)의 정보를 요청/ACK하면
@@ -59,7 +59,6 @@ internal static class ForcedeleteOwnNetIdSuppressPatch
     {
         private static void Postfix(knetid plrId, knetid objId)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return;
             if ((ushort)plrId != (ushort)objId) return;   // 본인 netId 요청만
             if (!NetPlayer.TryGetPlayerFromClientId(plrId, out NetPlayer plr)) return;
             if (IsMigrating(plr)) PurgeOwnForcedelete(plr);
@@ -72,7 +71,7 @@ internal static class ForcedeleteOwnNetIdSuppressPatch
     {
         private static void Postfix(NetPlayer plr)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server || plr == null) return;
+            if (plr == null) return;
             if (IsMigrating(plr)) PurgeOwnForcedelete(plr);
         }
     }

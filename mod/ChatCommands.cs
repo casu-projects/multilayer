@@ -42,7 +42,6 @@ public static class ChatCommands
     {
         private static bool Prefix(knetid clientId, ref NetDataReader reader)
         {
-            if (!KrokoshaScavMultiplayer.is_dedicated_server) return true;
 
             int startPosition = reader.Position;
             reader.Get(out bool _unusedFlag);

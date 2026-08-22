@@ -2,7 +2,7 @@ using System.Reflection;
 using HarmonyLib;
 using KrokoshaCasualtiesMP;
 
-namespace CasuMod;
+namespace CasuMod.Patch;
 
 // CharSync plrid 상시 전송 (근본 수정)
 // 문제: 서버가 보내는 CharSync(10174) 패킷의 plrid(플레이어 ID)는 수신자별 델타
@@ -25,7 +25,7 @@ internal static class CharSync_PlridAlwaysSyncPatch
 
     private static void Prefix(CoolSyncSubSystemForObjects.Server_PerPlrState plrstate, object obj)
     {
-        if (!KrokoshaScavMultiplayer.is_dedicated_server || plrstate == null || obj == null)
+        if (plrstate == null || obj == null)
             return;
 
         _realObjField ??= AccessTools.Field(obj.GetType(), "real_obj");

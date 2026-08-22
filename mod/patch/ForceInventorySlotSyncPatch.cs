@@ -12,7 +12,7 @@ namespace CasuMod.Patch;
 /// 수행하지만 (Body.SwapSlots + 네트워크 픽업 핸들러) 같은 틱 안에 일어나 두 동기화
 /// 패킷("바디에서 나감"/"새 슬롯 부착")이 하나로 합쳐져 방관자가 중간 상태를 못 본다.
 [HarmonyPatch(typeof(Body), "DropItem", new Type[] { typeof(Item) })]
-internal static class Body_DropItem_RecordForBystanderSlotSyncPatch
+internal static class ForceInventorySlotSyncPatch
 {
     private const float StaleEntryPurgeSeconds = 5f;
 

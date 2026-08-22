@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace CasuMod.Patch;
 
-// 서버의 액체에 관련한 계산 범위를 플레이중인 유저 주변으로 옮김
+// 서버의 Fluid 시뮬레이션 계산 범위를 플레이중인 유저 주변으로 옮김
 // 각 유저별 계산 범위가 겹치거나 맞닿은 범위를 합치고, 그 외 영역에서만 SimulationStep을 호출
 [HarmonyPatch(typeof(FluidManager), "FixedUpdate")]
 internal static class PosOfFluidSimulationPatch

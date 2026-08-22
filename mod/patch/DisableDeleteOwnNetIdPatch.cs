@@ -18,7 +18,7 @@ namespace CasuMod.Patch;
 // 해결: 적재 직후(Postfix) 마이그레이션 창(동결/도착 차단/감시) 동안 본인 netId를 큐에서 제거
 // 본인 바디는 연결 중 삭제될 일이 없으므로 억제가 안전하다. 다른 객체의 forcedelete는 유지
 [HarmonyPatch]
-internal static class ForcedeleteOwnNetIdSuppressPatch
+internal static class DisableDeleteOwnNetIdPatch
 {
     private static readonly FieldInfo StatesField =
         AccessTools.Field(typeof(CoolSyncSubSystemForObjects), "server_perplrstates");

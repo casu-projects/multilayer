@@ -18,7 +18,7 @@ namespace CasuMod.Patch;
 // 수신자 - 무시 가능한 비용). 신원을 잃을 수 없으므로 생성/재생성/유실 어느 경우든
 // 클라이언트는 항상 플레이어 바디로 생성하고, 이미 NPC화된 바디도 수리 경로로 복구된다
 [HarmonyPatch(typeof(CoolSyncSubSystemForObjects), "PackData1")]
-internal static class CharSync_PlridAlwaysSyncPatch
+internal static class CharSyncPlridPatch
 {
     private static FieldInfo _realObjField;
     private static FieldInfo _netIdField;

@@ -83,7 +83,7 @@ internal static class HeadlessChunkVisibility_SharedMainUpdateHook
 
     private static void Prefix()
     {
-        HeadlessChunkVisibilityPatch.RefreshPlayerInterest();
+        PosOfChunkActivatePatch.RefreshPlayerInterest();
     }
 }
 
@@ -99,7 +99,7 @@ internal static class HeadlessChunkVisibility_UpdateChunkVisibilityHook
 
     private static bool Prefix()
     {
-        HeadlessChunkVisibilityPatch.RefreshPlayerInterest();
+        PosOfChunkActivatePatch.RefreshPlayerInterest();
         return false;
     }
 }

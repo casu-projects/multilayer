@@ -59,11 +59,11 @@ internal static class Body_PickUpItem_ForceBystanderSlotSyncPatch
             return true;
         }
 
-        if (!Body_DropItem_RecordForBystanderSlotSyncPatch.RecentDrops.TryGetValue(item, out (Body Body, float DroppedAt) record))
+        if (!ForceInventorySlotSyncPatch.RecentDrops.TryGetValue(item, out (Body Body, float DroppedAt) record))
         {
             return true;
         }
-        Body_DropItem_RecordForBystanderSlotSyncPatch.RecentDrops.Remove(item);
+        ForceInventorySlotSyncPatch.RecentDrops.Remove(item);
 
         if (record.Body != __instance || Time.realtimeSinceStartup - record.DroppedAt > SameBodyReslotWindowSeconds)
         {

@@ -1,5 +1,5 @@
 #!/bin/bash
-# CasuMP 빌드 시스템 — orchestrator/agent/gateway 단일파일 self-contained 퍼블리시 + mod DLL.
+# CasuMP 빌드 시스템 — orchestrator/agent/gateway 단일파일 self-contained 퍼블리시 + mod DLL + utils/.
 # 최종 산출물은 project/__dist__/ 로 이동한다 (dist = 배포 단위).
 # 컴포넌트 config(orchestrator/agent/gateway.json)는 각 프로그램이 첫 실행 시 pwd(__dist__)에
 # 기본값으로 자동 생성한다 — build.sh는 건드리지 않는다. run.json/rule.json만 정본 기본값을
@@ -46,13 +46,31 @@ echo "── mod 빌드..."
 (cd "$ROOT/mod" && dotnet build -c Release -p:DebugType=None 2>&1 | tail -1)
 cp "$ROOT/mod/bin/Release/CasuMod.dll" "$DIST/"
 
-# 3) run.json/rule.json — 정본 기본값 복사 (없을 때만 — 이후 __dist__에서 편집)
+# 3) utils/lobby-browser — 개발용 도구 (단일파일 self-contained)
+echo "── utils/lobby-browser 빌드..."
+(cd "$ROOT/utils/lobby-browser" && dotnet publish -c Release -r linux-x64 --self-contained true \
+   -p:PublishSingleFile=true \
+   -p:IncludeNativeLibrariesForSelfExtract=true \
+   -p:DebugType=None -p:DebugSymbols=false \
+   -o "$TMP" 2>&1 | tail -1)
+mv "$TMP/SteamLobbyBrowser" "$DIST/casu-lobby-browser"
+
+# 4) utils/steam-login — Steam 로그인 유틸리티 (단일파일 self-contained)
+echo "── utils/steam-login 빌드..."
+(cd "$ROOT/utils/steam-login" && dotnet publish -c Release -r linux-x64 --self-contained true \
+   -p:PublishSingleFile=true \
+   -p:IncludeNativeLibrariesForSelfExtract=true \
+   -p:DebugType=None -p:DebugSymbols=false \
+   -o "$TMP" 2>&1 | tail -1)
+mv "$TMP/SteamLogin" "$DIST/casu-steam-login"
+
+# 5) run.json/rule.json — 정본 기본값 복사 (없을 때만 — 이후 __dist__에서 편집)
 [ -f "$DIST/run.json" ]  || cp "$ROOT/../../assets/multilayer-default-jsons/run.json"  "$DIST/"
 [ -f "$DIST/rule.json" ] || cp "$ROOT/../../assets/multilayer-default-jsons/rule.json" "$DIST/"
 
-# 4) 프로젝트 bin/obj 정리 — 빌드 산출물은 __dist__로 이동됨 (소스 트리 깔끔 유지,
+# 6) 프로젝트 bin/obj 정리 — 빌드 산출물은 __dist__로 이동됨 (소스 트리 깔끔 유지,
 #    재빌드는 항상 전체 빌드)
-for p in orchestrator agent gateway mod; do
+for p in orchestrator agent gateway mod utils/lobby-browser utils/steam-login; do
   rm -rf "$ROOT/$p/bin" "$ROOT/$p/obj"
 done
 

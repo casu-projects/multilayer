@@ -17,7 +17,7 @@ namespace CasuMod.Patch;
 // 미생성) 케이스와 이름/색 확정 재전송을 커버 (멱등 - 중복 수신은 이름/색 갱신만 함)
 
 // 바디 생성 직전 - 10023이 바디 첫 동기화보다 항상 먼저 나가도록 (레이스 승리)
-// 이 시점에 playername/plrcolor/nameIsCustom은 CreatePlayer(ApplyNameAndColor)에서 이미 설정됨
+// 이 시점에 playername/playerColor/nameIsCustom은 CreatePlayer(ApplyNameAndColor)에서 이미 설정됨
 [HarmonyPatch(typeof(NetPlayer), "CreateCharacter")]
 internal static class NetPlayer_CreateCharacter_BroadcastNewPlayerPatch
 {

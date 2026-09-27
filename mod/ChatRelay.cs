@@ -19,14 +19,14 @@ public static class ChatRelay
     }
 
     // 플레이어 채팅 (10099 수신기 내부 발화) -> 오케스트레이터 중계
-    // 발신자의 닉네임 색상을 원본 유지하기 위해 NetPlayer.plrcolor를 HTML hex로 함께 보낸다
+    // 발신자의 닉네임 색상을 원본 유지하기 위해 NetPlayer.playerColor를 HTML hex로 함께 보낸다
     private static void OnPlayerChat(NetPlayer plr, string message)
     {
         if (plr == null || plr.playername == "" || string.IsNullOrEmpty(message)) return;
         if (OrchestratorClient.Instance == null) return;
         if (ChatCommands.ChatModeCommand.GetMode(plr.clientId) == ChatCommands.ChatMode.Local) return; // Local - 릴레이 제외
 
-        Color24 c = plr.plrcolor;
+        Color24 c = plr.playerColor;
         string color = $"#{c.r:X2}{c.g:X2}{c.b:X2}";
 
         OrchestratorClient.Instance.SendEvent("CHAT",

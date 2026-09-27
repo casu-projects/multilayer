@@ -7,7 +7,7 @@ using System.Linq;
 namespace CasuMod;
 
 [BepInPlugin("dev.stdd.casumod", "CasuMod", "0.1.0")]
-[BepInDependency("KrokoshaCasualtiesMP", "4.0.1")]
+[BepInDependency("KrokoshaCasualtiesMP", "4.1.2")]
 public class Plugin : BaseUnityPlugin
 {
     public static ManualLogSource Log;

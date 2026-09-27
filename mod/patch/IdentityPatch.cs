@@ -152,7 +152,7 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
 
         if (steamId.HasValue && steamId.Value != 0)
         {
-            __result.steam_id = steamId.Value;
+            __result.SteamId = steamId.Value;
         }
 
         // tail(Ver 2)로 전달된 Steam 보정 이름 - 인트로의 1바이트/문자 인코딩으로 깨진
@@ -167,8 +167,8 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
         // 바디 스폰(Body.Start)보다 반드시 먼저 실행된다 (CreateNetPlayerWithPeer 동기 처리)
         SaveModule.OnPlayerArrival(__result.GetPersistentId());
 
-        // : 접속 시 플레이어 데이터 요청 - 직접연결(steam_id=0) 포함 전 플레이어
-        // playerKey는 GetPersistentId (STEAM_ 경로 패치 적용됨 - steam_id 있으면 STEAM_,
+        // : 접속 시 플레이어 데이터 요청 - 직접연결(SteamId=0) 포함 전 플레이어
+        // playerKey는 GetPersistentId (STEAM_ 경로 패치 적용됨 - SteamId 있으면 STEAM_,
         // 없으면 NAME_hex(username) - 게이트웨이 키와 일치)
         if (OrchestratorClient.Instance != null)
         {
@@ -178,15 +178,15 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
     }
 }
 
-// GetPersistentId - steam_id가 있으면 STEAM_ 경로 (게이트웨이 키 일치)
+// GetPersistentId - SteamId가 있으면 STEAM_ 경로 (게이트웨이 키 일치)
 [HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.GetPersistentId))]
 internal static class NetPlayer_GetPersistentId_PreferSteamIdPatch
 {
     private static bool Prefix(NetPlayer __instance, ref string __result)
     {
-        if (__instance.steam_id == 0)
+        if (__instance.SteamId == 0)
             return true;
-        __result = "STEAM_" + __instance.steam_id;
+        __result = "STEAM_" + __instance.SteamId;
         return false;
     }
 }

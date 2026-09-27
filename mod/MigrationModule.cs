@@ -398,7 +398,7 @@ public sealed class MigrationModule : MonoBehaviour
     }
 
     // 10170(플레이어 퇴장) - 클라이언트가 해당 clientId의 NetPlayer를 파괴한다
-    // 와이어: [ushort clientId][ulong steam_id] (수신기가 steam_id를 읽지 않아 0 전송)
+    // 와이어: [ushort clientId][ulong SteamId] (수신기가 SteamId를 읽지 않아 0 전송)
     private static void SendPlayerLeft(ushort leavingClientId, List<knetid> targets)
     {
         var writer = Net.CreateWriter(10170);

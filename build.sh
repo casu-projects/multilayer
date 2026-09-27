@@ -16,7 +16,7 @@ echo "=== CasuMP 빌드 시작 ==="
 mkdir -p "$DIST"
 
 # 0) 이전 산출물 정리 — config(*.json)/데이터(saves, instances 등)는 보존 (__dist__가 정본)
-rm -f "$DIST"/casu-* "$DIST"/CasuMod.dll "$DIST"/libsteam_api.so "$DIST"/steam_appid.txt
+rm -f "$DIST"/casu-* "$DIST"/CasuMod.dll "$DIST"/libsteam_api.so "$DIST"/steam_appid.txt "$DIST"/Steamworks.NET.dll
 rm -rf "$TMP"
 mkdir -p "$TMP"
 
@@ -39,6 +39,13 @@ mv "$TMP/CasuMpGateway"       "$DIST/casu-gateway"
 # Steam 모드: libsteam_api.so는 단일파일 번들에 content로 묻히면 SteamAPI.InitEx의
 # DllImport가 앱 디렉토리에서 로드하지 못하므로 반드시 별도 파일로 배치한다 (구 시스템과 동일).
 [ -f "$ROOT/../instance/libsteam_api.so" ] && cp "$ROOT/../instance/libsteam_api.so" "$DIST/"
+
+SWNET="$ROOT/third_party/steamworks/Steamworks.NET.dll"
+if [ ! -f "$SWNET" ]; then
+  echo "오류: $SWNET 없음 — Linux Pack=4 Steamworks.NET.dll이 필요합니다." >&2
+  exit 1
+fi
+cp "$SWNET" "$DIST/"
 rm -rf "$TMP"
 
 # 2) mod — Release 빌드 → 단일 DLL (BepInEx 플러그인 — 단일파일 대상 아님)

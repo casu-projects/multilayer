@@ -22,7 +22,7 @@
       <Private>true</Private>
     </Reference>
     <Reference Include="Steamworks">
-      <HintPath>../../instance/BepInEx/plugins/Steamworks.NET.dll</HintPath>
+      <HintPath>../third_party/steamworks/Steamworks.NET.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

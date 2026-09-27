@@ -40,15 +40,16 @@ public sealed class SteamLobbyAdapter
             {
                 Logger.Info($"SteamAPI.InitEx() 실패: {initResult} — {initErrMsg} "
                     + "Steam P2P는 비활성화됩니다.");
-                return;
             }
+            else
+            {
+                _initialized = true;
+                Logger.Info("SteamAPI.InitEx() 성공.");
 
-            _initialized = true;
-            Logger.Info("SteamAPI.InitEx() 성공.");
-
-            SteamNetworkingUtils.InitRelayNetworkAccess();
-            _connectionStatusChanged = Callback<SteamNetConnectionStatusChangedCallback_t>.Create(OnConnectionStatusChanged);
-            _listenSocket = SteamNetworkingSockets.CreateListenSocketP2P(0, 0, Array.Empty<SteamNetworkingConfigValue_t>());
+                SteamNetworkingUtils.InitRelayNetworkAccess();
+                _connectionStatusChanged = Callback<SteamNetConnectionStatusChangedCallback_t>.Create(OnConnectionStatusChanged);
+                _listenSocket = SteamNetworkingSockets.CreateListenSocketP2P(0, 0, Array.Empty<SteamNetworkingConfigValue_t>());
+            }
         }
         catch (DllNotFoundException ex)
         {
@@ -254,17 +255,15 @@ public sealed class SteamLobbyAdapter
         try
         {
             SteamNetworkingMessage_t message = SteamNetworkingMessage_t.FromIntPtr(messagePtr);
-            if (message.m_cbSize <= 1)
+            if (message.m_cbSize <= 0)
             {
                 return;
             }
-
-// Steam P2P wire: [payload][1-byte send flag] (bit 0x8 = ReliableOrdered)
-            int payloadLength = message.m_cbSize - 1;
+            
+            int payloadLength = message.m_cbSize;
             var payload = new byte[payloadLength];
             Marshal.Copy(message.m_pData, payload, 0, payloadLength);
-            byte sendFlagByte = Marshal.ReadByte(message.m_pData, payloadLength);
-            DeliveryMethod method = (sendFlagByte & 0x8) != 0 ? DeliveryMethod.ReliableOrdered : DeliveryMethod.Unreliable;
+            const DeliveryMethod method = DeliveryMethod.ReliableOrdered;
 
             if (_sessionsByConnection.TryGetValue(conn, out ClientSession? session))
             {
@@ -318,20 +317,15 @@ public sealed class SteamClientSink : IClientSink
     public void SendToClient(byte[] data, byte channel, DeliveryMethod method)
     {
         int sendFlag = ConvertDeliveryMethodToSteamSendFlag(method);
-
-        var framed = new byte[data.Length + 1];
-        Array.Copy(data, framed, data.Length);
-        framed[data.Length] = (byte)sendFlag;
-
-        IntPtr ptr = Marshal.AllocHGlobal(framed.Length);
+        IntPtr ptr = Marshal.AllocHGlobal(data.Length);
         try
         {
-            Marshal.Copy(framed, 0, ptr, framed.Length);
-            EResult result = SteamNetworkingSockets.SendMessageToConnection(_connection, ptr, (uint)framed.Length, sendFlag, out long msgNumber);
+            Marshal.Copy(data, 0, ptr, data.Length);
+            EResult result = SteamNetworkingSockets.SendMessageToConnection(_connection, ptr, (uint)data.Length, sendFlag, out long msgNumber);
             if (result != EResult.k_EResultOK && result != EResult.k_EResultNoConnection)
             {
                 Logger.Info($"SendMessageToConnection 실패: {result} "
-                    + $"(conn={_connection.m_HSteamNetConnection}, {framed.Length}바이트, msgNumber={msgNumber}).");
+                    + $"(conn={_connection.m_HSteamNetConnection}, {data.Length}바이트, msgNumber={msgNumber}).");
             }
         }
         finally

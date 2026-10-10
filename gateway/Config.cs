@@ -14,10 +14,11 @@ public sealed class GatewayConfig
 
     public string SteamSessionPath { get; set; } = "steam_session.json";
 
-    public string SteamVersionTag { get; set; } = "7.0.1_MPv4.0.1";
+    public string SteamVersionTag { get; set; } = "7.0.1_MPv5.0.0";
 
-    // 서버 브라우저 Mods 버튼 툴팁으로 표시할 MOTD 라인 (EXTRADATA modlist로 전달)
-    public string[] Motd { get; set; } = Array.Empty<string>();
+    // 서버 브라우저 Description(COOP_MOD_DESCRIPTION)으로 노출할 MOTD 문자열.
+    // 구버전 EXTRADATA modlist 채널 MOTD의 후신.
+    public string Motd { get; set; } = "";
 
     public double BackendRetryIntervalSeconds { get; set; } = 0.5;
 

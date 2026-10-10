@@ -308,7 +308,7 @@ internal static class Program
                         Bypass = LockdownState.Bypass,
                     });
                     hub.SendNoAck(conn, "AUTH_INFO",
-                        new { serverName = config.ServerName + " (MAINTENANCE)", serverPassword = config.ServerPassword, bannedKeys = banList.All, maxPlayers = config.MaxPlayers });
+                        new { serverName = config.ServerName + " [MNT]", serverPassword = config.ServerPassword, bannedKeys = banList.All, maxPlayers = config.MaxPlayers });
                 }
                 return;
 
@@ -372,7 +372,7 @@ internal static class Program
                 DispatchAgent(instances, sessions, conn, msg);
                 break;
             case ClientKind.Mod:
-                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, votes, discordBot, config.DiscordUrl, conn, msg);
+                DispatchMod(hub, sessions, instances, migrations, dataStore, runRules, votes, discordBot, conn, msg);
                 break;
         }
     }
@@ -413,6 +413,7 @@ internal static class Program
                             name = joinName,
                             fromDepth = 0,
                             toDepth = 0,
+                            originInstance = sessions.Get(connected)?.InstanceId ?? "",
                         });
                     }
 
@@ -453,6 +454,7 @@ internal static class Program
                             name = discName,
                             fromDepth = 0,
                             toDepth = 0,
+                            originInstance = discState?.InstanceId ?? "",
                         });
                     }
 
@@ -470,18 +472,6 @@ internal static class Program
             case "SWAP_FAILED":
                 if (TryPlayerKey(msg, out var sf) && msg.PayloadAs<SwapFailedPayload>() is { } sfPayload)
                     migrations.OnSwapFailed(sf, sfPayload.Reason ?? "unknown");
-                break;
-            case "LOBBY_STATUS_RESPONSE":
-                // lobby status 명령 응답 - 게이트웨이 스팀 로비 상태 표시 (자가 치유 진단용)
-                if (msg.PayloadAs<LobbyStatusResponsePayload>() is { } lobbyStatus)
-                {
-                    Console.WriteLine($"Steam 로비:   {(lobbyStatus.SteamEnabled ? "활성" : "비활성")}");
-                    Console.WriteLine($"상태:         {lobbyStatus.State}");
-                    Console.WriteLine($"로비 SteamID: {(lobbyStatus.LobbyId ?? "(없음)")}");
-                    Console.WriteLine($"로그온:       {(lobbyStatus.LoggedOn ? "성공" : "실패")}");
-                    Console.WriteLine($"AUTH_INFO:    {(lobbyStatus.AuthInfoReceived ? "수신" : "미수신")}");
-                    Console.WriteLine($"SteamAPI(P2P):{(lobbyStatus.SteamApiInitialized ? "초기화 성공" : "초기화 실패")}");
-                }
                 break;
             default:
                 break;
@@ -508,7 +498,7 @@ internal static class Program
 
     private static void DispatchMod(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, PlayerDataStore dataStore, RunRuleStore runRules, VoteCoordinator votes,
-        DiscordBot discordBot, string discordUrl, ControlHub.ClientConnection conn, ControlMessage msg)
+        DiscordBot discordBot, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -643,13 +633,6 @@ internal static class Program
                     hub.SendNoAck(conn, "LIST_RESULT", new { playerKey = listReq.PlayerKey, lines });
                 }
                 break;
-            case "DISCORD_REQUEST":
-                // !discord - 설정된 디스코드 서버 초대 URL 회신 (모드가 개인 채팅 2줄로 표시)
-                if (msg.PayloadAs<DiscordRequestPayload>() is { } discReq)
-                {
-                    hub.SendNoAck(conn, "DISCORD_RESULT", new { playerKey = discReq.PlayerKey, url = discordUrl });
-                }
-                break;
             case "CALLADMIN":
                 if (msg.PayloadAs<CallAdminPayload>() is { } callAdmin)
                 {
@@ -672,6 +655,8 @@ internal static class Program
                             name = announce.Name,
                             fromDepth = announce.FromDepth,
                             toDepth = announce.ToDepth,
+                            originInstance = announce.OriginInstance,
+                            text = announce.Text,
                         });
                     }
                 }
@@ -718,7 +703,7 @@ internal static class Program
             if (!TryResolveOnlinePlayer(sessions, targetQuery, out string resolvedKey, out string resolvedName))
             {
                 RejectVote(hub, conn, marker, callerClientId,
-                    $"플레이어를 찾을 수 없습니다: {targetQuery}");
+                    $"Player not found: {targetQuery}");
                 return;
             }
             marker.Payload["targetName"] = resolvedName;
@@ -734,7 +719,7 @@ internal static class Program
         if (!votes.TryStart(marker, expected))
         {
             RejectVote(hub, conn, marker, callerClientId,
-                "이미 진행 중인 투표가 있습니다. 잠시 후 다시 시도해주세요.");
+                "A vote is already in progress. Please try again later.");
             return;
         }
 
@@ -859,21 +844,21 @@ internal static class Program
             .GroupBy(s => s.Depth)
             .OrderBy(g => g.Key)
             .ToList();
-        if (byDepth.Count == 0) return new[] { "접속 중인 플레이어가 없습니다." };
+        if (byDepth.Count == 0) return new[] { "No players online." };
 
         return byDepth.Select(g =>
             $"[L{g.Key}] {string.Join(", ", g.Select(s => s.Username ?? s.Key.Value))}").ToArray();
     }
 
-    // Discord 채널 주제용 접속 인원 문자열 - "현재 n명 접속중 / [L1] 2명 / [L3] 1명"
+    // Discord 채널 주제용 접속 인원 문자열 - "n online / [L1] 2 / [L3] 1"
     // 온라인 정의(MaxPlayers 검사와 동일): Session != Offline. 플레이어가 없는 레이어는 생략
     private static string BuildPlayerCountText(PlayerSessionStore sessions)
     {
         var online = sessions.All.Where(s => s.Session != PlayerSessionState.Offline).ToList();
-        var parts = new List<string> { $"현재 {online.Count}명 접속중" };
+        var parts = new List<string> { $"{online.Count} online" };
         foreach (var g in online.GroupBy(s => s.Depth).OrderBy(g => g.Key))
         {
-            parts.Add($"[L{g.Key}] {g.Count()}명");
+            parts.Add($"[L{g.Key}] {g.Count()}");
         }
         return string.Join(" / ", parts);
     }
@@ -902,17 +887,6 @@ internal static class Program
     private sealed class InstancePayload { public string InstanceId { get; set; } = ""; }
     private sealed class SwapFailedPayload { public string? Reason { get; set; } }
 
-    // LOBBY_STATUS_RESPONSE (게이트웨이 -> 오케스트레이터 - lobby status 명령 응답)
-    private sealed class LobbyStatusResponsePayload
-    {
-        public string State { get; set; } = "";
-        public string? LobbyId { get; set; }
-        public bool LoggedOn { get; set; }
-        public bool AuthInfoReceived { get; set; }
-        public bool SteamEnabled { get; set; }
-        public bool SteamApiInitialized { get; set; }
-    }
-
     // 크로스 인스턴스 채팅 payload (mod -> orchestrator -> mod)
     private sealed class ChatPayload
     {
@@ -923,12 +897,6 @@ internal static class Program
 
     // !list 요청 (mod -> orchestrator)
     private sealed class ListRequestPayload
-    {
-        public string PlayerKey { get; set; } = "";
-    }
-
-    // !discord 요청 (mod -> orchestrator)
-    private sealed class DiscordRequestPayload
     {
         public string PlayerKey { get; set; } = "";
     }
@@ -956,6 +924,8 @@ internal static class Program
         public string Name { get; set; } = "";
         public int FromDepth { get; set; }
         public int ToDepth { get; set; }
+        public string OriginInstance { get; set; } = "";
+        public string Text { get; set; } = "";
     }
 
     // PlayerKey에서 SteamID64 추출 - STEAM_ 접두사가 아니면 0 (직접연결/steam 비활성)

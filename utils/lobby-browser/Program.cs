@@ -5,10 +5,11 @@ class Program
     static async Task<int> Main(string[] args)
     {
         string sessionPath = FindSessionFile(args);
+        string? versionFilter = FindOption(args, "--filter");
         if (!File.Exists(sessionPath))
         {
             Console.WriteLine($"[ERROR] Session file not found: {sessionPath}");
-            Console.WriteLine("Usage: dotnet run -- [path/to/steam_session.json]");
+            Console.WriteLine("Usage: casu-lobby-browser [path/to/steam_session.json] [--filter <version>]");
             return 1;
         }
 
@@ -23,7 +24,7 @@ class Program
 
         try
         {
-            await browser.RunAsync(sessionPath, cts.Token);
+            await browser.RunAsync(sessionPath, versionFilter, cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -44,6 +45,11 @@ class Program
         {
             if (args[i] == "--session" && i + 1 < args.Length)
                 return args[++i];
+            if (args[i] == "--filter")
+            {
+                i++; // skip its value
+                continue;
+            }
             if (!args[i].StartsWith('-'))
                 return args[i];
         }
@@ -58,5 +64,15 @@ class Program
             return distPath;
 
         return localPath;
+    }
+
+    private static string? FindOption(string[] args, string name)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == name && i + 1 < args.Length)
+                return args[i + 1];
+        }
+        return null;
     }
 }

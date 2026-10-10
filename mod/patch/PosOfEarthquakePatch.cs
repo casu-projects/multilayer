@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection.Emit;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using UnityEngine;
 
 namespace CasuMod.Patch;
@@ -16,7 +16,7 @@ internal static class PosOfEarthquakePatch
     {
         if (__instance == null || __instance.earthquakeIntensity <= 0f) return;
 
-        foreach (NetPlayer player in NetPlayer.AllLivingPlayers)
+        foreach (ScavPlayer player in ScavPlayer.AllLivingPlayers)
         {
             if (player == null || player.body == null) continue;
             if (UnityEngine.Random.value / Time.deltaTime < QuakeDestructionRate * __instance.earthquakeIntensity)

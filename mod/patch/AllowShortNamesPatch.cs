@@ -1,9 +1,9 @@
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod.Patch;
 
-[HarmonyPatch(typeof(KrokoshaScavMultiplayer), nameof(KrokoshaScavMultiplayer.ValidateClientConnectIntroductionPacket))]
+[HarmonyPatch(typeof(Multiplayer), nameof(Multiplayer.ValidateClientConnectIntroductionPacket))]
 internal static class AllowShortNamesPatch
 {
     private static void Postfix(ref bool __result, ref string deny_reason)

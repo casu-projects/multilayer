@@ -1,5 +1,5 @@
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using UnityEngine;
 
 namespace CasuMod.Patch;
@@ -23,7 +23,7 @@ internal static class LateJoinSpawnPatch
             return true;
         }
 
-        Vector2 anchor = Body_PlaceBody_MultiplayerPatch.spawnlocation;
+        Vector2 anchor = Body_PlaceBody_MultiplayerPatch.SpawnLocation;
         Vector2 colSize = Body_Awake_MultiplayerPatch.origColSize;
 
         Vector2? safe = FindSafePosition(anchor, colSize);

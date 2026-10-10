@@ -1,6 +1,6 @@
 using System.Reflection;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using UnityEngine;
 
 namespace CasuMod.Patch;
@@ -23,7 +23,7 @@ internal static class PosOfGeyserActivatePatch
 
     private static bool IsPlayerNearby(Vector2 pos)
     {
-        foreach (NetPlayer p in NetPlayer.AllLivingPlayers)
+        foreach (ScavPlayer p in ScavPlayer.AllLivingPlayers)
         {
             if (p != null && p.body != null
                 && Vector2.Distance(pos, p.body.transform.position) < 64f)

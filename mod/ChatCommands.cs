@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
-using KrokoshaCasualtiesUtils;
+using Together;
+using CasualtiesTogetherUtils;
 using LiteNetLib;
 using LiteNetLib.Utils;
 using UnityEngine;
@@ -27,14 +27,13 @@ public static class ChatCommands
     // 내장 명령 등록 - !help는 레지스트리에서 자동 생성된다
     private static void RegisterCommands()
     {
-        _registry.Register("help", "도움말 표시", HelpCommand.Cmd);
-        _registry.Register("chatmode", "채팅 공유 범위 전환", ChatModeCommand.Cmd);
-        _registry.Register("list", "접속 중인 플레이어 목록", PlayerListCommand.Cmd);
-        _registry.Register("calladmin", "관리자 호출", CallAdminCommand.Cmd);
-        _registry.Register("discord", "디스코드 서버 초대 링크", DiscordCommand.Cmd);
-        _registry.Register("respawn", "사망 시 레이어 1에서 새 캐릭터로 리스폰", RespawnCommand.Cmd);
-        _registry.Register("pos", "현재 좌표 표시", PosCommand.Cmd);
-        _registry.Register("banvote", "플레이어 영구 차단 투표", "<이름>", VoteCommands.CmdBanVote);
+        _registry.Register("help", "Show help", HelpCommand.Cmd);
+        _registry.Register("chatmode", "Toggle chat share scope", ChatModeCommand.Cmd);
+        _registry.Register("list", "List online players", PlayerListCommand.Cmd);
+        _registry.Register("calladmin", "Call an admin", CallAdminCommand.Cmd);
+        _registry.Register("respawn", "Respawn on layer 1 as a new character (when dead)", RespawnCommand.Cmd);
+        _registry.Register("pos", "Show current coordinates", PosCommand.Cmd);
+        _registry.Register("banvote", "Vote to permanently ban a player", "<name>", VoteCommands.CmdBanVote);
     }
 
     [HarmonyPatch(typeof(Chat), "Server_PlayerChatMessageSend")]
@@ -44,7 +43,10 @@ public static class ChatCommands
         {
 
             int startPosition = reader.Position;
-            reader.Get(out bool _unusedFlag);
+            // 신버전 와이어: [bool team][bool whisper][knetid whisperTarget][string message]
+            reader.Get(out bool _team);
+            reader.Get(out bool _whisper);
+            reader.Get(out knetid _whisperTarget);
             reader.Get(out string message);
 
             if (string.IsNullOrEmpty(message) || !message.StartsWith(CommandPrefix))
@@ -53,7 +55,7 @@ public static class ChatCommands
                 return true;
             }
 
-            if (!NetPlayer.TryGetPlayerFromClientId(clientId, out NetPlayer plr))
+            if (!ScavPlayer.TryGetPlayerFromClientId(clientId, out ScavPlayer plr))
             {
                 return false;
             }
@@ -77,18 +79,9 @@ public static class ChatCommands
                     return false;
                 }
 
-                // 게임 어드민 명령 dict 폴백 (대소문자 구분 - 바닐라 dict 동작 유지)
-                var cmdDict = AccessTools.Field(typeof(ServerMain), "ServerClientCustomCommandsDict")
-                    ?.GetValue(null) as Dictionary<string, Action<NetPlayer, string, string[]>>;
-                if (cmdDict != null && cmdDict.ContainsKey(argv[0]))
-                {
-                    AccessTools.Method(typeof(ServerMain), "RunClientCustomCommand")
-                        ?.Invoke(null, new object[] { command, plr });
-                }
-                else
-                {
-                    ChatPrivateReply.SendToPlayer(plr, $"알 수 없는 명령어: {argv[0]}");
-                }
+                // 게임 내장 커스텀 명령 dict 는 신버전 기반 모드에서 제거됨
+                // (Multiplayer.RegisterCustomServerReceiver 기반). 미등록 명령은 개인 회신만 한다.
+                ChatPrivateReply.SendToPlayer(plr, $"Unknown command: {argv[0]}");
             }
             return false; // 명령은 브로드캐스트/릴레이에서 제외
         }
@@ -99,10 +92,10 @@ public static class ChatCommands
     // AnnounceRelay.SendChatAnnouncementTo와 동일 포맷 - 위임 ( 통일)
     internal static class ChatPrivateReply
     {
-        internal static void SendToPlayer(NetPlayer plr, string message)
+        internal static void SendToPlayer(ScavPlayer plr, string message)
         {
             if (plr == null) return;
-            AnnounceRelay.SendChatAnnouncementTo(message, plr.clientId);
+            AnnounceRelay.SendChatAnnouncementTo(message, plr.playerId);
         }
     }
 
@@ -121,25 +114,25 @@ public static class ChatCommands
         internal static ChatMode GetMode(knetid clientId) =>
             ModeByClientId.TryGetValue(clientId, out ChatMode mode) ? mode : ChatMode.Global;
 
-        internal static void Cmd(NetPlayer caller, string[] argv)
+        internal static void Cmd(ScavPlayer caller, string[] argv)
         {
-            ChatMode current = GetMode(caller.clientId);
+            ChatMode current = GetMode(caller.playerId);
             ChatMode next = current == ChatMode.Global ? ChatMode.Local : ChatMode.Global;
-            ModeByClientId[caller.clientId] = next;
+            ModeByClientId[caller.playerId] = next;
 
             string label = next == ChatMode.Global
-                ? "<color=#87CEEB>모든 레이어</color>"
-                : "<color=#FFFF00>이 레이어</color>";
-            ChatPrivateReply.SendToPlayer(caller, $"채팅 모드 토글 : {label}");
+                ? "<color=#87CEEB>all layers</color>"
+                : "<color=#FFFF00>this layer</color>";
+            ChatPrivateReply.SendToPlayer(caller, $"Chat mode toggled: {label}");
         }
     }
 
     // !help - 레지스트리 기반 자동 생성 (이름순)
     internal static class HelpCommand
     {
-        internal static void Cmd(NetPlayer caller, string[] argv)
+        internal static void Cmd(ScavPlayer caller, string[] argv)
         {
-            ChatPrivateReply.SendToPlayer(caller, "사용 가능한 명령어:");
+            ChatPrivateReply.SendToPlayer(caller, "Available commands:");
             foreach (ChatCommand cmd in _registry.All.OrderBy(c => c.Name, StringComparer.Ordinal))
             {
                 string usage = cmd.Usage.Length > 0 ? " " + cmd.Usage : "";
@@ -151,7 +144,7 @@ public static class ChatCommands
     // !list - 접속 중인 플레이어 목록 (오케스트레이터가 전 레이어 기준으로 회신)
     internal static class PlayerListCommand
     {
-        internal static void Cmd(NetPlayer caller, string[] argv)
+        internal static void Cmd(ScavPlayer caller, string[] argv)
         {
             OrchestratorClient.Instance?.SendEvent("LIST_REQUEST",
                 new { playerKey = caller.GetPersistentId() });
@@ -161,22 +154,11 @@ public static class ChatCommands
     // !calladmin - 관리자 호출 (오케스트레이터가 Discord로 전파)
     internal static class CallAdminCommand
     {
-        internal static void Cmd(NetPlayer caller, string[] argv)
+        internal static void Cmd(ScavPlayer caller, string[] argv)
         {
             OrchestratorClient.Instance?.SendEvent("CALLADMIN",
-                new { playerKey = caller.GetPersistentId(), username = caller.playername });
-            ChatPrivateReply.SendToPlayer(caller, "관리자에게 호출이 전송되었습니다.");
-        }
-    }
-
-    // !discord - 디스코드 서버 초대 URL 표시. URL은 오케스트레이터가 단일 소유자
-    // (orchestrator.json DiscordUrl) - 요청 시점에 회신받아 개인 채팅 2줄로 표시한다
-    internal static class DiscordCommand
-    {
-        internal static void Cmd(NetPlayer caller, string[] argv)
-        {
-            OrchestratorClient.Instance?.SendEvent("DISCORD_REQUEST",
-                new { playerKey = caller.GetPersistentId() });
+                new { playerKey = caller.GetPersistentId(), username = caller.playerName });
+            ChatPrivateReply.SendToPlayer(caller, "Your admin call has been sent.");
         }
     }
 
@@ -185,24 +167,24 @@ public static class ChatCommands
     // 세이브 폐기/세션 프레시화는 오케스트레이터가 담당
     internal static class RespawnCommand
     {
-        internal static void Cmd(NetPlayer caller, string[] argv)
+        internal static void Cmd(ScavPlayer caller, string[] argv)
         {
             if (!caller.IsDead())
             {
-                ChatPrivateReply.SendToPlayer(caller, "사망한 상태에서만 사용할 수 있는 명령어입니다.");
+                ChatPrivateReply.SendToPlayer(caller, "You can only use this while dead.");
                 return;
             }
 
             string pid = caller.GetPersistentId();
             if (MigrationModule.IsFrozen(pid))
             {
-                ChatPrivateReply.SendToPlayer(caller, "마이그레이션 중에는 리스폰할 수 없습니다.");
+                ChatPrivateReply.SendToPlayer(caller, "You cannot respawn during migration.");
                 return;
             }
 
             if (OrchestratorClient.Instance == null)
             {
-                ChatPrivateReply.SendToPlayer(caller, "오케스트레이터 연결이 없어 리스폰할 수 없습니다.");
+                ChatPrivateReply.SendToPlayer(caller, "Cannot respawn: no orchestrator connection.");
                 return;
             }
 
@@ -214,13 +196,13 @@ public static class ChatCommands
             {
                 OrchestratorClient.Instance.SendEvent("RESPAWN",
                     new { playerKey = pid, fromDepth = OrchestratorClient.Instance.InstanceDepth });
-                ChatPrivateReply.SendToPlayer(caller, "리스폰 — 레이어 1로 이동합니다.");
+                ChatPrivateReply.SendToPlayer(caller, "Respawning — moving to layer 1.");
             }
         }
 
         // Case B - 무로딩 인플레이스 리스폰. 세이브 폐기/세션 프레시화는 RESPAWN
         // 이벤트로 오케스트레이터에 비동기 전달 (로컬 리셋과 독립 - 순서 무관)
-        private static void RespawnLocally(NetPlayer caller)
+        private static void RespawnLocally(ScavPlayer caller)
         {
             string pid = caller.GetPersistentId();
             OrchestratorClient.Instance.SendEvent("RESPAWN", new { playerKey = pid, fromDepth = 1 });
@@ -256,7 +238,7 @@ public static class ChatCommands
             }
             catch (System.Exception ex)
             {
-                Plugin.Log.LogWarning($"[Respawn] {caller.playername} 인벤토리 파괴 실패: {ex.Message}");
+                Plugin.Log.LogWarning($"[Respawn] {caller.playerName} 인벤토리 파괴 실패: {ex.Message}");
             }
 
             try
@@ -266,12 +248,12 @@ public static class ChatCommands
                 // > StopPiggyback -> ForceStand -> Server_TeleportCharacter(spawnlocation)
                 // level_transition:false - 드랍 경로 없음 (위에서 이미 파괴 - 중첩 안전)
                 caller.body.ResetMind(); // RespawnKeepSkills 규칙 무관 - 무조건 초기화
-                caller.Server_RespawnCharacter(Body_PlaceBody_MultiplayerPatch.spawnlocation, level_transition: false);
-                ChatPrivateReply.SendToPlayer(caller, "리스폰했습니다.");
+                caller.Server_RespawnCharacter(Body_PlaceBody_MultiplayerPatch.SpawnLocation, level_transition: false);
+                ChatPrivateReply.SendToPlayer(caller, "You have respawned.");
 
                 // Object.Destroy는 프레임 말에 실제 반영 - 파괴가 끝나 슬롯이 비워진 뒤에
                 // 보급품을 지급한다 (같은 프레임 지급 시 옛 아이템 때문에 바닥에 드랍됨)
-                KrokoshaCasualtiesUtils.Util.DelayCallLambda(0.6f, (Action)(() =>
+                CasualtiesTogetherUtils.Util.DelayCallLambda(0.6f, (Action)(() =>
                 {
                     if (caller == null || caller.body == null) return;
                     try
@@ -280,14 +262,14 @@ public static class ChatCommands
                     }
                     catch (System.Exception ex2)
                     {
-                        Plugin.Log.LogWarning($"[Respawn] {caller.playername} 보급품 지급 실패: {ex2.Message}");
+                        Plugin.Log.LogWarning($"[Respawn] {caller.playerName} 보급품 지급 실패: {ex2.Message}");
                     }
                 }));
             }
             catch (System.Exception ex)
             {
-                Plugin.Log.LogWarning($"[Respawn] {caller.playername} 리스폰 실패: {ex.Message}");
-                ChatPrivateReply.SendToPlayer(caller, "리스폰 처리에 실패했습니다. 관리자에게 문의하세요.");
+                Plugin.Log.LogWarning($"[Respawn] {caller.playerName} 리스폰 실패: {ex.Message}");
+                ChatPrivateReply.SendToPlayer(caller, "Respawn failed. Please contact an admin.");
             }
         }
     }
@@ -295,7 +277,7 @@ public static class ChatCommands
     // !pos - 실행한 유저의 현재 블록 좌표 (본인에게만 개인 회신)
     internal static class PosCommand
     {
-        internal static void Cmd(NetPlayer caller, string[] argv)
+        internal static void Cmd(ScavPlayer caller, string[] argv)
         {
             if (caller?.body == null) return;
             Vector2Int pos = WorldGeneration.world.WorldToBlockPos(caller.body.transform.position);
@@ -309,7 +291,7 @@ public static class ChatCommands
     {
         var payload = msg.PayloadAs<ListResultPayload>();
         if (payload == null || payload.Lines == null) return;
-        NetPlayer plr = FindByPersistentId(payload.PlayerKey);
+        ScavPlayer plr = FindByPersistentId(payload.PlayerKey);
         if (plr == null) return;
         // 레이어당 한 줄씩 별도의 개인 채팅으로 표시 ("[*] [L1]: player1111" 형태)
         foreach (string line in payload.Lines)
@@ -318,21 +300,6 @@ public static class ChatCommands
         }
     }
 
-    internal static void HandleDiscordResult(ControlMessage msg)
-    {
-        var payload = msg.PayloadAs<DiscordResultPayload>();
-        if (payload == null) return;
-        NetPlayer plr = FindByPersistentId(payload.PlayerKey);
-        if (plr == null) return;
-        if (string.IsNullOrEmpty(payload.Url))
-        {
-            ChatPrivateReply.SendToPlayer(plr, "디스코드 서버 URL이 설정되어 있지 않습니다.");
-            return;
-        }
-        ChatPrivateReply.SendToPlayer(plr, "디스코드 서버 URL:");
-        ChatPrivateReply.SendToPlayer(plr, payload.Url);
-    }
-
-    internal static NetPlayer FindByPersistentId(string persistentId) =>
-        NetPlayer.ClientIdToPlayerDict.Values.FirstOrDefault(p => p.GetPersistentId() == persistentId);
+    internal static ScavPlayer FindByPersistentId(string persistentId) =>
+        ScavPlayer.ClientIdToPlayerDict.Values.FirstOrDefault(p => p.GetPersistentId() == persistentId);
 }

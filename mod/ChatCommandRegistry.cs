@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod;
 
@@ -8,7 +8,7 @@ namespace CasuMod;
 // 레지스트리에서 찾아 Handler로 디스패치한다. Usage는 !help 자동 생성에 쓰인다
 public sealed class ChatCommand
 {
-    public ChatCommand(string name, string description, string usage, Action<NetPlayer, string[]> handler)
+    public ChatCommand(string name, string description, string usage, Action<ScavPlayer, string[]> handler)
     {
         Name = name;
         Description = description;
@@ -19,7 +19,7 @@ public sealed class ChatCommand
     public string Name { get; }
     public string Description { get; }
     public string Usage { get; }
-    public Action<NetPlayer, string[]> Handler { get; }
+    public Action<ScavPlayer, string[]> Handler { get; }
 }
 
 // 채팅 명령 레지스트리 - 이름 대소문자 무시, !help 자동 생성(All) 지원
@@ -28,12 +28,12 @@ public sealed class ChatCommandRegistry
 {
     private readonly Dictionary<string, ChatCommand> _commands = new(StringComparer.OrdinalIgnoreCase);
 
-    public void Register(string name, string description, string usage, Action<NetPlayer, string[]> handler)
+    public void Register(string name, string description, string usage, Action<ScavPlayer, string[]> handler)
     {
         _commands[name] = new ChatCommand(name, description, usage, handler);
     }
 
-    public void Register(string name, string description, Action<NetPlayer, string[]> handler)
+    public void Register(string name, string description, Action<ScavPlayer, string[]> handler)
     {
         Register(name, description, "", handler);
     }

@@ -1,6 +1,6 @@
 using System;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod.Patch;
 

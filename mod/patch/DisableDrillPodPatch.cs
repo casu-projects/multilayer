@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod.Patch;
 
@@ -12,7 +12,7 @@ internal static class DisableDrillPodPatch
     private static IEnumerable<MethodBase> TargetMethods()
     {
         yield return AccessTools.Method(typeof(DrillPod), "OnUse");
-        yield return AccessTools.Method(typeof(DrillPod_Update_MultiplayerPatch.Krokosha_DrillPod_OverrideComponent), "Update");
+        yield return AccessTools.Method(typeof(DrillPod_Update_MultiplayerPatch.DrillPodMultiplayerRewrite), "Update");
     }
 
     private static bool Prefix() => false;

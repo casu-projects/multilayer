@@ -1,6 +1,6 @@
 using CasuMod;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod.Patch;
 
@@ -15,13 +15,13 @@ public static class DiscordEventReporter
         return (WorldGeneration.world.biomeDepth + 1).ToString();
     }
 
-    internal static void Send(string type, NetPlayer plr)
+    internal static void Send(string type, ScavPlayer plr)
     {
-        if (plr == null || plr.is_local) return;
+        if (plr == null || plr.IsLocal) return;
         OrchestratorClient.Instance?.SendEvent(type, new
         {
             playerKey = plr.GetPersistentId(),
-            username = plr.playername,
+            username = plr.playerName,
             layer = CurrentLayer(),
         });
     }
@@ -31,7 +31,7 @@ public static class DiscordEventReporter
 [HarmonyPatch(typeof(ServerMain), nameof(ServerMain.OnPlayerDeath))]
 internal static class ServerMain_OnPlayerDeath_DiscordReportPatch
 {
-    private static void Postfix(NetPlayer plr)
+    private static void Postfix(ScavPlayer plr)
     {
         DiscordEventReporter.Send("DIED", plr);
     }
@@ -39,10 +39,10 @@ internal static class ServerMain_OnPlayerDeath_DiscordReportPatch
 
 // 리스폰 - Server_RespawnCharacter (리스폰/마이그레이션 목적지 신규 생성 포함)
 // 오케스트레이터가 마이그레이션 중 이벤트를 필터링한다
-[HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.Server_RespawnCharacter))]
+[HarmonyPatch(typeof(ScavPlayer), nameof(ScavPlayer.Server_RespawnCharacter))]
 internal static class NetPlayer_Server_RespawnCharacter_DiscordReportPatch
 {
-    private static void Postfix(NetPlayer __instance)
+    private static void Postfix(ScavPlayer __instance)
     {
         DiscordEventReporter.Send("RESPAWNED", __instance);
     }

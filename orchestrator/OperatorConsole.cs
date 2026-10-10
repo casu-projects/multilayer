@@ -80,22 +80,20 @@ public sealed class OperatorConsole
     // 내장 명령 등록 - help/usage는 레지스트리에서 자동 생성된다
     private void RegisterCommands()
     {
-        _registry.Register("help", "명령어 목록을 표시합니다", CmdHelp);
-        _registry.Register("list", "유저 목록을 표시합니다", CmdList);
-        _registry.Register("kick", "특정 유저를 추방합니다", "<player>", CmdKick);
-        _registry.Register("ban", "특정 유저를 차단합니다", "<player>", CmdBan);
-        _registry.Register("unban", "특정 유저의 차단을 해제합니다", "<player>", CmdUnban);
-        _registry.Register("lockdown", "점검 모드 토글 (전원 추방 + LockdownBypass만 접속 허용 + 타이틀 접미)", CmdLockdown);
-        _registry.Register("verbose", "디버그 로그 표시 토글 (orchestrator.json 영속 반영)", CmdVerbose);
-        _registry.Register("instance", "인스턴스 상태/조작", "[reset|stop <key|depth> | spawn <depth>]", CmdInstance);
-        _registry.Register("connections", "연결된 게이트웨이/에이전트/인스턴스(모드) 목록", CmdConnections);
-        _registry.Register("prewarm", "Prewarm 선호 에이전트 지정/해제", "[set <agent>|reset]", CmdPrewarm);
-        _registry.Register("clear", "터미널 화면을 지웁니다", CmdClear);
-        _registry.Register("migrate", "특정 유저를 수동 마이그레이션합니다 (기본: 다음 레이어)", "<player> [targetLayer]", CmdMigrate);
-        _registry.Register("exec", "모든 인스턴스에 게임 콘솔 명령을 실행합니다", "<command...>", CmdExec);
-        _registry.Register("rule", "rule.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)", "<이름> <값>", CmdRule);
-        _registry.Register("run", "run.json 수정 + 전 인스턴스 즉시 반영 (1/0 → True/False)", "<설정> <값>", CmdRun);
-        _registry.Register("lobby", "게이트웨이 스팀 로비 상태 조회 (자가 치유 진단용)", "status", CmdLobby);
+        _registry.Register("help", "명령어 목록", CmdHelp);
+        _registry.Register("list", "유저 목록", CmdList);
+        _registry.Register("kick", "유저 추방", "<player>", CmdKick);
+        _registry.Register("ban", "유저 차단", "<player>", CmdBan);
+        _registry.Register("unban", "차단 해제", "<player>", CmdUnban);
+        _registry.Register("lockdown", "점검 모드 토글", CmdLockdown);
+        _registry.Register("verbose", "디버그 로그 토글", CmdVerbose);
+        _registry.Register("prewarm", "레이어1 무접속 자동 종료 토글", CmdPrewarm);
+        _registry.Register("connections", "연결 목록", CmdConnections);
+        _registry.Register("clear", "화면 지우기", CmdClear);
+        _registry.Register("migrate", "수동 마이그레이션", "<player> [targetLayer]", CmdMigrate);
+        _registry.Register("exec", "전 인스턴스 콘솔 명령 실행", "<command...>", CmdExec);
+        _registry.Register("rule", "rule 업데이트", "<이름> <값>", CmdRule);
+        _registry.Register("run", "run 업데이트", "<설정> <값>", CmdRun);
     }
 
     public void Start()
@@ -266,74 +264,6 @@ public sealed class OperatorConsole
         if (TryResolvePlayer(string.Join(" ", args), out PlayerKey unban)) _banAction(unban.Value, "unban");
     }
 
-    // instance - 인자 없이 인스턴스 목록, reset|stop <key|depth>, spawn <depth>
-    private void CmdInstance(string[] args)
-    {
-        string subCmd = args.Length > 0 ? args[0].ToLowerInvariant() : "";
-        if (subCmd.Length == 0)
-        {
-            // 실행 중(Ready/Idle) 인스턴스만 표시 - 정지/크래시 기록은 제외. depth 순 정렬
-            var running = _instances.All
-                .Where(s => s.Status is InstanceStatus.Ready or InstanceStatus.Idle)
-                .OrderBy(s => s.Depth)
-                .ToList();
-            Console.WriteLine($"총 인스턴스 {running.Count}개 :");
-            foreach (InstanceInfo i in running)
-            {
-                string addr = _instances.BackendAddrFor(i) ?? "-";
-                Console.WriteLine($"{i.Key} — depth {i.Depth}, 포트 {i.Port}, 머신 {i.MachineId ?? "-"}, {i.Status}, 주소 {addr}");
-            }
-            return;
-        }
-        string subArg = args.Length > 1 ? string.Join(" ", args.Skip(1)) : "";
-        switch (subCmd)
-        {
-            case "reset":
-            case "stop":
-                string? key = ResolveInstanceKey(subArg);
-                if (key == null || _instances.Find(key) == null)
-                {
-                    Console.WriteLine($"인스턴스를 찾을 수 없습니다: {subArg}");
-                    break;
-                }
-                if (subCmd == "reset")
-                {
-                    _instances.ResetInstance(key);
-                }
-                else
-                {
-                    InstanceInfo? stopInfo = _instances.Find(key);
-                    _instances.StopInstance(key);
-                    if (stopInfo != null && _instances.IsPrewarmDepth(stopInfo.Depth))
-                    {
-                        // Prewarm 인스턴스 - 종료 후 자동 재시작 (유지 보수 용도)
-                        _instances.SchedulePrewarmRestart(key, TimeSpan.FromSeconds(5));
-                        Console.WriteLine($"{key}은(는) Prewarm 인스턴스 — 종료 후 5초 뒤 자동 재시작 예약.");
-                    }
-                }
-                break;
-            case "spawn":
-                if (!int.TryParse(subArg, out int spawnDepth) || spawnDepth < 1)
-                {
-                    Console.WriteLine("사용법: instance spawn <depth>  (예: instance spawn 4)");
-                    break;
-                }
-                if (_instances.IsPrewarmDepth(spawnDepth))
-                {
-                    Console.WriteLine($"depth-{spawnDepth}은(는) Prewarm 레이어 — instance spawn으로 생성할 수 없습니다 (자동 프리웜/재시작이 관리).");
-                    break;
-                }
-                string? spawnedAddr = _instances.EnsureInstance(spawnDepth);
-                Console.WriteLine(spawnedAddr != null
-                    ? $"depth-{spawnDepth} 준비 (주소 {spawnedAddr})."
-                    : $"depth-{spawnDepth} 스폰 실패 (에이전트 없음/수용량 초과).");
-                break;
-            default:
-                Console.WriteLine($"알 수 없는 instance 액션: {subCmd} — reset|stop <key|depth>, spawn <depth>");
-                break;
-        }
-    }
-
     private void CmdConnections(string[] args)
     {
         var conns = _hub.Connections.Where(c => !c.Closed).ToList();
@@ -354,33 +284,6 @@ public sealed class OperatorConsole
                 _ => $"Unknown  conn #{c.Id}",
             };
             Console.WriteLine($"  [{label}] {remote}");
-        }
-    }
-
-    private void CmdPrewarm(string[] args)
-    {
-        string psub = args.Length > 0 ? args[0].ToLowerInvariant() : "";
-        switch (psub)
-        {
-            case "set":
-                if (args.Length < 2)
-                {
-                    Console.WriteLine("사용법: prewarm set <agent>  (예: prewarm set m1)");
-                    break;
-                }
-                _instances.SetPreferredPrewarmAgent(args[1]);
-                Console.WriteLine($"Prewarm 선호 에이전트: {args[1]} (미연결/포화 시 알고리즘 폴백).");
-                break;
-            case "reset":
-                _instances.SetPreferredPrewarmAgent(null);
-                Console.WriteLine("Prewarm 선호 에이전트 해제 — 알고리즘 배치 사용.");
-                break;
-            default:
-                string? pref = _instances.PreferredPrewarmAgent;
-                Console.WriteLine(pref != null
-                    ? $"Prewarm 선호 에이전트: {pref}"
-                    : "Prewarm 선호 에이전트: 없음 (알고리즘 배치).");
-                break;
         }
     }
 
@@ -426,22 +329,6 @@ public sealed class OperatorConsole
     }
 
     private void CmdClear(string[] args) => ConsoleIO.ClearScreen();
-
-    // lobby status - 게이트웨이에 LOBBY_STATUS 요청 발신. 응답(LOBBY_STATUS_RESPONSE)은
-    // Program.DispatchGateway가 수신해 콘솔에 출력한다 (비동기)
-    private void CmdLobby(string[] args)
-    {
-        var gateway = _hub.GatewayConnection;
-        if (gateway == null)
-        {
-            Console.WriteLine("게이트웨이 미연결 — 로비 상태 조회 불가.");
-            return;
-        }
-        _hub.Send(gateway, "LOBBY_STATUS", null, (ok, reason) =>
-        {
-            if (!ok) Console.WriteLine($"LOBBY_STATUS 요청 실패: {reason}");
-        });
-    }
 
     private void CmdExec(string[] args) => HandleRun(string.Join(" ", args));
 
@@ -516,16 +403,8 @@ public sealed class OperatorConsole
         return raw;
     }
 
-    // "depth-N" 키 또는 숫자 depth를 인스턴스 키로 변환 ("1" -> "depth-1")
-    private static string? ResolveInstanceKey(string arg)
-    {
-        if (string.IsNullOrWhiteSpace(arg)) return null;
-        if (int.TryParse(arg, out int depth)) return InstanceManager.DepthKey(depth);
-        return arg;
-    }
-
     // lockdown - 켜면 현재 접속 세션 전체 추방(bypass 제외) orchestrator.json의
-    // LockdownBypass(SteamID64)만 접속 허용 서버 타이틀 뒤에 (MAINTENANCE) 접미
+    // LockdownBypass(SteamID64)만 접속 허용 서버 타이틀 뒤에 " [MNT]" 접미
     // 끄면 원상 복구. 상태는 메모리 전용 (영속화 없음)
     private void CmdLockdown(string[] args)
     {
@@ -553,7 +432,7 @@ public sealed class OperatorConsole
                 KickAll = true,
                 Bypass = bypass,
             });
-            PushAuthInfo(gateway, " (MAINTENANCE)");
+            PushAuthInfo(gateway, " [MNT]");
             Console.WriteLine($"락다운 켬 — 전 세션 추방, bypass {bypass.Length}명, 타이틀 접미 적용.");
             LockdownNotify?.Invoke(true);
         }
@@ -588,7 +467,7 @@ public sealed class OperatorConsole
     {
         bool next = !VerboseState.Active;
         VerboseState.Active = next;
-        PersistVerbose(next);
+        PersistConfigBool("Verbose", next);
         foreach (var conn in _hub.Connections.Where(c => !c.Closed))
         {
             _hub.SendNoAck(conn, "VERBOSE", new { on = next });
@@ -596,21 +475,32 @@ public sealed class OperatorConsole
         Console.WriteLine($"verbose {(next ? "켬" : "끔")} — orchestrator.json 반영 + 전 컴포넌트 전파.");
     }
 
-    // orchestrator.json의 Verbose 필드 영속 반영 (JsonNode로 최소 수정 - 주석/포맷 유지)
-    private void PersistVerbose(bool on)
+    // prewarm - 레이어1 프리웜 "1시간 무접속 자동 종료" 토글 (verbose와 동일한 단순 토글)
+    private void CmdPrewarm(string[] args)
+    {
+        bool next = !_instances.PrewarmIdleShutdownEnabled;
+        _instances.PrewarmIdleShutdownEnabled = next;
+        PersistConfigBool("PrewarmIdleShutdown", next);
+        Console.WriteLine(next
+            ? "prewarm idle-shutdown 켬 — 레이어1은 1시간 무접속 시 종료됩니다 (orchestrator.json 반영)."
+            : "prewarm idle-shutdown 끔 — 레이어1은 무접속에도 유지됩니다(항상 프리웜) (orchestrator.json 반영).");
+    }
+
+    // orchestrator.json의 bool 필드 영속 반영 (JsonNode로 최소 수정 - 주석/포맷 유지)
+    private void PersistConfigBool(string key, bool value)
     {
         try
         {
             if (_configPath.Length == 0 || !File.Exists(_configPath)) return;
             using var doc = JsonDocument.Parse(File.ReadAllText(_configPath));
             var node = System.Text.Json.Nodes.JsonNode.Parse(doc.RootElement.GetRawText());
-            node!["Verbose"] = on;
+            node![key] = value;
             File.WriteAllText(_configPath,
                 node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"verbose json 반영 실패: {ex.Message}");
+            Console.WriteLine($"{key} json 반영 실패: {ex.Message}");
         }
     }
 

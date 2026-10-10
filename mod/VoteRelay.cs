@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod;
 
@@ -60,21 +60,21 @@ public static class VoteRelay
         string verdict;
         if (total == 0)
         {
-            verdict = "무효";
+            verdict = "invalid";
         }
         else if ((float)payload.Yes / total > 0.5f)
         {
-            verdict = "가결";
+            verdict = "passed";
         }
         else
         {
-            verdict = "부결";
+            verdict = "rejected";
         }
 
-        Chat.Server_ChatAnnouncement($"찬성 {payload.Yes}표, 반대 {payload.No}표, 기권 {payload.Ignore}표");
-        Chat.Server_ChatAnnouncement($"투표 결과 {verdict}되었습니다.");
+        Chat.Server_ChatAnnouncement($"Yes {payload.Yes}, No {payload.No}, Abstain {payload.Ignore}");
+        Chat.Server_ChatAnnouncement($"Vote result: {verdict}.");
 
-        if (verdict == "가결")
+        if (verdict == "passed")
         {
             AnnounceEffect(payload.Kind, payload.Payload ?? new Dictionary<string, string>());
         }
@@ -86,7 +86,7 @@ public static class VoteRelay
         if (payload == null || string.IsNullOrEmpty(payload.CallerClientId)) return;
 
         if (ushort.TryParse(payload.CallerClientId, out ushort callerClientId)
-            && NetPlayer.TryGetPlayerFromClientId(callerClientId, out NetPlayer caller))
+            && ScavPlayer.TryGetPlayerFromClientId(callerClientId, out ScavPlayer caller))
         {
             ChatCommands.ChatPrivateReply.SendToPlayer(caller, payload.Reason);
         }
@@ -99,7 +99,7 @@ public static class VoteRelay
             case "ban":
                 if (payload.TryGetValue("targetName", out string targetName))
                 {
-                    Chat.Server_ChatAnnouncement($"{targetName} 님이 밴 처리되어 서버 접속이 차단되었습니다.");
+                    Chat.Server_ChatAnnouncement($"{targetName} has been permanently banned.");
                 }
                 break;
         }

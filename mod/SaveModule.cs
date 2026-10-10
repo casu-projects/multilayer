@@ -5,7 +5,7 @@ using System.Threading;
 using System.Collections.Concurrent;
 using System.Reflection;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -104,7 +104,7 @@ public static class SaveModule
 
     // 직렬화
 
-    public static JObject SerializePlayer(NetPlayer plr)
+    public static JObject SerializePlayer(ScavPlayer plr)
     {
         Body body = plr.body;
         var root = new JObject
@@ -132,7 +132,7 @@ public static class SaveModule
     }
 
     // 플레이어 데이터 제출 (퇴장/동결) -> 오케스트레이터
-    public static void SubmitPlayer(NetPlayer plr)
+    public static void SubmitPlayer(ScavPlayer plr)
     {
         if (plr == null || plr.body == null) return;
         try
@@ -143,7 +143,7 @@ public static class SaveModule
         }
         catch (System.Exception ex)
         {
-            Plugin.Log.LogWarning($"[Save] {plr.playername} 직렬화 실패: {ex.Message}");
+            Plugin.Log.LogWarning($"[Save] {plr.playerName} 직렬화 실패: {ex.Message}");
         }
     }
 
@@ -168,7 +168,7 @@ public static class SaveModule
 
     // 복원 (Body.Start에서)
 
-    internal static void RestorePlayer(Body body, NetPlayer plr, JObject root)
+    internal static void RestorePlayer(Body body, ScavPlayer plr, JObject root)
     {
         try
         {
@@ -185,7 +185,7 @@ public static class SaveModule
         }
         catch (System.Exception ex)
         {
-            Plugin.Log.LogWarning($"[Save] {plr.playername} 복원 실패: {ex.Message}");
+            Plugin.Log.LogWarning($"[Save] {plr.playerName} 복원 실패: {ex.Message}");
         }
     }
 
@@ -532,7 +532,7 @@ public static class SaveModule
         return new JObject { ["saved"] = saved };
     }
 
-    private static void RestoreRecipes(NetPlayer plr, JToken token)
+    private static void RestoreRecipes(ScavPlayer plr, JToken token)
     {
         if (token?["saved"] is not JArray saved || Recipes.recipes == null) return;
         for (int i = 0; i < saved.Count && i < Recipes.recipes.Count; i++)
@@ -591,7 +591,7 @@ public static class SaveModule
 
     // 위치 (바닐라 스폰 위치 전송 시점에 적용 - LateSpawnLocation Prefix)
 
-    private static void QueuePosition(Body body, NetPlayer plr, JToken token)
+    private static void QueuePosition(Body body, ScavPlayer plr, JToken token)
     {
         if (token is not JObject pos) return;
         PendingPositions[plr.GetPersistentId()] = (
@@ -602,7 +602,7 @@ public static class SaveModule
     }
 
     // 퇴장 시 저장된 드랍 아이템 큐잉 (RestorePlayer에서 호출 - 스폰 위치 확정 시 소비)
-    private static void QueueDroppedItems(NetPlayer plr, JToken token)
+    private static void QueueDroppedItems(ScavPlayer plr, JToken token)
     {
         if (token is not JArray drops) return;
         string pid = plr.GetPersistentId();
@@ -632,7 +632,7 @@ public static class SaveModule
     // 클라이언트가 처음 받는 스폰 위치가 저장 위치가 되게 한다 (기존 10168 지연 적용은
     // 바닐라 스폰 전송 이후라 클라이언트에 반영되지 않았다). 성공 시 true - 호출부가
     // 바닐라 스폰 계산을 스킵한다
-    internal static bool TryApplyPendingPosition(NetPlayer plr, NetBody pb)
+    internal static bool TryApplyPendingPosition(ScavPlayer plr, NetBody pb)
     {
         if (plr == null || pb == null || WorldGeneration.world == null) return false;
         if (!TryTakePendingPosition(plr.GetPersistentId(), out var p)) return false;
@@ -656,7 +656,7 @@ public static class SaveModule
 
         pb.body.transform.position = safe.Value;
         // 바닐라 스폰 플로우가 저장 위치를 덮어쓰지 않도록 플래그 설정 (PlayerSavedState.Apply와 동일 규약)
-        plr.server_plrstate.did_give_spawn_location_from_a_save = true;
+        plr.ServerPlayerState.did_give_spawn_location_from_a_save = true;
         return true;
     }
 
@@ -820,13 +820,13 @@ public static class SaveModule
         private static void Prefix(Body __instance)
         {
             NetBody netBody = __instance.GetComponent<NetBody>();
-            if (netBody == null || !netBody.is_player || netBody.plr == null) return;
-            ServerMain.server_lastplayerstates.Remove(netBody.plr.GetPersistentId());
+            if (netBody == null || !netBody.IsPlayer || netBody.plr == null) return;
+            ServerMain.Server_LastPlayerStates.Remove(netBody.plr.GetPersistentId());
         }
 
         private static void Postfix(Body __instance)
         {
-            if (!NetPlayer.BodyToPlayerDict.TryGetValue(__instance, out NetPlayer plr)) return;
+            if (!ScavPlayer.BodyToPlayerDict.TryGetValue(__instance, out ScavPlayer plr)) return;
             string pid = plr.GetPersistentId();
 
             if (!TryTakePending(pid, out JObject data))
@@ -851,7 +851,7 @@ public static class SaveModule
             }
             else
             {
-                if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Save] {plr.playername} 데이터 없음 — 기본 상태로 시작.");
+                if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Save] {plr.playerName} 데이터 없음 — 기본 상태로 시작.");
                 GrantStartingSupplies(__instance, plr);
             }
         }
@@ -861,7 +861,7 @@ public static class SaveModule
     // 바닐라 지급은 totalTraveled=1 소진(FinishWorldGeneration)으로 전부 억제되어 있으므로,
     // 여기서 바닐라 NetBody.CreateNewPlayerCharacter의 지급 로직을 대신 수행한다
     // 리스폰(!respawn - 인플레이스)에서도 재사용한다
-    internal static void GrantStartingSupplies(Body body, NetPlayer plr)
+    internal static void GrantStartingSupplies(Body body, ScavPlayer plr)
     {
         // 바닐라 조건 미러링 - 시작 보급품은 첫 레이어 신규 런 전용
         // totalTraveled는 FinishWorldGeneration에서 1로 소진되므로 첫 레이어 판정에는 biomeDepth를 쓴다
@@ -892,10 +892,10 @@ public static class SaveModule
     }
 
     // 퇴장 저장 - 마이그레이션 중(FREEZE 후)이면 건너뜀
-    [HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.OnDestroy))]
+    [HarmonyPatch(typeof(ScavPlayer), nameof(ScavPlayer.OnDestroy))]
     internal static class NetPlayer_OnDestroy_SubmitPatch
     {
-        private static void Prefix(NetPlayer __instance)
+        private static void Prefix(ScavPlayer __instance)
         {
             if (__instance == null) return;
             if (MigrationModule.IsFrozen(__instance.GetPersistentId())) return;

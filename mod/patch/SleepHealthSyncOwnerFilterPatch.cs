@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using LiteNetLib;
 using LiteNetLib.Utils;
 
@@ -15,7 +15,7 @@ namespace CasuMod.Patch;
 internal static class SleepHealthSyncOwnerFilterPatch
 {
     private static readonly Type MedicalSyncType =
-        AccessTools.TypeByName("KrokoshaCasualtiesMP.MedicalSync");
+        AccessTools.TypeByName("Together.MedicalSync");
 
     private static readonly MethodInfo CanSyncHealthMethod =
         AccessTools.Method(MedicalSyncType, "CanSyncHealth");
@@ -26,7 +26,7 @@ internal static class SleepHealthSyncOwnerFilterPatch
     private static bool Prefix(NetBody nb, bool force)
     {
         if (nb == null
-            || !nb.is_player
+            || !nb.IsPlayer
             || nb.plr == null
             || nb.body == null
             || !nb.body.sleeping
@@ -40,7 +40,7 @@ internal static class SleepHealthSyncOwnerFilterPatch
         var targets = new List<knetid>();
         foreach (knetid clientId in ServerMain.AllClientIdsExceptHost)
         {
-            if (clientId != nb.plr.clientId)
+            if (clientId != nb.plr.playerId)
             {
                 targets.Add(clientId);
             }
@@ -48,9 +48,11 @@ internal static class SleepHealthSyncOwnerFilterPatch
 
         if (targets.Count == 0) return false;
 
-        NetDataWriter writer = Net.CreateWriter(10127);
+        NetDataWriter writer = Net.CreateWriter((Enum)NetmsgId.CLIENT_HealthSync);
         writer.Put((ushort)nb.netId);
-        MyLiteNetLibExtensions.Put(writer, new CharacterHealthStateSyncPacket(nb.body));
+        var packet = new CharacterHealthStateSyncPacket();
+        packet.Write(nb.body);
+        MyLiteNetLibExtensions.Put(writer, packet);
         writer.Put(false);
         writer.CompressWriter();
         Net.Server_SendToClients(DeliveryMethod.Unreliable, in writer, targets);

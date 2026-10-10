@@ -1,15 +1,15 @@
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod.Patch;
 
-[HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.DestroyCharacterIfNoLocal))]
+[HarmonyPatch(typeof(ScavPlayer), nameof(ScavPlayer.DestroyCharacterIfNoLocal))]
 internal static class DisableItemDropWhenLeavePatch
 {
-    private static bool Prefix(NetPlayer __instance)
+    private static bool Prefix(ScavPlayer __instance)
     {
         // 로컬 placeholder 바디(PlayerCamera.main.body)는 유지한다
-        if (__instance == null || __instance.is_local)
+        if (__instance == null || __instance.IsLocal)
             return false;
 
         if (__instance.body != null)
@@ -19,7 +19,7 @@ internal static class DisableItemDropWhenLeavePatch
                 InvButton_get_body_MultiplayerPatch.focused_body = null;
             }
 
-            NetPlayer.BodyToPlayerDict.Remove(__instance.body);
+            ScavPlayer.BodyToPlayerDict.Remove(__instance.body);
             NetBody.DestroyNPC(__instance.body);
             __instance.body = null;
         }

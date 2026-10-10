@@ -18,7 +18,7 @@ public sealed class SteamLobby
 {
     private const uint AppId = 4576510;
 
-    // 로비 수명주기 상태 - 진단 연동(오케스트레이터 LOBBY_STATUS) 및 자가 치유 판정에 사용
+    // 로비 수명주기 상태 - 자가 치유 판정에 사용
     public enum LobbyState
     {
         Disabled,    // 세션 파일 없음 / 초기화 안 됨 - 로비 불가
@@ -37,22 +37,29 @@ public sealed class SteamLobby
     private static readonly TimeSpan SafetyRecycleInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan CreateFailRetry = TimeSpan.FromSeconds(10);
 
-    private const string KeyLobbyName = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_LOBBYNAME";
-    private const string KeyVersion = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_VERSION";
-    private const string KeyGamemode = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_GAMEMODE";
-    private const string KeyCurrentLayer = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_CURRENTLAYER";
-    private const string KeyAvgMood = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_AVGMOOD";
-    private const string KeyDepth = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_DEPTH";
-    private const string KeyLivingCount = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_LIVINGCOUNT";
-    private const string KeyPlrCount = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_PLRCOUNT";
-    private const string KeyHasPassword = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_HASPASSWORD";
-    private const string KeyIsDedicated = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_ISDEDICATED";
-    private const string KeyLocked = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_LOCKED";
-    private const string KeyRunSettings = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_RUNSETTINGS";
+    // 신버전 기반 모드(CasualtiesMP v5.0.0)는 로비 데이터 키를 COOP_MOD_* 로 통일했다
+    // (구버전: CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_*). 클라이언트가
+    // 이 키들을 인덱서로 직접 읽으므로(누락 시 로비가 검색에서 숨겨짐) 키 이름을 맞춰야 한다.
+    private const string KeyLobbyName = "COOP_MOD_LOBBYNAME";
+    private const string KeyVersion = "COOP_MOD_VERSION";
+    private const string KeyGamemode = "COOP_MOD_GAMEMODE";
+    private const string KeyCurrentLayer = "COOP_MOD_CURRENTLAYER";
+    private const string KeyAvgMood = "COOP_MOD_AVGMOOD";
+    private const string KeyDepth = "COOP_MOD_DEPTH";
+    private const string KeyLivingCount = "COOP_MOD_LIVINGCOUNT";
+    private const string KeyPlrCount = "COOP_MOD_PLRCOUNT";
+    private const string KeyHasPassword = "COOP_MOD_HASPASSWORD";
+    private const string KeyIsDedicated = "COOP_MOD_ISDEDICATED";
+    private const string KeyLocked = "COOP_MOD_LOCKED";
+    private const string KeyRunSettings = "COOP_MOD_RUNSETTINGS";
+    // 클라이언트가 GetValueOrDefault 로 읽는 신규 키 (없으면 각각 ""/"EN"/"" 폴백)
+    private const string KeyDescription = "COOP_MOD_DESCRIPTION";
+    private const string KeyLanguage = "COOP_MOD_LANGUAGE";
+    private const string KeyMods = "COOP_MOD_MODS";
 
     // Must always be present (even empty) - the client's parser reads this key
     // unconditionally and a missing key throws, hiding the whole lobby from search
-    private const string KeyExtraData = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_EXTRADATA";
+    private const string KeyExtraData = "COOP_MOD_EXTRADATA";
 
     private readonly string _sessionPath;
     private readonly string _versionTag;
@@ -84,30 +91,29 @@ public sealed class SteamLobby
     private static readonly TimeSpan MetadataRefreshInterval = TimeSpan.FromSeconds(8);
 
     // 오케스트레이터의 LOBBY_METADATA 명령으로 갱신되는 동적 값 (플레이어 수는 코어 세션 수)
-    // mod 목록은 전송하지 않는다 (EXTRADATA 와이어에는 빈 목록 + false 고정)
+    // mod 목록은 전송하지 않는다 (EXTRADATA 와이어에는 steamId[] + false 고정)
     private int _livingCount;
     private int _happinessSum;
     private ulong[] _steamIds = Array.Empty<ulong>();
     private byte[]? _rulesBytes;
-    private readonly string[] _motd;
+    private readonly string _motd;
+
+    // 게임 Net 의 MAX_SERVER_DESC_LENGTH / MAX_SERVER_DESC_NEWLINES 와 일치해야 한다
+    // (초과하면 클라이언트가 로비를 목록에서 제외한다)
+    private const int MaxDescLength = 200;
+    private const int MaxDescNewlines = 3;
+
+    // 게임 Net.MAX_SERVER_NAME_LENGTH 와 일치 - 초과하면 클라이언트가 로비를 목록에서 제외한다
+    private const int MaxServerNameLength = 32;
 
     public bool Initialized { get; private set; }
 
-    // 현재 로비 수명주기 상태 (진단 연동용 - 오케스트레이터 LOBBY_STATUS 응답에 사용)
-    public LobbyState State => _state;
-
-    // 현재 로비 SteamID (생성 전 null)
-    public SteamID? LobbyId => _lobbyId;
-
-    // SteamKit2 로그온 성공 여부 (진단용)
-    public bool LoggedOn => _loggedOn;
-
-    public SteamLobby(string sessionPath, string versionTag, GatewayCore core, string[] motd)
+    public SteamLobby(string sessionPath, string versionTag, GatewayCore core, string motd)
     {
         _sessionPath = sessionPath;
         _versionTag = versionTag;
         _core = core;
-        _motd = motd ?? Array.Empty<string>();
+        _motd = motd ?? "";
     }
 
     // 오케스트레이터 LOBBY_METADATA 명령 적용 (인스턴스 리포트는 오케스트레이터가 수집)
@@ -406,7 +412,7 @@ public sealed class SteamLobby
 
         return new()
         {
-            [KeyLobbyName] = _core.ServerName,
+            [KeyLobbyName] = ClampName(_core.ServerName),
             [KeyVersion] = _versionTag,
             [KeyGamemode] = "loading",
             [KeyCurrentLayer] = "0",
@@ -418,13 +424,39 @@ public sealed class SteamLobby
             [KeyIsDedicated] = "1",
             [KeyLocked] = "0",
             [KeyRunSettings] = "0",
+            [KeyDescription] = BuildDescription(),
+            [KeyLanguage] = "EN",
+            [KeyMods] = "CasualtiesMP",
             [KeyExtraData] = BuildExtraData(),
             ["bucket"] = Random.Shared.Next(0, 20).ToString(),
         };
     }
 
-    // EXTRADATA: gzip(rules + steamId[] + enforceModList + modListGuids[]), LiteNetLib
-    // 길이 프리픽스 + base64 - 클라이언트가 기대하는 형식 그대로
+    // 서버 이름을 게임 제한(32자)으로 클램프 - 초과 시 신버전 클라이언트가 로비를 목록에서 제외한다
+    private string ClampName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "";
+        if (name.Length <= MaxServerNameLength) return name;
+        Logger.Info($"서버 이름이 {MaxServerNameLength}자를 초과하여 절단: \"{name}\"");
+        return name.Substring(0, MaxServerNameLength);
+    }
+
+    // gateway.json Motd(문자열) -> COOP_MOD_DESCRIPTION.
+    // 게임 제한(최대 4줄=개행 3개, 200자)을 넘지 않도록 클램프한다.
+    private string BuildDescription()
+    {
+        if (string.IsNullOrEmpty(_motd)) return "";
+
+        string[] lines = _motd.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        string desc = string.Join("\n", lines.Take(MaxDescNewlines + 1));
+        if (desc.Length > MaxDescLength)
+            desc = desc.Substring(0, MaxDescLength);
+        return desc;
+    }
+
+    // EXTRADATA: gzip(deathcounter+rules struct + steamId[] + enforceModList), LiteNetLib
+    // 길이 프리픽스 + base64 - 신버전 클라이언트가 기대하는 형식 그대로
+    // (신 파서는 modlist를 COOP_MOD_MODS 키에서 읽으므로 EXTRADATA에 mod/MOTD 배열을 넣지 않는다)
     private string BuildExtraData()
     {
         if (_rulesBytes == null || _rulesBytes.Length == 0)
@@ -437,10 +469,7 @@ public sealed class SteamLobby
         var inner = new NetDataWriter();
         inner.Put(_rulesBytes);
         inner.PutArray(allSteamIds);
-        // modlist 채널에 MOTD 전달 - enforceModList=false 유지 (클라이언트가 서버 브라우저의
-        // Mods 버튼 툴팁으로 줄바꿈 표시, 접속 검증에는 영향 없음)
-        inner.Put(false);
-        inner.PutArray(_motd);
+        inner.Put(false);   // SERVER_TOGGLE_ENFORCE_MODLIST
 
         byte[] compressed;
         using (var outStream = new MemoryStream())

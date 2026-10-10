@@ -1,15 +1,25 @@
 namespace CasuMpOrchestrator;
 
-// 스팀 P2P 로비 등록 시 쓰이는 EXTRADATA를 위한 KrokoshaMultiplayerGameRules 이진 레이아웃 구성
-// 총 100 바이트 (deathcounter[4] + KrokoshaMultiplayerGameRules[96])
+// 스팀 P2P 로비 등록 시 쓰이는 EXTRADATA를 위한 Together.MultiplayerGameRules 이진 레이아웃 구성
+//
+// 신버전 기반 모드(CasualtiesMP v5.0.0)는 규칙 구조체가 커졌다:
+//   - Together.SteamServerInfoInLobbyExtraData = [deathcounter int(4)] + [MultiplayerGameRules]
+//   - Together.MultiplayerGameRules unmanaged sizeof = 108 (bool=1바이트, 자연 정렬)
+//   => 총 112 바이트 (구버전: 100 = deathcounter[4] + KrokoshaMultiplayerGameRules[96])
+//
+// 오프셋은 Together.MultiplayerGameRules 의 필드 순서/자연 정렬과 1:1로 맞춘다.
+// (신 클라이언트가 GetUnmanaged<SteamServerInfoInLobbyExtraData>() 로 정확히 112바이트를 읽음)
 internal static class RulesBlobBuilder
 {
+    // deathcounter(4) + MultiplayerGameRules(108)
+    internal const int BlobSize = 112;
+
     internal static byte[] Build(Dictionary<string, string> data)
     {
-        var buf = new byte[100];
+        var buf = new byte[BlobSize];
         var span = new Span<byte>(buf);
 
-        // offset 4: rules
+        // offset 4: MultiplayerGameRules
         const int R = 4;
         SetBool(span, R + 0, data, "sv_cheats", false);
         SetBool(span, R + 1, data, "AllowClientCheatCommands", false);
@@ -22,59 +32,67 @@ internal static class RulesBlobBuilder
         SetBool(span, R + 8, data, "OnlyProximityChat", false);
         SetBool(span, R + 9, data, "UnchippedProximityChat", true);
         SetBool(span, R + 10, data, "UnchippedIsIndividual", true);
-        SetByte(span, R + 11, data, "ScatterMinGroupSize", 51);
-        SetFloat(span, R + 12, data, "ScatterPunishDistance", 80f);
-        SetByte(span, R + 16, data, "LayerFinishPlrPercent", 101);
-        SetBool(span, R + 17, data, "LayerFinishKeepXOffset", true);
-        SetByte(span, R + 18, data, "StragglerRadlinePercent", 30);
-        SetBool(span, R + 19, data, "NoInventoryLock", false);
-        SetBool(span, R + 20, data, "EnableSleep", false);
-        SetBool(span, R + 21, data, "EnableTimeManipulation", false);
-        SetBool(span, R + 22, data, "SpeechImpairedChat", true);
-        SetBool(span, R + 23, data, "HearingLossChat", true);
-        SetBool(span, R + 24, data, "MindwipeDisablesChat", true);
-        SetBool(span, R + 25, data, "DeadTextchat", true);
-        SetBool(span, R + 26, data, "DeadVoicechat", true);
-        SetBool(span, R + 27, data, "SleepingMute", false);
-        SetBool(span, R + 28, data, "Permadeath", false);
-        SetBool(span, R + 29, data, "ReviveOnNextLevel", false);
-        SetBool(span, R + 30, data, "ReviveFromTrader", true);
-        SetBool(span, R + 31, data, "RespawnKeepInventory", false);
-        SetBool(span, R + 32, data, "RespawnKeepSkills", false);
-        SetBool(span, R + 33, data, "AllowSpectatorFreecam", true);
-        SetBool(span, R + 34, data, "AllowPush", true);
-        SetBool(span, R + 35, data, "AlwaysAllowCarry", false);
-        SetByte(span, R + 36, data, "PiggybackMaxStack", 1);
-        // offset 37-39: padding #1
-        SetFloat(span, R + 40, data, "PiggybackWeightMultiplier", 0.8f);
-        SetBool(span, R + 44, data, "SpectateWhileUnconscious", false);
-        SetBool(span, R + 45, data, "EnableMP3Sync", true);
-        SetByte(span, R + 46, data, "VoicechatQuality", 4);
-        SetBool(span, R + 47, data, "VoicechatEnabled", true);
-        SetFloat(span, R + 48, data, "ProximityHearDistance", 55f);
-        SetBool(span, R + 52, data, "CharacterYapPublic", true);
-        SetBool(span, R + 53, data, "Teams", false);
-        SetBool(span, R + 54, data, "PVP", false);
-        SetBool(span, R + 55, data, "PVPCombatDismember", true);
-        SetFloat(span, R + 56, data, "PVPMoodDebuff", 0.5f);
-        SetFloat(span, R + 60, data, "PVPDamageMultiplier", 1f);
-        SetBool(span, R + 64, data, "LateJoinAllowed", true);
-        SetBool(span, R + 65, data, "LateJoinSpectate", false);
-        SetBool(span, R + 66, data, "AmputateHealthyPlayers", true);
-        // offset 67: padding #2
-        SetFloat(span, R + 68, data, "AdditionalBrainRegen", 1f);
-        SetFloat(span, R + 72, data, "AdditionalHealthRegen", 1f);
-        SetFloat(span, R + 76, data, "AdditionalHealthDecay", 1f);
-        SetBool(span, R + 80, data, "LastStandAllowed", true);
-        // offset 81-83: padding #3
-        SetFloat(span, R + 84, data, "SelfharmWitnessMoodDebuff", 3f);
-        SetBool(span, R + 88, data, "SavePlayerState", true);
-        SetBool(span, R + 89, data, "SavePlayerInventory", true);
-        SetBool(span, R + 90, data, "SavePlayerPosition", true);
-        SetBool(span, R + 91, data, "AutoContinue", false);
-        SetUshort(span, R + 92, data, "AutoMinPlrsToStart", 2);
-        SetBool(span, R + 94, data, "AutoExitWhenAllDied", true);
-        SetBool(span, R + 95, data, "AutoExitWhenAllLeft", true);
+        SetBool(span, R + 11, data, "ConsentForFeeding", true);
+        SetByte(span, R + 12, data, "ScatterMinGroupSize", 51);
+        // 13-15: padding (float 정렬)
+        SetFloat(span, R + 16, data, "ScatterPunishDistance", 80f);
+        SetByte(span, R + 20, data, "LayerFinishPlrPercent", 101);
+        SetBool(span, R + 21, data, "LayerFinishKeepXOffset", true);
+        SetByte(span, R + 22, data, "StragglerRadlinePercent", 30);
+        SetBool(span, R + 23, data, "RadlineExtraDamage", true);
+        SetBool(span, R + 24, data, "NoInventoryLock", false);
+        SetBool(span, R + 25, data, "EnableSleep", false);
+        SetBool(span, R + 26, data, "EnableTimeManipulation", false);
+        SetBool(span, R + 27, data, "SpeechImpairedChat", true);
+        SetBool(span, R + 28, data, "HearingLossChat", true);
+        SetBool(span, R + 29, data, "SpeechImpairedVC", true);
+        SetBool(span, R + 30, data, "HearingLossVC", true);
+        SetBool(span, R + 31, data, "MindwipeDisablesChat", true);
+        SetBool(span, R + 32, data, "DeadTextchat", true);
+        SetBool(span, R + 33, data, "DeadVoicechat", true);
+        SetBool(span, R + 34, data, "SleepingMute", false);
+        SetBool(span, R + 35, data, "TrackPlayerDeaths", true);
+        SetBool(span, R + 36, data, "Permadeath", false);
+        SetBool(span, R + 37, data, "ReviveOnNextLevel", false);
+        SetBool(span, R + 38, data, "ReviveFromTrader", true);
+        SetBool(span, R + 39, data, "RespawnKeepInventory", false);
+        SetBool(span, R + 40, data, "RespawnKeepSkills", false);
+        SetBool(span, R + 41, data, "AllowSpectatorFreecam", true);
+        SetBool(span, R + 42, data, "AllowPush", true);
+        SetBool(span, R + 43, data, "AlwaysAllowCarry", false);
+        SetByte(span, R + 44, data, "PiggybackMaxStack", 1);
+        // 45-47: padding
+        SetFloat(span, R + 48, data, "PiggybackWeightMultiplier", 0.8f);
+        SetByte(span, R + 52, data, "MinigameMaxPlayers", 50);
+        SetBool(span, R + 53, data, "SpectateWhileUnconscious", false);
+        SetBool(span, R + 54, data, "EnableMP3Sync", true);
+        SetByte(span, R + 55, data, "VoicechatQuality", 4);
+        SetBool(span, R + 56, data, "VoicechatEnabled", true);
+        // 57-59: padding
+        SetFloat(span, R + 60, data, "ProximityHearDistance", 55f);
+        SetBool(span, R + 64, data, "CharacterYapPublic", true);
+        SetBool(span, R + 65, data, "Teams", false);
+        SetBool(span, R + 66, data, "PVP", false);
+        SetBool(span, R + 67, data, "PVPCombatDismember", true);
+        SetFloat(span, R + 68, data, "PVPMoodDebuff", 0.5f);
+        SetFloat(span, R + 72, data, "PVPDamageMultiplier", 1f);
+        SetBool(span, R + 76, data, "LateJoinAllowed", true);
+        SetBool(span, R + 77, data, "LateJoinSpectate", false);
+        SetBool(span, R + 78, data, "SpawnOnPlayer", true);
+        SetBool(span, R + 79, data, "AmputateHealthyPlayers", true);
+        SetFloat(span, R + 80, data, "AdditionalBrainRegen", 1f);
+        SetFloat(span, R + 84, data, "AdditionalHealthRegen", 1f);
+        SetFloat(span, R + 88, data, "AdditionalHealthDecay", 1f);
+        SetBool(span, R + 92, data, "LastStandAllowed", true);
+        // 93-95: padding
+        SetFloat(span, R + 96, data, "SelfharmWitnessMoodDebuff", 3f);
+        SetBool(span, R + 100, data, "SavePlayerState", true);
+        SetBool(span, R + 101, data, "SavePlayerInventory", true);
+        SetBool(span, R + 102, data, "SavePlayerPosition", true);
+        SetBool(span, R + 103, data, "AutoContinue", false);
+        SetUshort(span, R + 104, data, "AutoMinPlrsToStart", 2);
+        SetBool(span, R + 106, data, "AutoExitWhenAllDied", true);
+        SetBool(span, R + 107, data, "AutoExitWhenAllLeft", true);
 
         return buf;
     }

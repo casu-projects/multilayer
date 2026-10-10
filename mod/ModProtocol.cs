@@ -83,13 +83,6 @@ public sealed class ListResultPayload
     public string[] Lines { get; set; } = Array.Empty<string>();
 }
 
-// !discord 결과 (오케스트레이터 -> 요청자 개인 회신용)
-public sealed class DiscordResultPayload
-{
-    public string PlayerKey { get; set; } = "";
-    public string Url { get; set; } = "";
-}
-
 public sealed class ConsolePayload
 {
     public string Command { get; set; } = "";

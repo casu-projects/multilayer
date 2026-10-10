@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Text;
-using KrokoshaCasualtiesMP;
+using Together;
 using UnityEngine;
 
 namespace CasuMod;
@@ -74,7 +74,7 @@ public sealed class OrchestratorClient : MonoBehaviour
     private void TryReportReadyOnConnection()
     {
         if (!_connected || _readyReportedOnConnection) return;
-        if (!KrokoshaCasualtiesUtils.Util.IsWorldGenerated()) return;
+        if (!CasualtiesTogetherUtils.Util.IsWorldGenerated()) return;
         _readyReportedOnConnection = true;
         SendEvent("INSTANCE_READY", new { instanceKey = InstanceKey });
     }
@@ -178,9 +178,6 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "LIST_RESULT":
                 ChatCommands.HandleListResult(msg);
                 break;
-            case "DISCORD_RESULT":
-                ChatCommands.HandleDiscordResult(msg);
-                break;
             case "CONSOLE":
                 RunModule.HandleConsole(msg.PayloadAs<ConsolePayload>()?.Command ?? "");
                 Ack(msg, true);
@@ -200,7 +197,7 @@ public sealed class OrchestratorClient : MonoBehaviour
     }
 
     // 마이그레이션 실패 추방 - 오케스트레이터가 Abort 시 KICK_PLAYER를 전송한다
-    // 전송 레벨 Net.Server_Kick 사용 (NetPlayer.Server_Kick은 아이템 드랍 부작용 - 동결 중
+    // 전송 레벨 Net.Server_Kick 사용 (ScavPlayer.Server_Kick은 아이템 드랍 부작용 - 동결 중
     // 바디에 위험). 재접속 시 세이브 캡처로 데이터가 복구된다
     private static void HandleKickPlayer(ControlMessage msg)
     {
@@ -208,14 +205,14 @@ public sealed class OrchestratorClient : MonoBehaviour
         if (payload == null || string.IsNullOrEmpty(payload.PlayerKey)) return;
         try
         {
-            NetPlayer plr = ChatCommands.FindByPersistentId(payload.PlayerKey);
+            ScavPlayer plr = ChatCommands.FindByPersistentId(payload.PlayerKey);
             if (plr == null)
             {
                 if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Orch] KICK_PLAYER 대상 없음: {payload.PlayerKey}");
                 return;
             }
-            Net.Server_Kick(plr.clientId, payload.Reason ?? "Migration Failed. Please reconnect.");
-            Plugin.Log.LogWarning($"[Orch] {plr.playername} 마이그레이션 실패 추방: {payload.Reason}");
+            Net.Server_Kick(plr.playerId, payload.Reason ?? "Migration Failed. Please reconnect.");
+            Plugin.Log.LogWarning($"[Orch] {plr.playerName} 마이그레이션 실패 추방: {payload.Reason}");
         }
         catch (Exception ex)
         {

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
@@ -28,7 +28,7 @@ internal static class PosOfChunkActivatePatch
 
         // 실제 유저 접속하지 않아서 하나도 준비되지 않은 접속/월드젠 틈에는 기존 상태를 건드리지 않게 설정
         bool hasReadyPlayer = false;
-        foreach (NetPlayer player in NetPlayer.AllLivingPlayers)
+        foreach (ScavPlayer player in ScavPlayer.AllLivingPlayers)
         {
             if (player != null && player.body != null)
             {
@@ -48,7 +48,7 @@ internal static class PosOfChunkActivatePatch
 
             // 멀티 모드가 이미 관리하는 플레이어의 가시 그리드를 그대로 가져와서 사용
             // 이러면 레이어 전체를 갱신 할 필요도 없고, 여러 플레이어가 멀리 떨어져 있어도 각자의 주변만 활성화 된다
-            bool interested = SharedMain.CheckIfChunkOnThisPositionIsVisibleByAnyPlayer(
+            bool interested = SharedMain.PositionIsInSimulatedChunk(
                 renderer.transform.position);
 
             if (interested)

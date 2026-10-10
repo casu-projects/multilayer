@@ -1,6 +1,3 @@
-using System.Text.Json;
-using System.IO;
-
 namespace CasuMpOrchestrator;
 
 public enum InstanceStatus
@@ -37,6 +34,9 @@ public sealed class InstanceManager
     // 프리웜 고정 레이어 - 에이전트 등록 시 항상 스폰/유지 (유휴 시 RESET 후 대기)
     private const int PrewarmDepth = 1;
 
+    // 레이어1 프리웜 무접속 자동 종료 유예 (1시간 고정) - 초과 시 프로세스 정지(자원 회수)
+    private static readonly TimeSpan PrewarmIdleShutdownDelay = TimeSpan.FromHours(1);
+
     private readonly OrchestratorConfig _config;
     private readonly ControlHub _hub;
 
@@ -48,10 +48,17 @@ public sealed class InstanceManager
     {
         _config = config;
         _hub = hub;
-        LoadPreferredPrewarmAgent();
     }
 
     public IReadOnlyCollection<InstanceInfo> All => _instances.Values.ToList();
+
+    // 레이어1 프리웜 1시간 무접속 자동 종료 (orchestrator.json PrewarmIdleShutdown, 기본 ON)
+    // prewarm 명령 토글 - OFF면 레이어1은 종료되지 않는다(항상 프리웜)
+    public bool PrewarmIdleShutdownEnabled
+    {
+        get => _config.PrewarmIdleShutdown;
+        set => _config.PrewarmIdleShutdown = value;
+    }
 
     public InstanceInfo? Find(string key) => _instances.TryGetValue(key, out var info) ? info : null;
 
@@ -94,8 +101,7 @@ public sealed class InstanceManager
     // 해당 depth의 인스턴스를 보장 (없으면 SPAWN). 백엔드 주소 반환 - 부팅 중이어도
     // 게이트웨이가 백엔드 재시도로 커버 . Stopped/Crashed 기록은 죽은 프로세스이므로
     // 재스폰한다 (유휴 정지 후 재접속 시 고아 주소로 라우팅되는 것 방지)
-    // preferredMachine: 프리웜 경로의 선호 에이전트 (등록+여유 시 우선, 아니면 알고리즘)
-    public string? EnsureInstance(int depth, string? preferredMachine = null)
+    public string? EnsureInstance(int depth)
     {
         InstanceInfo? info = FindByDepth(depth);
         if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
@@ -104,13 +110,13 @@ public sealed class InstanceManager
             {
                 VerboseState.Line($"{info.Key} 재스폰 (상태 {info.Status}).");
             }
-            info = Spawn(depth, preferredMachine);
+            info = Spawn(depth);
             if (info == null) return null;
         }
         return BackendAddrFor(info);
     }
 
-    private InstanceInfo? Spawn(int depth, string? preferredMachine = null)
+    private InstanceInfo? Spawn(int depth)
     {
         if (_agents.Count == 0)
         {
@@ -118,8 +124,8 @@ public sealed class InstanceManager
             return null;
         }
 
-        // 배치: 선호 에이전트(등록+여유) 우선, 아니면 수용량 대비 사용량이 가장 적은 에이전트
-        string? machineId = SelectMachine(preferredMachine);
+        // 배치: 수용량 대비 사용량이 가장 적은 에이전트
+        string? machineId = SelectMachine();
         if (machineId == null)
         {
             Console.WriteLine($"모든 에이전트 수용량 초과 — depth-{depth} 스폰 불가.");
@@ -167,64 +173,14 @@ public sealed class InstanceManager
         throw new InvalidOperationException("인스턴스 포트 고갈");
     }
 
-    // 에이전트 선택 - preferred가 등록되고 여유(Used &lt; Capacity)가 있으면 그것을
-    // 우선하고, 아니면 수용량 대비 사용량이 가장 낮은 에이전트로 폴백한다
-    private string? SelectMachine(string? preferred)
+    // 에이전트 선택 - 수용량 대비 사용량이 가장 낮은 에이전트
+    private string? SelectMachine()
     {
-        if (preferred != null
-            && _agents.TryGetValue(preferred, out var pref)
-            && pref.Used < pref.Capacity)
-        {
-            return preferred;
-        }
         return _agents
             .Where(kv => kv.Value.Used < kv.Value.Capacity)
             .OrderBy(kv => (double)kv.Value.Used / kv.Value.Capacity)
             .Select(kv => kv.Key)
             .FirstOrDefault();
-    }
-
-    // 프리웜 전용 선호 에이전트 - `prewarm set <agent>`로 지정 (미연결/포화 시
-    // SelectMachine이 알고리즘으로 폴백). 수요 스폰(마이그레이션/접속)에는 적용되지 않는다
-    // pwd/prewarm-agent.json에 영속화 - 재시작 후에도 유지된다
-    private string? _preferredPrewarmAgent;
-    private static readonly string PrewarmAgentPath =
-        Path.Combine(Directory.GetCurrentDirectory(), "prewarm-agent.json");
-
-    public void SetPreferredPrewarmAgent(string? machineId)
-    {
-        _preferredPrewarmAgent = machineId;
-        try
-        {
-            File.WriteAllText(PrewarmAgentPath,
-                JsonSerializer.Serialize(new { agent = machineId }, new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"prewarm-agent.json 저장 실패: {ex.Message}");
-        }
-    }
-
-    public string? PreferredPrewarmAgent => _preferredPrewarmAgent;
-
-    private void LoadPreferredPrewarmAgent()
-    {
-        try
-        {
-            if (File.Exists(PrewarmAgentPath))
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(PrewarmAgentPath));
-                if (doc.RootElement.TryGetProperty("agent", out JsonElement el)
-                    && el.ValueKind == JsonValueKind.String)
-                {
-                    _preferredPrewarmAgent = el.GetString();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"prewarm-agent.json 로드 실패: {ex.Message}");
-        }
     }
 
     public void StopInstance(string key)
@@ -287,40 +243,12 @@ public sealed class InstanceManager
 
     private readonly Queue<int> _prewarmQueue = new();
     private int _prewarmInFlight = -1;
-    // Prewarm 인스턴스 수동 정지 -> 재시작 예약 (OnInstanceExited가 실제 종료 시점에
-    // _prewarmRestartAt으로 이전). 키: 인스턴스 키
-    private readonly Dictionary<string, TimeSpan> _prewarmRestartRequested = new();
-    private readonly Dictionary<string, DateTime> _prewarmRestartAt = new();
-
-    // Prewarm 인스턴스 정지 후 자동 재시작 예약 - 실제 종료(OnInstanceExited) 시점부터
-    // delay 후 재스폰된다 (instance stop의 유지 관리 용도)
-    public void SchedulePrewarmRestart(string key, TimeSpan delay)
-        => _prewarmRestartRequested[key] = delay;
-
-    // depth가 Prewarm 레이어인지 - instance spawn 금지/자동 재시작 대상 판정
-    public bool IsPrewarmDepth(int depth) => depth == PrewarmDepth;
 
     // 순차 프리웜 진행 (메인 루프 틱) - 현재 항목이 READY(월드젠 완료)가 되면
     // 다음을 스폰한다. 실패(스폰 불가/크래시) 시 현재 항목을 버리고 다음으로 넘어간다
     // (누락분은 다음 에이전트 등록의 PrewarmLayers가 재보충)
     public void TickPrewarm()
     {
-        // 수동 정지 -> 자동 재시작 예약 처리 (실제 종료 후 유예 경과 시 재스폰)
-        foreach (var kv in _prewarmRestartAt.ToList())
-        {
-            if (DateTime.UtcNow < kv.Value) continue;
-            _prewarmRestartAt.Remove(kv.Key);
-            InstanceInfo? info = Find(kv.Key);
-            if (info != null && info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
-            {
-                int depth = info.Depth;
-                if (!_prewarmQueue.Contains(depth) && depth != _prewarmInFlight)
-                {
-                    _prewarmQueue.Enqueue(depth);
-                }
-            }
-        }
-
         if (_prewarmInFlight >= 0)
         {
             InstanceInfo? info = FindByDepth(_prewarmInFlight);
@@ -351,7 +279,7 @@ public sealed class InstanceManager
                 _prewarmInFlight = depth; // 이미 진행 중 - 대기
                 return;
             }
-            string? addr = EnsureInstance(depth, _preferredPrewarmAgent);
+            string? addr = EnsureInstance(depth);
             if (addr != null)
             {
                 _prewarmInFlight = depth;
@@ -471,13 +399,6 @@ public sealed class InstanceManager
         info.Status = InstanceStatus.Stopped;
         info.ModConnection = null;
         VerboseState.Line($"{key} 종료 (code {code}).");
-
-        // Prewarm 인스턴스 수동 정지 -> 실제 종료 시점부터 유예 후 자동 재시작 예약
-        if (_prewarmRestartRequested.Remove(key, out TimeSpan delay))
-        {
-            _prewarmRestartAt[key] = DateTime.UtcNow + delay;
-            VerboseState.Line($"{key} Prewarm 자동 재시작 예약 ({delay.TotalSeconds:F0}초 후).");
-        }
     }
 
     // 유휴 정리 ( 인스턴스 수명주기 + Prewarm 유휴 재초기화)
@@ -507,15 +428,23 @@ public sealed class InstanceManager
             }
 
             bool isPrewarm = info.Depth == PrewarmDepth;
-            if (isPrewarm && !info.HasPlayedSinceReset)
-            {
-                // 이미 초기화된 신선한 월드 - 플레이어 없이 무한 재월드젠 금지
-                info.Status = InstanceStatus.Idle;
-                continue;
-            }
-
             if (isPrewarm)
             {
+                // 1시간 무접속 -> 자동 종료 (자원 회수, prewarm 토글 ON). 이후 접속 시 콜드 스폰
+                if (PrewarmIdleShutdownEnabled && now - info.LastNonIdleAt >= PrewarmIdleShutdownDelay)
+                {
+                    Console.WriteLine($"{info.Key} 유휴 초과(1시간) — 정지.");
+                    StopInstance(info.Key);
+                    continue;
+                }
+
+                if (!info.HasPlayedSinceReset)
+                {
+                    // 이미 초기화된 신선한 월드 - 플레이어 없이 무한 재월드젠 금지
+                    info.Status = InstanceStatus.Idle;
+                    continue;
+                }
+
                 // Prewarm 인스턴스 - 프로세스 생존 + 레이어 초기화 후 유휴 대기
                 info.HasPlayedSinceReset = false;
                 ResetInstance(info.Key);

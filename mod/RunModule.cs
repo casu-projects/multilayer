@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using UnityEngine;
 
 namespace CasuMod;
@@ -39,7 +39,7 @@ public static class RunModule
             }
             PreRunScript pre = UnityEngine.Object.FindObjectOfType<PreRunScript>();
             if (pre == null) return;
-            if (!Net.running) return;
+            if (!Net.IsRunning) return;
             _pendingStartRun = false;
             DoStartRun(pre);
             return;
@@ -55,10 +55,10 @@ public static class RunModule
                 return;
             }
             // ToMainMenu 완료(월드 언로드) + 전용 서버 가동 확인 후 월드젠 재시작
-            if (KrokoshaCasualtiesUtils.Util.IsWorldGenerated()) return;
+            if (CasualtiesTogetherUtils.Util.IsWorldGenerated()) return;
             PreRunScript pre = UnityEngine.Object.FindObjectOfType<PreRunScript>();
             if (pre == null) return;
-            if (!Net.running) return;
+            if (!Net.IsRunning) return;
             _pendingReset = false;
             DoStartRun(pre);
         }
@@ -69,7 +69,7 @@ public static class RunModule
     internal static void HandleStartRun()
     {
         // 이미 세계가 생성된 인스턴스는 런 시작 불필요 (재접속/재수용 방어)
-        if (KrokoshaCasualtiesUtils.Util.IsWorldGenerated())
+        if (CasualtiesTogetherUtils.Util.IsWorldGenerated())
         {
             return;
         }
@@ -79,7 +79,7 @@ public static class RunModule
         // StartRun을 실행하면 월드젠이 조용히 정지한다 ( 회귀). 둘 다 충족할
         // 때까지 Update에서 재시도한다
         PreRunScript pre = UnityEngine.Object.FindObjectOfType<PreRunScript>();
-        if (pre == null || !Net.running)
+        if (pre == null || !Net.IsRunning)
         {
             _pendingStartRun = true;
             _startRunRetryDeadline = Time.unscaledTime + 90f;
@@ -129,7 +129,7 @@ public static class RunModule
     internal static void HandleShutdown()
     {
         Plugin.Log.LogInfo("[Run] SHUTDOWN — 데이터 제출 후 종료.");
-        foreach (NetPlayer p in NetPlayer.BodyToPlayerDict.Values)
+        foreach (ScavPlayer p in ScavPlayer.BodyToPlayerDict.Values)
         {
             // 마이그레이션 동결 중(FREEZE) 플레이어 제외 - 캡처 데이터를 파괴된 인벤토리
             // 상태로 덮어쓰지 않는다 (WAL/캡처가 재시작 복구 담당 - OnDestroy 패치 -5와 동일)

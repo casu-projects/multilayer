@@ -9,16 +9,37 @@ internal sealed class LobbyBrowser
 {
     private const uint AppId = 4576510;
 
-    private const string MetaLobbyName = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_LOBBYNAME";
-    private const string MetaVersion = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_VERSION";
-    private const string MetaGamemode = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_GAMEMODE";
-    private const string MetaPlrCount = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_PLRCOUNT";
-    private const string MetaHasPassword = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_HASPASSWORD";
-    private const string MetaIsDedicated = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_ISDEDICATED";
-    private const string MetaLivingCount = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_LIVINGCOUNT";
-    private const string MetaCurrentLayer = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_CURRENTLAYER";
-    private const string MetaAvgMood = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_AVGMOOD";
-    private const string MetaExtraData = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_EXTRADATA";
+    // 신버전(5.x) 로비 키 = "COOP_MOD_" + suffix, 구버전(4.x) = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_" + suffix
+    private const string KeyPrefixNew = "COOP_MOD_";
+    private const string KeyPrefixOld = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_";
+
+    private const string SuffixLobbyName = "LOBBYNAME";
+    private const string SuffixDescription = "DESCRIPTION";
+    private const string SuffixVersion = "VERSION";
+    private const string SuffixGamemode = "GAMEMODE";
+    private const string SuffixPlrCount = "PLRCOUNT";
+    private const string SuffixHasPassword = "HASPASSWORD";
+    private const string SuffixIsDedicated = "ISDEDICATED";
+    private const string SuffixLivingCount = "LIVINGCOUNT";
+    private const string SuffixCurrentLayer = "CURRENTLAYER";
+    private const string SuffixDepth = "DEPTH";
+    private const string SuffixLanguage = "LANGUAGE";
+    private const string SuffixMods = "MODS";
+    private const string SuffixAvgMood = "AVGMOOD";
+    private const string SuffixExtraData = "EXTRADATA";
+
+    // 신/구 공용 메타데이터 조회 - 신 키 우선, 없으면 구 키로 폴백
+    private static string? Meta(IReadOnlyDictionary<string, string> md, string suffix)
+    {
+        if (md.TryGetValue(KeyPrefixNew + suffix, out string? v) && !string.IsNullOrEmpty(v))
+            return v;
+        md.TryGetValue(KeyPrefixOld + suffix, out string? old);
+        return old;
+    }
+
+    // EXTRADATA 규칙 구조체 크기: 신버전 112B(deathcounter+rules 108), 구버전 100B(deathcounter+rules 96)
+    private static int ExtraDataOffset(IReadOnlyDictionary<string, string> md) =>
+        md.ContainsKey(KeyPrefixNew + SuffixVersion) ? 112 : 100;
 
     private SteamClient? _steamClient;
     private CallbackManager? _callbackManager;
@@ -30,12 +51,14 @@ internal sealed class LobbyBrowser
     private bool _lobbyListReceived;
     private SavedSteamSession? _session;
     private Dictionary<ulong, string> _nameCache = new();
+    private string? _versionFilter;
 
     public LobbyBrowser() { }
 
-    public async Task RunAsync(string sessionPath, CancellationToken ct)
+    public async Task RunAsync(string sessionPath, string? versionFilter, CancellationToken ct)
     {
         _session = LoadSession(sessionPath);
+        _versionFilter = string.IsNullOrWhiteSpace(versionFilter) ? null : versionFilter.Trim();
 
         _steamClient = new SteamClient();
         _callbackManager = new CallbackManager(_steamClient);
@@ -123,19 +146,36 @@ internal sealed class LobbyBrowser
             return;
         }
 
-        int totalPlayers = callback.Lobbies.Sum(l =>
+        // --filter: 버전 태그에 지정 문자열이 포함된 로비만 (신/구 포맷 공통)
+        IReadOnlyList<SteamMatchmaking.Lobby> lobbies = callback.Lobbies;
+        if (_versionFilter != null)
         {
-            l.Metadata.TryGetValue(MetaPlrCount, out string? pc);
+            lobbies = callback.Lobbies
+                .Where(l => (Meta(l.Metadata, SuffixVersion) ?? "").Contains(_versionFilter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            Console.WriteLine($"Filter: version contains \"{_versionFilter}\"");
+            if (lobbies.Count == 0)
+            {
+                Console.WriteLine("No lobbies match the version filter.");
+                _lobbyListReceived = true;
+                return;
+            }
+        }
+
+        int totalPlayers = lobbies.Sum(l =>
+        {
+            string? pc = Meta(l.Metadata, SuffixPlrCount);
             return int.TryParse(pc, out int n) ? n : 0;
         });
-        Console.WriteLine($"\nTotal {callback.Lobbies.Count} lobbies, {totalPlayers} players\n");
+        Console.WriteLine($"\nTotal {lobbies.Count} lobbies, {totalPlayers} players\n");
 
         var allSteamIds = new HashSet<ulong>();
-        foreach (var lobby in callback.Lobbies)
+        foreach (var lobby in lobbies)
         {
-            if (lobby.Metadata.TryGetValue(MetaExtraData, out string? extraBase64))
+            string? extraBase64 = Meta(lobby.Metadata, SuffixExtraData);
+            if (!string.IsNullOrEmpty(extraBase64))
             {
-                foreach (ulong id in DecodeExtraData(extraBase64).SteamIds)
+                foreach (ulong id in DecodeExtraData(extraBase64, ExtraDataOffset(lobby.Metadata)).SteamIds)
                     allSteamIds.Add(id);
             }
         }
@@ -146,34 +186,48 @@ internal sealed class LobbyBrowser
         }
 
         int index = 1;
-        foreach (var lobby in callback.Lobbies)
+        foreach (var lobby in lobbies)
         {
-            lobby.Metadata.TryGetValue(MetaLobbyName, out string? lobbyName);
-            lobby.Metadata.TryGetValue(MetaVersion, out string? version);
-            lobby.Metadata.TryGetValue(MetaGamemode, out string? gamemode);
-            lobby.Metadata.TryGetValue(MetaHasPassword, out string? hasPassword);
-            lobby.Metadata.TryGetValue(MetaIsDedicated, out string? isDedicated);
-            lobby.Metadata.TryGetValue(MetaLivingCount, out string? livingCount);
-            lobby.Metadata.TryGetValue(MetaCurrentLayer, out string? currentLayer);
-            lobby.Metadata.TryGetValue(MetaAvgMood, out string? avgMood);
+            string? lobbyName = Meta(lobby.Metadata, SuffixLobbyName);
+            string? description = Meta(lobby.Metadata, SuffixDescription);
+            string? version = Meta(lobby.Metadata, SuffixVersion);
+            string? gamemode = Meta(lobby.Metadata, SuffixGamemode);
+            string? hasPassword = Meta(lobby.Metadata, SuffixHasPassword);
+            string? isDedicated = Meta(lobby.Metadata, SuffixIsDedicated);
+            string? livingCount = Meta(lobby.Metadata, SuffixLivingCount);
+            string? currentLayer = Meta(lobby.Metadata, SuffixCurrentLayer);
+            string? depth = Meta(lobby.Metadata, SuffixDepth);
+            string? language = Meta(lobby.Metadata, SuffixLanguage);
+            string? modsKey = Meta(lobby.Metadata, SuffixMods);
+            string? avgMood = Meta(lobby.Metadata, SuffixAvgMood);
 
             string pwIcon = hasPassword == "1" ? " \uf023" : "";
             string dedIcon = isDedicated == "1" ? " \uf108" : "";
             string lobbyLabel = string.IsNullOrEmpty(lobbyName) ? "(No Name)" : lobbyName;
 
-            lobby.Metadata.TryGetValue(MetaPlrCount, out string? plrCount);
+            string? plrCount = Meta(lobby.Metadata, SuffixPlrCount);
             string plrDisplay = int.TryParse(plrCount, out int pc) ? pc.ToString() : "0";
 
             Console.WriteLine($"#{index} {lobbyLabel}{pwIcon}{dedIcon} <{lobby.SteamID.ConvertToUInt64()}>");
+            if (!string.IsNullOrEmpty(description))
+            {
+                string[] dlines = description.Replace("\r", "").Split('\n');
+                Console.WriteLine($"    Desc:      {dlines[0]}");
+                for (int d = 1; d < dlines.Length; d++)
+                    Console.WriteLine($"               {dlines[d]}");
+            }
             if (!string.IsNullOrEmpty(version)) Console.WriteLine($"    Version:   {version}");
             if (!string.IsNullOrEmpty(gamemode)) Console.WriteLine($"    Mode:      {gamemode}");
             if (!string.IsNullOrEmpty(currentLayer)) Console.WriteLine($"    Layer:     {currentLayer}");
+            if (!string.IsNullOrEmpty(depth)) Console.WriteLine($"    Depth:     {depth}");
+            if (!string.IsNullOrEmpty(language)) Console.WriteLine($"    Lang:      {language}");
             Console.WriteLine($"    Players:   {plrDisplay}/{lobby.MaxMembers}");
 
             ExtraData? extraData = null;
-            if (lobby.Metadata.TryGetValue(MetaExtraData, out string? extraBase64) && !string.IsNullOrEmpty(extraBase64))
+            string? extraB64 = Meta(lobby.Metadata, SuffixExtraData);
+            if (!string.IsNullOrEmpty(extraB64))
             {
-                extraData = DecodeExtraData(extraBase64);
+                extraData = DecodeExtraData(extraB64, ExtraDataOffset(lobby.Metadata));
                 foreach (ulong sid in extraData.SteamIds)
                 {
                     string name = _nameCache.TryGetValue(sid, out string? n) ? n : sid.ToString();
@@ -183,10 +237,15 @@ internal sealed class LobbyBrowser
 
             if (!string.IsNullOrEmpty(livingCount)) Console.WriteLine($"    Survived:  {livingCount}/{plrDisplay}");
             if (!string.IsNullOrEmpty(avgMood)) Console.WriteLine($"    AvgMood:   {avgMood}");
-            if (extraData?.Mods.Length > 0)
+
+            // mods: EXTRADATA 우선, 없으면 신버전 COOP_MOD_MODS 키(': ' 구분) 사용
+            string[] mods = extraData?.Mods ?? Array.Empty<string>();
+            if (mods.Length == 0 && !string.IsNullOrEmpty(modsKey))
+                mods = modsKey.Split(':', StringSplitOptions.RemoveEmptyEntries);
+            if (mods.Length > 0)
             {
-                Console.WriteLine($"    Mods:      {extraData.Mods.Length}");
-                foreach (string mod in extraData.Mods)
+                Console.WriteLine($"    Mods:      {mods.Length}");
+                foreach (string mod in mods)
                     Console.WriteLine($"    \u2514 {mod}");
             }
 
@@ -197,8 +256,9 @@ internal sealed class LobbyBrowser
         _lobbyListReceived = true;
     }
 
-    // EXTRADATA: base64 → [2B ushort prefix + GZip] → [100B rules][steamIds][bool enforceModList][string[] modListGuids]
-    private static ExtraData DecodeExtraData(string base64)
+    // EXTRADATA: base64 → [2B ushort prefix + GZip] → [rules struct][steamIds][bool enforceModList][string[] modListGuids]
+    // rulesOffset: 신버전 112B / 구버전 100B (ExtraDataOffset 로 판정)
+    private static ExtraData DecodeExtraData(string base64, int rulesOffset)
     {
         try
         {
@@ -239,7 +299,7 @@ internal sealed class LobbyBrowser
                 decompressed = outStream.ToArray();
             }
 
-            int offset = 100;
+            int offset = rulesOffset;
             if (offset + 2 > decompressed.Length) return new ExtraData(Array.Empty<ulong>(), Array.Empty<string>());
             int steamIdCount = BitConverter.ToUInt16(decompressed, offset);
             offset += 2;

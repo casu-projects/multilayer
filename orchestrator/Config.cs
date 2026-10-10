@@ -23,6 +23,9 @@ public sealed class OrchestratorConfig
 
     public bool Verbose { get; set; } = false;
 
+    // 레이어 1 프리웜 인스턴스가 1시간 무접속 시 자동 종료할지 (prewarm 명령 토글, 기본 ON)
+    public bool PrewarmIdleShutdown { get; set; } = true;
+
     public List<ulong> LockdownBypass { get; set; } = new();
 
     public double MigrationStepTimeoutSeconds { get; set; } = 30;
@@ -54,8 +57,6 @@ public sealed class OrchestratorConfig
     public string SteamWebApiKey { get; set; } = "";
 
     public ulong DiscordAdminUserId { get; set; } = 0;
-
-    public string DiscordUrl { get; set; } = "";
 
     [JsonIgnore]
     public string RunTablePath => Path.Combine(Directory.GetCurrentDirectory(), "run.json");

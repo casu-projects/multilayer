@@ -1,5 +1,5 @@
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod;
 
@@ -16,6 +16,6 @@ internal static class PreRunScript_StartRun_RuleBootstrapPatch
 
         int applied = RuleApplier.ApplyRulesNow();
 
-        Plugin.Log.LogInfo($"[Rule] KrokoshaMP 규칙 적용 {applied}건 (내장 세이브: SavePlayerState={KrokoshaScavMultiplayer.rules.SavePlayerState}, SavePlayerInventory={KrokoshaScavMultiplayer.rules.SavePlayerInventory}, SavePlayerPosition={KrokoshaScavMultiplayer.rules.SavePlayerPosition}).");
+        Plugin.Log.LogInfo($"[Rule] KrokoshaMP 규칙 적용 {applied}건 (내장 세이브: SavePlayerState={Multiplayer.rules.SavePlayerState}, SavePlayerInventory={Multiplayer.rules.SavePlayerInventory}, SavePlayerPosition={Multiplayer.rules.SavePlayerPosition}).");
     }
 }

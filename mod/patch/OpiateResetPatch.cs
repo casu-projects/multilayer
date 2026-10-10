@@ -1,7 +1,8 @@
+using System;
 using System.Collections.Generic;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
-using KrokoshaCasualtiesUtils;
+using Together;
+using CasualtiesTogetherUtils;
 using LiteNetLib;
 
 namespace CasuMod.Patch;
@@ -15,15 +16,17 @@ namespace CasuMod.Patch;
 // 해결: 리스폰 직후 전 필드가 0인 10128 패킷을 브로드캐스트 - 클라이언트 Apply가
 // GetOrAddComponent + 5필드 전체를 0으로 덮어써 완전 리셋한다. (제세동/ReviveCharacter는
 // 상태를 유지하는 것이 바닐라 의미이므로 대상에서 제외)
-[HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.Server_RespawnCharacter))]
+[HarmonyPatch(typeof(ScavPlayer), nameof(ScavPlayer.Server_RespawnCharacter))]
 internal static class NetPlayer_Server_RespawnCharacter_OpiateResetPatch
 {
-    private static void Postfix(NetPlayer __instance)
+    private static void Postfix(ScavPlayer __instance)
     {
-        if (__instance.playerbody == null) return;
+        if (__instance.body == null) return;
+        NetBody nb = __instance.netBody;
+        if (nb == null) return;
 
-        var writer = Net.CreateWriter(10128);
-        writer.Put((ushort)__instance.playerbody.netId);
+        var writer = Net.CreateWriter((Enum)NetmsgId.CLIENT_HealthPainkillerSync);
+        writer.Put((ushort)nb.netId);
         MyLiteNetLibExtensions.Put(writer, default(CharacterHealthPainkillerStateSyncPacket));
         writer.Put(false);
         Net.Server_SendToClients(DeliveryMethod.ReliableOrdered, in writer, (IEnumerable<knetid>)ServerMain.AllClientIdsExceptHost);

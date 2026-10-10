@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod;
 
@@ -11,7 +11,7 @@ namespace CasuMod;
 // 부트스트랩이, 런타임 수신은 이 클래스가 적용한다 (인바운드 큐는 메인 스레드 - Unity 접근 안전)
 public static class RuleApplier
 {
-    // KrokoshaMultiplayerGameRules(정적 구조체)에 rule.json 전체를 반영
+    // MultiplayerGameRules(정적 구조체)에 rule.json 전체를 반영
     // bool 필드는 1/0 -> True/False 문자열 변환 후 Convert.ChangeType (RuleBootstrap 동일 규약)
     // 런 설정(run.json)과 겹치는 키는 런 설정 우선 스킵. 반환: 적용 건수
     public static int ApplyRulesNow()
@@ -25,7 +25,7 @@ public static class RuleApplier
             if (runSettings.ContainsKey(entry.Key))
                 continue;
 
-            var field = AccessTools.Field(typeof(KrokoshaMultiplayerGameRules), entry.Key);
+            var field = AccessTools.Field(typeof(MultiplayerGameRules), entry.Key);
             if (field == null)
                 continue;
 
@@ -41,9 +41,9 @@ public static class RuleApplier
                 }
 
                 object converted = Convert.ChangeType(value, field.FieldType, CultureInfo.InvariantCulture);
-                var rulesObj = KrokoshaScavMultiplayer.rules;
+                var rulesObj = Multiplayer.rules;
                 field.SetValueDirect(__makeref(rulesObj), converted);
-                KrokoshaScavMultiplayer.rules = rulesObj;
+                Multiplayer.rules = rulesObj;
                 applied++;
             }
             catch (Exception ex)

@@ -1,13 +1,13 @@
 using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using System.Linq;
 
 namespace CasuMod;
 
 [BepInPlugin("dev.stdd.casumod", "CasuMod", "0.1.0")]
-[BepInDependency("KrokoshaCasualtiesMP", "4.1.2")]
+[BepInDependency("CasualtiesMP", "5.0.0")]
 public class Plugin : BaseUnityPlugin
 {
     public static ManualLogSource Log;

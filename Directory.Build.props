@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <AssetsDir>$(MSBuildThisFileDirectory)../assets/</AssetsDir>
+    <DepsDir>$(AssetsDir)dependency/</DepsDir>
+    <GameDepsDir>$(DepsDir)casualties-unknown/</GameDepsDir>
+    <ModDepsDir>$(DepsDir)casualties-together/</ModDepsDir>
+  </PropertyGroup>
+</Project>

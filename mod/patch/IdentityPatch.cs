@@ -2,7 +2,7 @@ using CasuMod;
 using System;
 using System.Reflection;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using Together;
 using LiteNetLib;
 using LiteNetLib.Utils;
 
@@ -75,7 +75,13 @@ internal static class OnConnectionRequest_TailV2Patch
             return;
         }
 
-        var r = new NetDataReader(raw, tailStart + 3, 12);
+        // NetDataReader 3번째 인자는 "길이"가 아니라 절대 끝 위치(_dataSize)다
+        // (SetSource: _dataSize = maxSize, EnsureAvailable 은 _dataSize - _position 으로 판정).
+        // 고정부(12B)가 user data 안에 온전히 존재하는지 먼저 보장한다.
+        if (tailStart + FixedTailSize > offset + size)
+            return;
+
+        var r = new NetDataReader(raw, tailStart + 3, tailStart + FixedTailSize);
         _pendingSteamId = r.GetULong();
         _pendingClientId = r.GetUShort();
         _pendingIsReturning = r.GetBool();
@@ -98,24 +104,7 @@ internal static class OnConnectionRequest_TailV2Patch
     internal static string? TakeName() { var v = _pendingName; _pendingName = null; return v; }
 }
 
-// 오케스트레이터가 전역 배정한 clientId 강제 적용
-[HarmonyPatch(typeof(Net), "GetNextPlayerId")]
-internal static class Net_GetNextPlayerId_ForceClientIdPatch
-{
-    private static bool Prefix(ref knetid __result)
-    {
-        ushort? forced = OnConnectionRequest_TailV2Patch.TakeClientId();
-        if (!forced.HasValue || forced.Value == 0)
-            return true;
-        if (NetPlayer.ClientIdToPlayerDict.ContainsKey(forced.Value))
-            return true;
-        __result = forced.Value;
-        return false;
-    }
-}
-
-// 복귀(재접속/세션 복원) 플레이어 clientId 집합 - RosterBarrier가 신뢰성 DELETE로
-// 관찰자들의 NPC/스테일 항목을 정리해 재생성하게 하는 데 사용
+// 복귀(재접속/세션 복원) 플레이어 clientId 집합 - 마이그레이션 도착 감시에 사용
 internal static class ReturningTracker
 {
     internal static readonly System.Collections.Generic.HashSet<knetid> ClientIds = new();
@@ -123,36 +112,39 @@ internal static class ReturningTracker
 
 // 마이그레이션 도착 플레이어 clientId 집합 - 접속 공지 억제 전용
 // (isMigratingArrival=true - 게이트웨이 SwapBackend만 true, 일반 재접속은 미등록)
-// 마이그레이션 도착만 억제하고 퇴장 후 재접속은 접속 공지를 표시하기 위한 구분
 internal static class MigrationArrivalTracker
 {
     internal static readonly System.Collections.Generic.HashSet<knetid> ClientIds = new();
 }
 
-// 신원 적용: SteamID64 + 접속 시 PLAYER_DATA_REQUEST 전송
-[HarmonyPatch(typeof(TransportLiteNetLib), nameof(TransportLiteNetLib.CreateNetPlayerWithPeer))]
-internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
+// 신원 적용: LES 는 BasePlayer.ServerCreatePlayer 로 원격 플레이어 엔티티를 생성한다.
+// tail(SteamID/이름/복귀·도착 플래그)을 여기서 반영한다. (구 CreateNetPlayerWithPeer Postfix 대체)
+// GetNextPlayerId 강제 clientId 훅은 신버전 LES 에 없어 제거 - 신원 키는 SteamID/name 기반.
+[HarmonyPatch(typeof(BasePlayer), "ServerCreatePlayer")]
+internal static class BasePlayer_ServerCreatePlayer_ApplyIdentityPatch
 {
-    private static void Postfix(NetPlayer __result)
+    private static void Postfix(BasePlayer __result)
     {
-        if (__result == null)
+        if (__result == null || __result.player == null)
             return;
+        ScavPlayer plr = __result.player;
 
         ulong? steamId = OnConnectionRequest_TailV2Patch.TakeSteamId();
         bool isMigrating = OnConnectionRequest_TailV2Patch.TakeIsMigrating() ?? false;
         bool isReturning = OnConnectionRequest_TailV2Patch.TakeIsReturning();
         if (isReturning || isMigrating)
         {
-            ReturningTracker.ClientIds.Add(__result.clientId);
+            ReturningTracker.ClientIds.Add(plr.playerId);
         }
         if (isMigrating)
         {
-            MigrationArrivalTracker.ClientIds.Add(__result.clientId);
+            MigrationArrivalTracker.ClientIds.Add(plr.playerId);
         }
 
         if (steamId.HasValue && steamId.Value != 0)
         {
-            __result.SteamId = steamId.Value;
+            plr.SteamId = steamId.Value;
+            __result.playerSteamId.Value = steamId.Value;
         }
 
         // tail(Ver 2)로 전달된 Steam 보정 이름 - 인트로의 1바이트/문자 인코딩으로 깨진
@@ -160,33 +152,20 @@ internal static class CreateNetPlayerWithPeer_ApplyIdentityPatch
         string? tailName = OnConnectionRequest_TailV2Patch.TakeName();
         if (!string.IsNullOrEmpty(tailName))
         {
-            __result.playername = tailName;
+            plr.playerName = tailName;
+            plr.ApplyNameAndColor(tailName, plr.playerColor);
         }
 
         // 도착 epoch: 직전 방문의 잔존 PendingData/PendingPositions 소비 차단
-        // 바디 스폰(Body.Start)보다 반드시 먼저 실행된다 (CreateNetPlayerWithPeer 동기 처리)
-        SaveModule.OnPlayerArrival(__result.GetPersistentId());
+        // 바디 스폰(Body.Start)보다 반드시 먼저 실행된다 (ServerCreatePlayer 동기 처리)
+        SaveModule.OnPlayerArrival(plr.GetPersistentId());
 
-        // : 접속 시 플레이어 데이터 요청 - 직접연결(SteamId=0) 포함 전 플레이어
-        // playerKey는 GetPersistentId (STEAM_ 경로 패치 적용됨 - SteamId 있으면 STEAM_,
-        // 없으면 NAME_hex(username) - 게이트웨이 키와 일치)
+        // 접속 시 플레이어 데이터 요청 - 직접연결(SteamId=0) 포함 전 플레이어
+        // playerKey는 GetPersistentId (SteamId 있으면 STEAM_, 없으면 NAME_hex)
         if (OrchestratorClient.Instance != null)
         {
             OrchestratorClient.Instance.SendEvent("PLAYER_DATA_REQUEST",
-                new { playerKey = __result.GetPersistentId() });
+                new { playerKey = plr.GetPersistentId() });
         }
-    }
-}
-
-// GetPersistentId - SteamId가 있으면 STEAM_ 경로 (게이트웨이 키 일치)
-[HarmonyPatch(typeof(NetPlayer), nameof(NetPlayer.GetPersistentId))]
-internal static class NetPlayer_GetPersistentId_PreferSteamIdPatch
-{
-    private static bool Prefix(NetPlayer __instance, ref string __result)
-    {
-        if (__instance.SteamId == 0)
-            return true;
-        __result = "STEAM_" + __instance.SteamId;
-        return false;
     }
 }

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace CasuMod;
 
@@ -12,27 +12,27 @@ internal static class VoteCommands
 {
     private const float VoteTimeSeconds = 30f;
 
-    internal static void CmdBanVote(NetPlayer caller, string[] argv)
+    internal static void CmdBanVote(ScavPlayer caller, string[] argv)
     {
         if (VoteSystem.Server_ActiveVote != null)
         {
-            ChatCommands.ChatPrivateReply.SendToPlayer(caller, "이미 진행 중인 투표가 있습니다. 잠시 후 다시 시도해주세요.");
+            ChatCommands.ChatPrivateReply.SendToPlayer(caller, "A vote is already in progress. Please try again later.");
             return;
         }
 
         if (argv.Length < 2)
         {
-            ChatCommands.ChatPrivateReply.SendToPlayer(caller, "사용법: !banvote <플레이어이름>.");
+            ChatCommands.ChatPrivateReply.SendToPlayer(caller, "Usage: !banvote <player name>.");
             return;
         }
 
         // 대상 해석은 오케스트레이터가 수행 (전 레이어 온라인 세션 기준)
         var payload = new Dictionary<string, string>
         {
-            ["callerClientId"] = ((ushort)caller.clientId).ToString(CultureInfo.InvariantCulture),
+            ["callerClientId"] = ((ushort)caller.playerId).ToString(CultureInfo.InvariantCulture),
             ["targetQuery"] = argv[1],
         };
-        VoteRelay.EmitVoteStart(Guid.NewGuid().ToString(), "ban", "영구 차단 투표",
+        VoteRelay.EmitVoteStart(Guid.NewGuid().ToString(), "ban", "Permanent Ban Vote",
             promptBody: "", VoteTimeSeconds, payload);
     }
 }

@@ -52,7 +52,6 @@ public sealed class PlayerSessionStore
 
     public IReadOnlyCollection<PlayerState> All => _players.Values.ToList();
 
-    // 게이트웨이 세션 이벤트
 
     // SESSION_CONNECTED 처리 - 상태 확정 + 인스턴스 배정
     // ROUTE-ON-READY: 웜 인스턴스(READY/IDLE)면 즉시 라우팅, 콜드 인스턴스면
@@ -244,7 +243,6 @@ public sealed class PlayerSessionStore
         _hub.SendNoAck(_hub.GatewayConnection, "TABLE_SNAPSHOT", new { entries });
     }
 
-    // 영속화
 
     private ushort AllocateClientId()
     {

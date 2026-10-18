@@ -13,19 +13,12 @@ public static class Logger
     private static long _dropped;
     private static string _source = "agent";
 
-    public static bool Verbose;
-
     public static void Init(string source) => _source = source;
 
     public static void Info(string message, string? suffix = null)
     {
         string source = suffix == null ? _source : $"{_source}/{suffix}";
         Enqueue(message, source);
-    }
-
-    public static void Debug(string message, string? suffix = null)
-    {
-        if (Verbose) Info(message, suffix);
     }
 
     // 콘솔 전용 - 릴레이 없음 (연결 오류 등 오케스트레이터 콘솔 도배 방지)

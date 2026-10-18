@@ -3,13 +3,10 @@ using Together;
 
 namespace CasuMod.Patch;
 
-// 접속/퇴장 공지를 base 와 동일한 포맷/색상으로 모드가 직접 만들어 발신한다.
-//   포맷: [플레이어색 이름]<parsebreak> [서버색(#FFC90E) <key:plr_joined|plr_left>]
-//   - <key:> 는 클라이언트가 자기 로케일로 해석, <parsebreak> 도 클라가 처리한다
-// - base 로컬 join/leave 는 JoinLeaveAnnounceSuppressPatch 가 억제하므로 중복 없음
-// - 레이어 이동(마이그레이션) 시에는 발신하지 않는다:
-//     도착 = MigrationArrivalTracker(게이트웨이 tail isMigratingArrival)
-//     출발 = MigrationModule.IsFrozen(FREEZE 로 설정)
+// 접속/퇴장 공지를 base와 동일한 포맷/색상으로 모드가 직접 만들어 발신한다.
+// 포맷: [플레이어색 이름]<parsebreak> [서버색 <key:plr_joined|plr_left>] - <key:>/<parsebreak>는 클라가 해석.
+// base 로컬 join/leave는 JoinLeaveAnnounceSuppressPatch가 억제하므로 중복이 없고,
+// 레이어 이동(도착=MigrationArrivalTracker, 출발=IsFrozen) 시에는 발신하지 않는다.
 internal static class JoinLeaveAnnounceMessage
 {
     internal static string Build(ScavPlayer plr, string localeKey)

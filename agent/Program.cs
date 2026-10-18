@@ -66,14 +66,6 @@ internal static class Program
     {
         switch (msg.Type)
         {
-            case "VERBOSE":
-            {
-                var payload = msg.PayloadAs<VerbosePayload>();
-                Logger.Verbose = payload?.On ?? false;
-                Logger.Info($"verbose {(Logger.Verbose ? "켬" : "끔")} (오케스트레이터).");
-                ack(ControlMessage.Ack(msg.Seq, true));
-                return;
-            }
             case "SPAWN":
             {
                 var payload = msg.PayloadAs<SpawnPayload>();
@@ -89,7 +81,6 @@ internal static class Program
                 }
                 if (!IsPortFreeOnOs(payload.Port))
                 {
-                    Logger.Debug($"{payload.InstanceKey} 포트 {payload.Port} 점유 중 — SPAWN 거부.");
                     ack(ControlMessage.Ack(msg.Seq, false, "port in use"));
                     return;
                 }
@@ -134,7 +125,6 @@ internal static class Program
         }
     }
 
-    // 호스트 IP 탐지
     private static string DetectLocalIPv4()
     {
         foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())

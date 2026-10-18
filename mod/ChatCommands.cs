@@ -43,7 +43,7 @@ public static class ChatCommands
         {
 
             int startPosition = reader.Position;
-            // 신버전 와이어: [bool team][bool whisper][knetid whisperTarget][string message]
+            // 와이어: [bool team][bool whisper][knetid whisperTarget][string message]
             reader.Get(out bool _team);
             reader.Get(out bool _whisper);
             reader.Get(out knetid _whisperTarget);
@@ -79,8 +79,7 @@ public static class ChatCommands
                     return false;
                 }
 
-                // 게임 내장 커스텀 명령 dict 는 신버전 기반 모드에서 제거됨
-                // (Multiplayer.RegisterCustomServerReceiver 기반). 미등록 명령은 개인 회신만 한다.
+                // 미등록 명령은 개인 회신만 한다.
                 ChatPrivateReply.SendToPlayer(plr, $"Unknown command: {argv[0]}");
             }
             return false; // 명령은 브로드캐스트/릴레이에서 제외
@@ -199,8 +198,7 @@ public static class ChatCommands
         }
 
         // 레이어 N: 사망 상태로 바로 마이그레이션하면 클라이언트가 사망/관전 UI 인 채로
-        // 월드를 재로드해 EventSystem NRE(UIUtil.GetEventSystemRaycastResults)가 발생한다(실측).
-        // 먼저 인플레이스 리스폰으로 살아난 뒤 마이그레이션해 정상 UI 경로를 타게 한다.
+        // 월드를 재로드해 EventSystem NRE가 발생하므로, 먼저 인플레이스 리스폰으로 살아난 뒤 마이그레이션한다.
         private static void RespawnThenMigrate(ScavPlayer caller, string pid)
         {
             int depth = OrchestratorClient.Instance.InstanceDepth;
@@ -242,12 +240,8 @@ public static class ChatCommands
         {
             if (caller == null || caller.body == null) return false;
 
-            // 인벤토리/착용 파괴 (드랍 아님 - FREEZE와 동일 정책, 유령 아이템 원천 차단)
-            // 주의 1: slots[i]=null 금지 - slots는 InventorySlot[] (컴포넌트 배열)이라 참조를
-            // 깨뜨리면 살아있는 바디의 HoldingItem/PickUpItem 등에서 NRE가 발생한다
-            // 주의 2: Object.Destroy는 프레임 말에 실제 반영 - 보급품 지급은 그 이후로 지연한다
-            // (아래 DelayCallLambda - 구 RespawnCommand의 ScheduleDelayedRespawn과 동일 원리)
-            // 주의 3: 컨테이너는 파괴 시 내용물을 월드에 드랍(unload)하므로 자식부터 파괴한다
+            // 인벤토리/착용 파괴(FREEZE와 동일 정책). slots[i]=null 금지(slots는 컴포넌트 배열),
+            // Object.Destroy는 프레임 말 반영이므로 보급품 지급은 0.6초 지연, 컨테이너는 자식부터 파괴한다.
             try
             {
                 var all = new List<Item>(caller.body.GetAllItemsThorough());
@@ -288,7 +282,7 @@ public static class ChatCommands
                 if (grantSupplies)
                 {
                     // Object.Destroy는 프레임 말에 실제 반영 - 파괴가 끝나 슬롯이 비워진 뒤에
-                    // 보급품을 지급한다 (같은 프레임 지급 시 옛 아이템 때문에 바닥에 드랍됨)
+                    // 보급품을 지급한다 (같은 프레임 지급 시 파괴 전 아이템 때문에 바닥에 드랍됨)
                     CasualtiesTogetherUtils.Util.DelayCallLambda(0.6f, (Action)(() =>
                     {
                         if (caller == null || caller.body == null) return;

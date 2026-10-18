@@ -9,9 +9,8 @@ internal sealed class LobbyBrowser
 {
     private const uint AppId = 4576510;
 
-    // 신버전(5.x) 로비 키 = "COOP_MOD_" + suffix, 구버전(4.x) = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_" + suffix
-    private const string KeyPrefixNew = "COOP_MOD_";
-    private const string KeyPrefixOld = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_";
+    // 로비 데이터 키 = "COOP_MOD_" + suffix
+    private const string KeyPrefix = "COOP_MOD_";
 
     private const string SuffixLobbyName = "LOBBYNAME";
     private const string SuffixDescription = "DESCRIPTION";
@@ -28,18 +27,11 @@ internal sealed class LobbyBrowser
     private const string SuffixAvgMood = "AVGMOOD";
     private const string SuffixExtraData = "EXTRADATA";
 
-    // 신/구 공용 메타데이터 조회 - 신 키 우선, 없으면 구 키로 폴백
-    private static string? Meta(IReadOnlyDictionary<string, string> md, string suffix)
-    {
-        if (md.TryGetValue(KeyPrefixNew + suffix, out string? v) && !string.IsNullOrEmpty(v))
-            return v;
-        md.TryGetValue(KeyPrefixOld + suffix, out string? old);
-        return old;
-    }
+    private static string? Meta(IReadOnlyDictionary<string, string> md, string suffix) =>
+        md.TryGetValue(KeyPrefix + suffix, out string? v) && !string.IsNullOrEmpty(v) ? v : null;
 
-    // EXTRADATA 규칙 구조체 크기: 신버전 112B(deathcounter+rules 108), 구버전 100B(deathcounter+rules 96)
-    private static int ExtraDataOffset(IReadOnlyDictionary<string, string> md) =>
-        md.ContainsKey(KeyPrefixNew + SuffixVersion) ? 112 : 100;
+    // EXTRADATA 규칙 구조체 크기 = deathcounter(4) + rules(108) = 112B
+    private const int ExtraDataOffset = 112;
 
     private SteamClient? _steamClient;
     private CallbackManager? _callbackManager;
@@ -146,7 +138,7 @@ internal sealed class LobbyBrowser
             return;
         }
 
-        // --filter: 버전 태그에 지정 문자열이 포함된 로비만 (신/구 포맷 공통)
+        // --filter: 버전 태그에 지정 문자열이 포함된 로비만
         IReadOnlyList<SteamMatchmaking.Lobby> lobbies = callback.Lobbies;
         if (_versionFilter != null)
         {
@@ -175,7 +167,7 @@ internal sealed class LobbyBrowser
             string? extraBase64 = Meta(lobby.Metadata, SuffixExtraData);
             if (!string.IsNullOrEmpty(extraBase64))
             {
-                foreach (ulong id in DecodeExtraData(extraBase64, ExtraDataOffset(lobby.Metadata)).SteamIds)
+                foreach (ulong id in DecodeExtraData(extraBase64).SteamIds)
                     allSteamIds.Add(id);
             }
         }
@@ -227,7 +219,7 @@ internal sealed class LobbyBrowser
             string? extraB64 = Meta(lobby.Metadata, SuffixExtraData);
             if (!string.IsNullOrEmpty(extraB64))
             {
-                extraData = DecodeExtraData(extraB64, ExtraDataOffset(lobby.Metadata));
+                extraData = DecodeExtraData(extraB64);
                 foreach (ulong sid in extraData.SteamIds)
                 {
                     string name = _nameCache.TryGetValue(sid, out string? n) ? n : sid.ToString();
@@ -238,7 +230,7 @@ internal sealed class LobbyBrowser
             if (!string.IsNullOrEmpty(livingCount)) Console.WriteLine($"    Survived:  {livingCount}/{plrDisplay}");
             if (!string.IsNullOrEmpty(avgMood)) Console.WriteLine($"    AvgMood:   {avgMood}");
 
-            // mods: EXTRADATA 우선, 없으면 신버전 COOP_MOD_MODS 키(': ' 구분) 사용
+            // mods: EXTRADATA 우선, 없으면 COOP_MOD_MODS 키(': ' 구분) 사용
             string[] mods = extraData?.Mods ?? Array.Empty<string>();
             if (mods.Length == 0 && !string.IsNullOrEmpty(modsKey))
                 mods = modsKey.Split(':', StringSplitOptions.RemoveEmptyEntries);
@@ -257,8 +249,7 @@ internal sealed class LobbyBrowser
     }
 
     // EXTRADATA: base64 → [2B ushort prefix + GZip] → [rules struct][steamIds][bool enforceModList][string[] modListGuids]
-    // rulesOffset: 신버전 112B / 구버전 100B (ExtraDataOffset 로 판정)
-    private static ExtraData DecodeExtraData(string base64, int rulesOffset)
+    private static ExtraData DecodeExtraData(string base64)
     {
         try
         {
@@ -299,7 +290,7 @@ internal sealed class LobbyBrowser
                 decompressed = outStream.ToArray();
             }
 
-            int offset = rulesOffset;
+            int offset = ExtraDataOffset;
             if (offset + 2 > decompressed.Length) return new ExtraData(Array.Empty<ulong>(), Array.Empty<string>());
             int steamIdCount = BitConverter.ToUInt16(decompressed, offset);
             offset += 2;

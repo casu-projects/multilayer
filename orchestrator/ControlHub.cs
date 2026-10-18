@@ -162,7 +162,6 @@ public sealed class ControlHub
         }
     }
 
-    // 메인 스레드 API
 
     public long NextSeq() => ++_seqCounter;
 
@@ -216,7 +215,6 @@ public sealed class ControlHub
     // ACK 완료 처리 + 재전송/타임아웃 + 연결 종료 처리 (메인 스레드 Tick에서 호출)
     public void Tick()
     {
-        // ACK 완료
         while (_ackCompletions.TryDequeue(out var ack))
         {
             if (ack.Conn.PendingAcks.TryRemove(ack.Seq, out PendingCommand? pending))
@@ -225,7 +223,6 @@ public sealed class ControlHub
             }
         }
 
-        // 재전송/타임아웃
         DateTime now = DateTime.UtcNow;
         foreach (ClientConnection conn in Connections)
         {
@@ -247,7 +244,6 @@ public sealed class ControlHub
             }
         }
 
-        // 연결 종료
         while (_closedConnections.TryDequeue(out ClientConnection? conn))
         {
             lock (_connections)

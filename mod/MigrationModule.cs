@@ -13,13 +13,11 @@ using UnityEngine;
 
 namespace CasuMod;
 
-// 오케스트레이터가 트랜잭션을 주도하고, 모드는 이벤트 보고/지시 수행만 한다
-// 신버전 기반 모드는 LiteEntitySystem(ECS) 기반으로 바디/아이템 동기화를 자체 관리하므로
-// 구 CoolSync 레지스트리 버스트(10170/10174) 기반 정리 로직은 제거되었다
+// 오케스트레이터가 트랜잭션을 주도하고, 모드는 이벤트 보고/지시 수행만 한다.
 public sealed class MigrationModule : MonoBehaviour
 {
     private readonly HashSet<string> _reported = new();
-    // 동결 플레이어 -> 현재 epoch (구 epoch 메시지는 무시 - 멱등)
+    // 동결 플레이어 -> 현재 epoch (오래된 epoch 메시지는 무시 - 멱등)
     private static readonly ConcurrentDictionary<string, int> FrozenPlayers = new();
     // FREEZE 시점에 캡처한 playerId - PRECLEAR 시점의 재조회 실패(플레이어가 이미 사라짐 등)를
     // 방지한다. SWAP 전까지 동일 인스턴스에서 playerId 는 불변이므로 안전하게 재사용한다.
@@ -90,14 +88,12 @@ public sealed class MigrationModule : MonoBehaviour
         ScavPlayer plr = FindByPersistentId(playerKey);
         if (plr == null || plr.body == null)
         {
-            if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Migration] FREEZE: {playerKey} 바디 없음.");
             OrchestratorClient.Instance?.SendEvent("FREEZE_DONE", new { playerKey, epoch });
             return;
         }
 
         // 리스폰 트랜잭션인데 아직 사망 상태면 인플레이스로 살려둔다 - 사망/관전 UI 인 채로
-        // 목적지 월드를 재로드하면 클라 EventSystem NRE(UIUtil.GetEventSystemRaycastResults)가
-        // 발생한다(실측). 명령 경로를 우회한 리스폰에 대한 안전망.
+        // 목적지 월드를 재로드하면 클라 EventSystem NRE가 발생하므로, 명령 경로를 우회한 리스폰의 안전망이다.
         if (respawn && !plr.body.alive)
         {
             try
@@ -139,28 +135,17 @@ public sealed class MigrationModule : MonoBehaviour
             Plugin.Log.LogWarning($"[Migration] {playerKey} 인벤토리 파괴 실패: {ex.Message}");
         }
 
-        // "레이어 끝에 닿자마자 바디가 사라지는" UX : 다른 클라이언트에 퇴장을 즉시 반영한다.
-        // 신버전 기반 모드는 LES 가 바디 엔티티 수명주기를 관리하므로 raw 10170 브로드캐스트는
-        // 제거되었다 (베이스가 실제 연결 해제/엔티티 제거 시 처리).
-        // 발신 중단은 IsFrozen 상태 기반 게이트가 담당한다
+        // 퇴장 반영/발신 중단은 IsFrozen 상태 기반 게이트가 담당한다.
 
-        // 1초 후: FREEZE_DONE - SWAP 전 버스트/파괴가 정리될 시간을 준다.
-        // 로딩 트리거(10016)는 목적지 인스턴스가 도착 시 단일 발신한다 (SendRegenerateWorld 는
-        // BasePlayer_ServerCreatePlayer 도착 훅 -> OnConnectionRequest Postfix 에서 호출된다).
-        // 출발지 연결은 곧 SWAP 에서 끊기므로 여기서 보내면 패킷이 유실되어 클라이언트가
-        // 옛 월드에 남고, 목적지 조기 baseline 으로 크래시한다.
+        // 1초 후 FREEZE_DONE. 10016은 목적지가 도착 시 발신한다(SWAP 전 출발지 발신은 유실됨).
         Util.DelayCallLambda(1f, (Action)(() =>
         {
             OrchestratorClient.Instance?.SendEvent("FREEZE_DONE", new { playerKey, epoch });
         }));
     }
 
-    // SWAP 직전 pre-clear (오케스트레이터가 목적지 READY 확인 후 발신). 출발지에는 아직
-    // 클라이언트의 스테일 EntitiesDict 가 그대로 남아 있으므로(SWAP 전 연결 유지), 이 시점에
-    // 대상 클라이언트 전용 "전체 엔티티 파괴" RPC 를 enqueue 한다. 이후 ~1.5초 재전송으로
-    // 도달을 보장한 뒤 PRECLEAR_DONE 을 알리고 곧바로 SWAP 이 일어난다. PlayerResyncTimeout(4s)
-    // 이전에 스왑되므로 출발지가 재-baseline 으로 되살릴 틈이 없다. 이렇게 비워진 사전에
-    // 목적지 첫 baseline 이 적용되어 ExecuteRpcs IndexOutOfRange 크래시가 사라진다.
+    // SWAP 직전, 출발지에서 대상 클라 전용 "전체 엔티티 파괴" RPC를 enqueue한다.
+    // 1.5초 재전송 후 SWAP(PlayerResyncTimeout 4s 이내)해 재-baseline 부활을 막고, 빈 사전에 목적지 baseline을 적용한다.
     internal static void HandlePreClear(ControlMessage msg)
     {
         PlayerKeyPayload payload = msg.PayloadAs<PlayerKeyPayload>();
@@ -186,9 +171,8 @@ public sealed class MigrationModule : MonoBehaviour
         }
 
         FirePreClear(playerId);
-        // pre-clear destroy RPC 는 비신뢰(unreliable) 틱 패킷으로 전송되므로, 1차가 SWAP 전에
-        // 모두 도달하지 못할 수 있다(실측: 1차만 보내면 목적지 baseline 이 부분 적용되어
-        // 'Bad data' + 플레이어 바디 미연결로 스폰 정지). 0.7초 뒤 2차 버스트로 도달을 보장한다.
+        // pre-clear destroy RPC는 비신뢰(unreliable) 틱 패킷이라 1차가 SWAP 전에 모두 도달하지
+        // 못할 수 있다(목적지 baseline 부분 적용 + 바디 미연결). 0.7초 뒤 2차 버스트로 보장한다.
         Util.DelayCallLambda(0.7f, (Action)(() => FirePreClear(playerId)));
 
         Util.DelayCallLambda(1.5f, (Action)(() =>
@@ -270,12 +254,8 @@ public sealed class MigrationModule : MonoBehaviour
             // 데이터 보관 -> 바디 생성 시(Body.Start) 복원 경로 사용
             SaveModule.SetPending(playerKey, (JObject)payload);
         }
-        // 이 인스턴스에서도 동결 - 10168(WORLDGEN_DONE) 보고와 퇴장/저장 스킵에 필요
-        // (FREEZE는 구 인스턴스에만 도착하므로 RESUME 시점에 설정. 중복 RESUME은 멱등)
+        // 이 인스턴스에서도 동결(RESUME은 멱등).
         FrozenPlayers[playerKey] = epoch;
-
-        // 로딩 트리거는 구 인스턴스의 FREEZE(1초 플러시 후 10016)가 단일 발신원이다
-        // 여기서 재전송하면 대기 중인 클라이언트의 재생성이 취소·재시작되어 상태가 손상된다
 
         OrchestratorClient.Instance?.SendEvent("RESUME_DONE", new { playerKey, epoch });
     }
@@ -330,7 +310,6 @@ public sealed class MigrationModule : MonoBehaviour
         Net.Server_SendToClientsVeryReliable(in writer, in targets);
     }
 
-    // 후킹
 
     // finished_worldgen 수신 시 동결 플레이어의 월드젠 완료를 보고한다
     [HarmonyPatch(typeof(WorldgenPatches), "ServerReceiver_FinishedWorldgen")]
@@ -348,9 +327,7 @@ public sealed class MigrationModule : MonoBehaviour
         }
     }
 
-    // 동결(FREEZE) 플레이어 퇴장 -> PLAYER_LEFT (오케스트레이터가 데이터 확정)
-    // 신버전 기반 모드는 바디 생성을 ScavPlayer.DestroyCharacterIfNoLocal 이 담당하므로
-    // 구 CharSync 서버측 정리/신뢰성 10174 DELETE 는 제거되었다
+    // 동결(FREEZE) 플레이어 퇴장 -> PLAYER_LEFT (오케스트레이터가 데이터 확정).
     [HarmonyPatch(typeof(ScavPlayer), nameof(ScavPlayer.OnDestroy))]
     internal static class ScavPlayer_OnDestroy_ReportLeftPatch
     {

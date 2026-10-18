@@ -7,17 +7,11 @@ using Together;
 
 namespace CasuMod.Patch;
 
-// 마이그레이션 도착 클라이언트는 출발지 인스턴스의 ServerTick 을 학습한 상태로
-// 입력을 보낸다 (StateA = _stateA.Tick = 출발지 틱). 도착지 인스턴스는 더 늦게
-// 부팅되어 tick 이 뒤처져 있으면 ServerEntityManager.Deserialize 의 게이트
-//   SequenceDiff(item.Header.StateA, base.Tick) > 0  ||  StateB > base.Tick
-// 가 모든 입력을 "invalid sequence" 로 거부한다 (sem.cs:324). 그러면 플레이어가
-// WaitingForFirstInput 을 벗어나지 못해 Active 로 전환되지 않고, diffs/스폰이
-// 전혀 가지 않아 WorldPlacePlayer 에서 무한 대기한다.
-//
-// 도착 후 클라이언트의 첫 입력 패킷에서 StateA/StateB 를 직접 파싱해, 도착지
-// ServerEntityManager 의 tick 을 그보다 앞서도록(최소 점프) 정렬한다. 이후 입력이
-// 정상 수용되어 플레이어가 Active 로 넘어가고 시야도 재동기화된다. (서버측 전용)
+// 마이그레이션 도착 클라는 출발지의 ServerTick을 학습한 상태로 입력을 보낸다(StateA = 출발지 틱).
+// 도착지 tick이 뒤처져 있으면 ServerEntityManager.Deserialize의 게이트
+// (SequenceDiff(StateA, base.Tick) > 0 || StateB > base.Tick)가 모든 입력을 "invalid sequence"로
+// 거부해 플레이어가 Active로 전환되지 못하고 WorldPlacePlayer에서 무한 대기한다.
+// 도착 후 첫 입력에서 StateA/StateB를 파싱해 도착지 tick을 그보다 앞서도록 정렬한다.
 [HarmonyPatch(typeof(ScavEntityTypesMap), "ServerReceiver__LiteEntitySystem")]
 internal static class MigrationTickAlignPatch
 {

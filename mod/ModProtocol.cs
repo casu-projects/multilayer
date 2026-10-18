@@ -53,7 +53,7 @@ public sealed class PlayerKeyPayload
 {
     public string PlayerKey { get; set; } = "";
 
-    // 마이그레이션 트랜잭션 epoch. -1이면 검증 생략 (구버전 하위 호환)
+    // 마이그레이션 트랜잭션 epoch. -1이면 검증 생략
     public int Epoch { get; set; } = -1;
 }
 
@@ -102,15 +102,4 @@ public sealed class KickPlayerPayload
 {
     public string PlayerKey { get; set; } = "";
     public string Reason { get; set; } = "";
-}
-
-// 디버그 로그 표시 상태 (orchestrator -> mod - `verbose on/off` 명령)
-public sealed class VerbosePayload
-{
-    public bool On { get; set; }
-}
-
-public static class KeyUtil
-{
-    public static string Steam(ulong steamId) => $"STEAM_{steamId}";
 }

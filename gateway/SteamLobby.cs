@@ -6,14 +6,8 @@ using SteamKit2.Internal;
 
 namespace CasuMpGateway;
 
-// SteamKit2 기반 로비 (네트워크당 로비 1개) - 기존 오케스트레이터 SteamKitLobbyManager 포팅
-// P2P 데이터는 SteamLobbyAdapter가 처리하고, 여기는 로비 생성/메타데이터/KICK 시그널만 담당한다
-//
-// 자가 치유: 로비는 ① SteamKit2 로그인(_loggedOn) ② 오케스트레이터 AUTH_INFO(AuthInfoReceived)
-// ③ 미생성/미생성중 ④ 재시도 간격 경과 가 모두 충족돼야 생성된다. 시스템 재시작 시 이 조건들이
-// 서로 다른 타이밍에 준비되며 레이스가 발생할 수 있고, 일단 생성된 로비가 사라져도 감지/재생성
-// 경로가 없었다. 여기서는 명시적 상태 머신 + 각 실패 지점별 복구 + 주기 안전망으로 "어떤 순서로
-// 준비돼도 로비가 수렴"하도록 보장한다. 설정값은 전부 하드코딩 기본값이다.
+// SteamKit2 기반 로비(네트워크당 1개) - 생성/메타데이터/KICK 시그널만 담당한다.
+// 로그인·AUTH_INFO·재시도 조건이 어떤 순서로 준비돼도 명시적 상태 머신 + 주기 안전망으로 로비가 수렴한다.
 public sealed class SteamLobby
 {
     private const uint AppId = 4576510;
@@ -30,16 +24,14 @@ public sealed class SteamLobby
         Failed,      // 로그온/생성 실패 (백오프 후 재시도)
     }
 
-    // 자가 치유 하드코딩 기본값
     private static readonly TimeSpan RetryMin = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan RetryMax = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan AuthWaitWarnInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SafetyRecycleInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan CreateFailRetry = TimeSpan.FromSeconds(10);
 
-    // 신버전 기반 모드(CasualtiesMP v5.0.0)는 로비 데이터 키를 COOP_MOD_* 로 통일했다
-    // (구버전: CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_*). 클라이언트가
-    // 이 키들을 인덱서로 직접 읽으므로(누락 시 로비가 검색에서 숨겨짐) 키 이름을 맞춰야 한다.
+    // CasualtiesMP v5.0.0은 로비 데이터 키를 COOP_MOD_*로 통일했다. 클라이언트가 이 키를
+    // 인덱서로 직접 읽으므로(누락 시 로비가 검색에서 숨겨짐) 키 이름을 맞춰야 한다.
     private const string KeyLobbyName = "COOP_MOD_LOBBYNAME";
     private const string KeyVersion = "COOP_MOD_VERSION";
     private const string KeyGamemode = "COOP_MOD_GAMEMODE";
@@ -77,7 +69,6 @@ public sealed class SteamLobby
     private DateTime _lobbyRetryAfterUtc;
     private bool _loggedOn;
 
-    // 자가 치유 상태 추적
     private LobbyState _state = LobbyState.Disabled;
     private SteamID? _lobbyId;
     private int _retryBackoff = 0;             // 0,1,2,... 지수 백오프 단계 (RetryMin*2^step, RetryMax 캡)
@@ -258,7 +249,6 @@ public sealed class SteamLobby
         }
 
         string text = $"KICK:{targetSteamId}:{reason}";
-        Logger.Debug($"KICK 로비 채팅 메시지 전송: 내용=\"{text}\".");
         var msg = new ClientMsgProtobuf<CMsgClientMMSSendLobbyChatMsg>(EMsg.ClientMMSSendLobbyChatMsg)
         {
             Body =
@@ -290,14 +280,9 @@ public sealed class SteamLobby
                 Logger.Info($"로그온 실패({_loginFailures}회): {callback.Result} / {callback.ExtendedResult}"
                     + " — 백오프 후 재시도.");
             }
-            else
-            {
-                Logger.Debug($"로그온 실패({_loginFailures}회): {callback.Result} / {callback.ExtendedResult}");
-            }
             return;
         }
 
-        Logger.Debug($"로그인 성공 (SteamID {_steamClient!.SteamID}).");
         _loggedOn = true;
         _loginFailures = 0;
         _retryBackoff = 0;
@@ -328,10 +313,6 @@ public sealed class SteamLobby
         if (hadLobby)
         {
             Logger.Info($"CM 연결 끊김 — 로비({_lobbyId}) 손실 감지. 재연결/재생성 진행.");
-        }
-        else
-        {
-            Logger.Debug("CM 연결 끊김 - 재접속 시도.");
         }
         _lobbyId = null;
         SetState(LobbyState.Connecting);
@@ -432,7 +413,7 @@ public sealed class SteamLobby
         };
     }
 
-    // 서버 이름을 게임 제한(32자)으로 클램프 - 초과 시 신버전 클라이언트가 로비를 목록에서 제외한다
+    // 서버 이름을 게임 제한(32자)으로 클램프 - 초과 시 클라이언트가 로비를 목록에서 제외한다
     private string ClampName(string name)
     {
         if (string.IsNullOrEmpty(name)) return "";
@@ -455,8 +436,8 @@ public sealed class SteamLobby
     }
 
     // EXTRADATA: gzip(deathcounter+rules struct + steamId[] + enforceModList), LiteNetLib
-    // 길이 프리픽스 + base64 - 신버전 클라이언트가 기대하는 형식 그대로
-    // (신 파서는 modlist를 COOP_MOD_MODS 키에서 읽으므로 EXTRADATA에 mod/MOTD 배열을 넣지 않는다)
+    // 길이 프리픽스 + base64 - 클라이언트가 기대하는 형식
+    // (클라이언트 파서는 modlist를 COOP_MOD_MODS 키에서 읽으므로 EXTRADATA에 mod/MOTD 배열을 넣지 않는다)
     private string BuildExtraData()
     {
         if (_rulesBytes == null || _rulesBytes.Length == 0)

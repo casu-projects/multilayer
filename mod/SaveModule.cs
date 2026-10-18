@@ -102,7 +102,6 @@ public static class SaveModule
         return false;
     }
 
-    // 직렬화
 
     public static JObject SerializePlayer(ScavPlayer plr)
     {
@@ -189,11 +188,9 @@ public static class SaveModule
         }
     }
 
-    // 필드 직렬화 헬퍼
 
-    // 직렬화 제외 필드 - 온도계 transient 상태: tempCheckTime은 냉각 1초 게이트 타임스탬프로,
-    // 새 프로세스(Time.time 0)에 이전 경과 시간이 복원되면 게이트가 영구 스킵되어 냉각만
-    // 정지된다(실측). temperature/wetness/clothingTemperature는 장착·주기 재계산 대상
+    // 직렬화 제외 필드 - 온도계 transient 상태: tempCheckTime(냉각 1초 게이트)이 새 프로세스에서
+    // 복원되면 게이트가 영구 스킵되어 냉각이 멈춘다. temperature/wetness/clothingTemperature는 재계산 대상.
     private static readonly HashSet<string> TransientFieldBlacklist = new()
     {
         "tempCheckTime",
@@ -240,7 +237,7 @@ public static class SaveModule
         foreach (JProperty prop in fields.Properties())
         {
             if (TransientFieldBlacklist.Contains(prop.Name))
-                continue; // 구버전 저장 데이터(블랙리스트 적용 전) 방어 - 복원 스킵
+                continue; // 블랙리스트 필드가 남아 있는 저장 데이터는 복원 스킵
             FieldInfo f = type.GetField(prop.Name, BindingFlags.Public | BindingFlags.Instance);
             if (f == null) continue;
             if (IsSavableType(f.FieldType))
@@ -341,7 +338,6 @@ public static class SaveModule
         return null;
     }
 
-    // 인벤토리 (계층 - )
 
     private static JArray SerializeInventory(Body body)
     {
@@ -504,7 +500,6 @@ public static class SaveModule
         item.favourited = entry.Value<bool?>("favourited") ?? false;
         ApplyComponents(obj, entry["components"]);
 
-        // 재귀 내용물
         if (entry["contents"] is JArray contents && contents.Count > 0
             && item.GetComponent<Container>() is Container container)
         {
@@ -517,7 +512,6 @@ public static class SaveModule
         return item;
     }
 
-    // 레시피 / 신원 / 기타
 
     private static JObject SerializeRecipes()
     {
@@ -630,9 +624,8 @@ public static class SaveModule
     }
 
     // 저장 위치 적용 - 바닐라 스폰 위치 전송(LateSpawnLocation) 시점에 호출되어
-    // 클라이언트가 처음 받는 스폰 위치가 저장 위치가 되게 한다 (기존 10168 지연 적용은
-    // 바닐라 스폰 전송 이후라 클라이언트에 반영되지 않았다). 성공 시 true - 호출부가
-    // 바닐라 스폰 계산을 스킵한다
+    // 클라이언트가 처음 받는 스폰 위치가 저장 위치가 되게 한다. 성공 시 true - 호출부가
+    // 바닐라 스폰 계산을 스킵한다.
     internal static bool TryApplyPendingPosition(ScavPlayer plr, NetBody pb)
     {
         if (plr == null || pb == null || WorldGeneration.world == null) return false;
@@ -679,10 +672,8 @@ public static class SaveModule
         }
     }
 
-    // 퇴장 시 저장된 드랍 아이템을 스폰 위치 확정 후 드랍한다. LateSpawnLocation은 재접속/
-    // 마이그레이션/신규 모두에서 첫 스폰 시 1회 호출되고, 이 시점에 b.body.transform.position이
-    // 최종 확정되며(저장 위치 복원 or 기본 스폰) 클라이언트 스폰 위치 전송(ServerMain.cs:227)
-    // 이전이므로 드랍 아이템이 클라이언트 로드 시 함께 보인다.
+    // 퇴장 시 저장된 드랍 아이템을 스폰 위치 확정 후 드랍한다. LateSpawnLocation은 재접속/마이그레이션/신규
+    // 모두에서 첫 스폰 시 1회 호출되고, 위치가 최종 확정된 뒤 클라 스폰 위치가 전송되므로 함께 보인다.
     [HarmonyPatch(typeof(ServerMain), nameof(ServerMain.LateSpawnLocation))]
     internal static class ServerMain_LateSpawnLocation_DroppedItemsRestorePatch
     {
@@ -807,16 +798,14 @@ public static class SaveModule
         }
     }
 
-    // 후킹
 
     // 바디 생성 시 복원 . 데이터 미수신 시 짧은 대기 후 기본 상태
     [HarmonyPatch(typeof(Body), "Start")]
     internal static class Body_Start_RestorePatch
     {
-        // 베이스 모드의 인메모리 저장(server_lastplayerstates) 이중 복원 차단
-        // 우리 시스템(오케스트레이터 단일 소유자)이 정본이므로, 같은 인스턴스 재접속/롤백
-        // 시 베이스 PlayerSavedState.Apply가 아이템을 중복 생성하는 것을 방지한다
-        // (구 모드 FreshInstanceReconnectPatch.cs:23 동일 규약)
+        // 베이스 모드의 인메모리 저장(server_lastplayerstates) 이중 복원 차단.
+        // 우리 시스템(오케스트레이터 단일 소유자)이 정본이므로, 같은 인스턴스 재접속/롤백 시
+        // 베이스 PlayerSavedState.Apply가 아이템을 중복 생성하는 것을 방지한다.
         [HarmonyPriority(Priority.First)]
         private static void Prefix(Body __instance)
         {
@@ -845,14 +834,11 @@ public static class SaveModule
             if (data != null)
             {
                 RestorePlayer(__instance, plr, data);
-                // 위치 적용은 10168(월드젠 완료) Postfix로 지연 (수정) - 바닐라
-                // HeyPlayerJustJoined의 스폰 리로케이션(10019)이 저장 위치를 덮어쓰는 경합을
-                // 피하기 위해, 바닐라 스폰 적용 이후에 우리 위치를 적용한다
-                // (QueuePosition이 PendingPositions에 큐잉 - MigrationModule의 10168 Postfix에서 소비)
+                // 저장 위치 적용은 월드젠 완료 시점까지 지연한다 - 바닐라 스폰 리로케이션이
+                // 저장 위치를 덮어쓰는 경합을 피하기 위해 바닐라 스폰 적용 이후에 적용한다.
             }
             else
             {
-                if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Save] {plr.playerName} 데이터 없음 — 기본 상태로 시작.");
                 GrantStartingSupplies(__instance, plr);
             }
         }

@@ -23,14 +23,6 @@ public static class Logger
         Enqueue(message, source);
     }
 
-    // 디버그 로그 표시 여부 - 오케스트레이터 VERBOSE로 설정
-    public static bool Verbose;
-
-    public static void Debug(string message, string? suffix = null)
-    {
-        if (Verbose) Info(message, suffix);
-    }
-
     // 콘솔 전용 - 릴레이 없음 (연결 오류 등 오케스트레이터 콘솔 도배 방지)
     public static void Local(string message) => System.Console.WriteLine(message);
 
@@ -60,10 +52,4 @@ public static class Logger
         Interlocked.Decrement(ref _queued);
         return true;
     }
-}
-
-// 디버그 로그 표시 상태 (VERBOSE 메시지 - `verbose on/off` 명령)
-public sealed class VerbosePayload
-{
-    public bool On { get; set; }
 }

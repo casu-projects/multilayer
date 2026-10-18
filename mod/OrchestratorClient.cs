@@ -189,12 +189,7 @@ public sealed class OrchestratorClient : MonoBehaviour
             case "KICK_PLAYER":
                 HandleKickPlayer(msg);
                 break;
-            case "VERBOSE":
-                Plugin.VerboseLogging = msg.PayloadAs<VerbosePayload>()?.On ?? false;
-                Plugin.Log.LogInfo($"[Orch] verbose {(Plugin.VerboseLogging ? "켬" : "끔")} (오케스트레이터).");
-                break;
             default:
-                if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Orch] 알 수 없는 명령: {msg.Type}");
                 Ack(msg, false, "unknown");
                 break;
         }
@@ -212,7 +207,6 @@ public sealed class OrchestratorClient : MonoBehaviour
             ScavPlayer plr = ChatCommands.FindByPersistentId(payload.PlayerKey);
             if (plr == null)
             {
-                if (Plugin.VerboseLogging) Plugin.Log.LogWarning($"[Orch] KICK_PLAYER 대상 없음: {payload.PlayerKey}");
                 return;
             }
             Net.Server_Kick(plr.playerId, payload.Reason ?? "Migration Failed. Please reconnect.");
@@ -224,7 +218,6 @@ public sealed class OrchestratorClient : MonoBehaviour
         }
     }
 
-    // 네트워크 스레드
 
     private void ThreadLoop()
     {
@@ -242,7 +235,7 @@ public sealed class OrchestratorClient : MonoBehaviour
                 _connected = true;
                 Plugin.Log.LogInfo($"[Orch] 오케스트레이터 연결: {OrchAddr}");
 
-                // READY 재보고는 재연결 전용 (수정): 첫 연결은 FinishWorldGeneration
+                // READY 재보고는 재연결 전용: 첫 연결은 FinishWorldGeneration
                 // 완료 시점의 INSTANCE_READY 보고가 담당한다 - 첫 연결에서도 재보고가 발동하면
                 // ROUTE_UPDATE가 중복되어 게이트웨이가 백엔드를 이중 연결하고
                 // "Player with this name already exists" 추방을 유발한다
@@ -252,7 +245,6 @@ public sealed class OrchestratorClient : MonoBehaviour
                 }
                 _everConnected = true;
 
-                // MOD_HELLO 등록
                 writer.WriteLine(ControlMessage.Create(1, "MOD_HELLO", new
                 {
                     instanceKey = InstanceKey,

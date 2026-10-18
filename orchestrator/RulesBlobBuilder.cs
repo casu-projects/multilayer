@@ -1,14 +1,8 @@
 namespace CasuMpOrchestrator;
 
-// 스팀 P2P 로비 등록 시 쓰이는 EXTRADATA를 위한 Together.MultiplayerGameRules 이진 레이아웃 구성
-//
-// 신버전 기반 모드(CasualtiesMP v5.0.0)는 규칙 구조체가 커졌다:
-//   - Together.SteamServerInfoInLobbyExtraData = [deathcounter int(4)] + [MultiplayerGameRules]
-//   - Together.MultiplayerGameRules unmanaged sizeof = 108 (bool=1바이트, 자연 정렬)
-//   => 총 112 바이트 (구버전: 100 = deathcounter[4] + KrokoshaMultiplayerGameRules[96])
-//
-// 오프셋은 Together.MultiplayerGameRules 의 필드 순서/자연 정렬과 1:1로 맞춘다.
-// (신 클라이언트가 GetUnmanaged<SteamServerInfoInLobbyExtraData>() 로 정확히 112바이트를 읽음)
+// 스팀 P2P 로비 EXTRADATA용 Together.MultiplayerGameRules 이진 레이아웃 구성.
+// SteamServerInfoInLobbyExtraData = [deathcounter int(4)] + [MultiplayerGameRules(108B, bool=1B, 자연 정렬)] = 112B.
+// 오프셋은 필드 순서/자연 정렬과 1:1로 맞춘다 (신 클라가 정확히 112B를 GetUnmanaged로 읽는다).
 internal static class RulesBlobBuilder
 {
     // deathcounter(4) + MultiplayerGameRules(108)

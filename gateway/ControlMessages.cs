@@ -55,7 +55,6 @@ public sealed class ControlMessage
         };
     }
 
-    // payload 편의 접근
 
     public T? PayloadAs<T>() where T : class =>
         Payload is JsonElement el ? el.Deserialize<T>(ParseOptions) : null;

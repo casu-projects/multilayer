@@ -5,7 +5,7 @@ using Together;
 
 namespace CasuMod;
 
-// 크로스 인스턴스 투표 릴레이 (구 시스템 CrossInstanceVoteRelay/Receive 이식)
+// 크로스 인스턴스 투표 릴레이
 // VOTE_START 발신 / VOTE_RUN 수신(바닐라 투표 UI + tally 발신) / VOTE_RESULT 수신(공지 + 효과) /
 // VOTE_REJECTED 수신(발신자 개인 회신). 오케스트레이터 VoteCoordinator와 페어
 public static class VoteRelay

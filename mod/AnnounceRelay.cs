@@ -8,15 +8,9 @@ using LiteNetLib.Utils;
 
 namespace CasuMod;
 
-// 크로스 인스턴스 공지 릴레이 - 사망/퇴장/접속/레이어 이동/리스폰 공지를 오케스트레이터 경유로
-// 전 레이어에 전파한다. base 의 Server_ChatAnnouncement 는 AllClientIds 고정이라 타겟 지정이
-// 불가능해 CLIENT_ChatMessage(type 2, name="*") 와이어로 전송한다.
-//
-// 접속/퇴장: base 로컬 공지(<key:plr_joined>/<key:plr_left>)는 JoinLeaveAnnounceSuppressPatch 가
-// 억제하고, 모드가 base 와 동일한 포맷/색상으로 직접 만들어 "발신 레이어 즉시 표시 + 타 레이어
-// 크로스 전송"한다. 레이어 이동(마이그레이션)은 JoinLeaveAnnouncePatch 가 이벤트를 만들지 않아
-// 자연히 표시되지 않는다.
-// 사망: base 의 강화된 로컬 메시지(사유 포함)가 발신 레이어 담당, 이 릴레이는 타 레이어에 원문 전달.
+// 크로스 인스턴스 공지(사망/퇴장/접속/레이어 이동/리스폰)를 오케스트레이터 경유로 전 레이어에 전파한다.
+// base 공지는 타겟 지정이 불가능해 CLIENT_ChatMessage(type 2, name="*") 와이어로 보낸다.
+// 접속/퇴장은 base 로컬 공지를 억제하고 모드가 동일 포맷으로 만들어 발신 레이어 즉시 표시 + 타 레이어 전송한다.
 public static class AnnounceRelay
 {
     public const string KindDeath = "death";

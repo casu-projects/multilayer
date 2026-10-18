@@ -136,7 +136,6 @@ public sealed class GatewayCore
         {
             if (_sessions.TryGetValue(session.Player, out ClientSession? old))
             {
-                Logger.Debug($"{session.Username} 중복 세션 — 기존 세션 폐기.");
                 _sessions.Remove(session.Player);
                 old.Kick("Reconnected from a new session.");
             }
@@ -211,7 +210,6 @@ public sealed class GatewayCore
         RemoveSession(session, reason);
     }
 
-    // 내부
 
     private void HandleCommand(ControlMessage msg)
     {
@@ -241,9 +239,6 @@ public sealed class GatewayCore
                     break;
                 case "MAINTENANCE":
                     ApplyMaintenance(msg);
-                    break;
-                case "VERBOSE":
-                    ApplyVerbose(msg);
                     break;
                 case "SHUTDOWN":
                     ApplyShutdown();
@@ -327,7 +322,6 @@ public sealed class GatewayCore
                 return;
             }
         }
-        Logger.Debug($"{session.Username} 세션을 {payload.BackendAddr}(으)로 전환 (클라 연결 유지).");
         // SWAP 멱등성 : 이미 같은 목적지로 Active/Connecting/Swapping이면
         // 재연결하지 않는다 - 중복 SWAP(오케스트레이터 재전송/재시도)으로 백엔드를 이중
         // 연결하면 인스턴스의 "Player with this name already exists" 추방이 발생한다
@@ -402,14 +396,6 @@ public sealed class GatewayCore
         }
     }
 
-    // 디버그 로그 표시 상태 (오케스트레이터 VERBOSE 메시지)
-    private void ApplyVerbose(ControlMessage msg)
-    {
-        var payload = msg.PayloadAs<VerbosePayload>();
-        Logger.Verbose = payload?.On ?? false;
-        Logger.Info($"verbose {(Logger.Verbose ? "켬" : "끔")} (오케스트레이터).");
-    }
-
     private void ApplyMaintenance(ControlMessage msg)    {
         var payload = msg.PayloadAs<MaintenancePayload>() ?? throw new InvalidDataException("payload 없음");
         _maintenance = payload.On;
@@ -471,7 +457,6 @@ public sealed class GatewayCore
     internal static bool IsUsableBackendAddr(string? addr) =>
         !string.IsNullOrEmpty(addr) && addr.Contains(':');
 
-    // payload 모델
 
     public sealed class TableSnapshot
     {

@@ -7,13 +7,9 @@ using CasualtiesTogetherUtils;
 
 namespace CasuMod.Patch;
 
-// 사망 처리 대체: 개인(리스폰 안내 팝업+채팅) + 타 레이어 공지.
-// base 의 everyone-died 블록(전체 서버 알림/호스트 팝업)은 비활성화한다
-// (개인 !respawn 리스폰이 가능하므로). 바닐라 유지분(발신 레이어 로컬 사망 공지 +
-// 튜토리얼 완료 + 시체 컴포넌트)만 재현한다.
-//
-// 주의: Harmony 는 Prefix 가 원본을 스킵해도 Postfix 를 계속 실행하므로,
-//       DiscordEventPatch 의 DIED 보고(Postfix)는 그대로 동작한다.
+// 사망 처리 대체: 개인 리스폰 안내(팝업+채팅) + 타 레이어 공지.
+// base의 everyone-died 블록(전체 알림/호스트 팝업)은 비활성화하고 바닐라 유지분만 재현한다.
+// Harmony는 Prefix가 원본을 스킵해도 Postfix를 실행하므로 DiscordEventPatch의 DIED 보고는 유지된다.
 [HarmonyPatch(typeof(ServerMain), nameof(ServerMain.OnPlayerDeath))]
 [HarmonyPriority(Priority.First)]
 internal static class DeathAnnouncePatch

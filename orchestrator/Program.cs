@@ -17,7 +17,6 @@ internal static class Program
 
         string configPath = args.Length > 0 ? args[0] : "orchestrator.json";
         OrchestratorConfig config = OrchestratorConfig.Load(configPath);
-        VerboseState.Active = config.Verbose;
 
         Console.WriteLine($"구성 로드: {configPath}");
         Console.WriteLine($"제어 허브 포트: {config.Port}");
@@ -286,7 +285,6 @@ internal static class Program
                 if (conn.Kind != ClientKind.Unknown) break;
                 conn.Kind = ClientKind.Gateway;
                 conn.GatewayVersion = msg.PayloadAs<HelloVersion>()?.Version;
-                VerboseState.Line($"게이트웨이 등록 (version {conn.GatewayVersion}).");
                 sessions.PushTableSnapshot();
                 // 인증/밴 정보 푸시 - 밴 목록 단일 소유자는 오케스트레이터, 게이트웨이는
                 // 메모리 사본으로 접속 시 검증 (재연결 시 스냅샷 재푸시로 수렴)
@@ -295,8 +293,6 @@ internal static class Program
                 hub.SendNoAck(conn, "ACK_REPLY", null);
                 // 새 게이트웨이 - Steam 로비 메타데이터 즉시 푸시 (rules/players)
                 PushLobbyMetadata(hub, runRules, sessions, force: true);
-                // 디버그 로그 표시 상태 전파
-                hub.SendNoAck(conn, "VERBOSE", new { on = VerboseState.Active });
                 // 락다운 활성 상태면 재푸시 (게이트웨이 재시작에도 유지 - 상태는 메모리 전용)
                 if (LockdownState.Active)
                 {
@@ -325,8 +321,6 @@ internal static class Program
                 // 에이전트가 추가될 때마다 재실행되어 누락 레이어가 자동 보충된다
                 instances.PrewarmLayers();
                 hub.SendNoAck(conn, "AGENT_HELLO_ACK", new { ok = true });
-                // 디버그 로그 표시 상태 전파
-                hub.SendNoAck(conn, "VERBOSE", new { on = VerboseState.Active });
                 return;
 
             case "MOD_HELLO":
@@ -341,8 +335,6 @@ internal static class Program
                 hub.SendNoAck(conn, "MOD_HELLO_ACK", new { ok = true });
                 hub.SendNoAck(conn, "RUN_RULES_STATE",
                     new { runSettings = runRules.RunSnapshot, rules = runRules.RuleSnapshot });
-                // 디버그 로그 표시 상태 전파
-                hub.SendNoAck(conn, "VERBOSE", new { on = VerboseState.Active });
                 return;
         }
 
@@ -873,7 +865,6 @@ internal static class Program
         _ = discordBot.UpdatePlayerCountTopicAsync(BuildPlayerCountText(sessions));
     }
 
-    // payload 모델
 
     private sealed class HelloVersion { public int Version { get; set; } }
     private sealed class AgentHelloPayload { public string MachineId { get; set; } = ""; public int Capacity { get; set; } public string Address { get; set; } = ""; }

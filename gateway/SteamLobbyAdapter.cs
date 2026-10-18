@@ -102,12 +102,6 @@ public sealed class SteamLobbyAdapter
             }
             _pendingCloses.RemoveAll(p => due.Contains(p.Conn));
         }
-
-        if (DateTime.UtcNow >= _nextQualityLogAtUtc)
-        {
-            _nextQualityLogAtUtc = DateTime.UtcNow.AddSeconds(10);
-            LogConnectionQuality();
-        }
     }
 
     public void Stop()
@@ -136,56 +130,6 @@ public sealed class SteamLobbyAdapter
     // 오케스트레이터 LOBBY_METADATA -> 로비 메타데이터 반영
     public void UpdateLobbyMetadata(GatewayCore.LobbyMetadataPayload payload) => _lobby.UpdateDynamicMetadata(payload);
 
-    // 주기적 P2P 연결 품질 로그 (10초 간격) - direct/relay 여부는 연결 성립 시 상세 상태
-    // ("transport" 라인), 실시간 품질은 GetConnectionRealTimeStatus(핑/패킷률/백로그)로 관찰
-    // 릴레이 경유 유저 식별 + 손실/백로그 - 동기화 문제의 데이터 기반 판단용
-    private DateTime _nextQualityLogAtUtc = DateTime.MinValue;
-
-    private void LogConnectionQuality()
-    {
-        foreach (HSteamNetConnection conn in _activeConnections.ToList())
-        {
-            try
-            {
-                SteamNetConnectionRealTimeStatus_t rt = default;
-                SteamNetConnectionRealTimeLaneStatus_t lane = default;
-                if (SteamNetworkingSockets.GetConnectionRealTimeStatus(
-                        conn, ref rt, 1, ref lane)
-                    != EResult.k_EResultOK)
-                {
-                    continue;
-                }
-                ulong sid = _connectionSteamIds.TryGetValue(conn, out ulong s) ? s : 0;
-                Logger.Debug($"P2P 품질 steam={sid} ping={rt.m_nPing}ms "
-                    + $"qual(L/R)={(int)Math.Round(rt.m_flConnectionQualityLocal * 100.0)}%"
-                    + $"/{(int)Math.Round(rt.m_flConnectionQualityRemote * 100.0)}% "
-                    + $"pps(out/in)={rt.m_flOutPacketsPerSec:F0}/{rt.m_flInPacketsPerSec:F0} "
-                    + $"pendRel={rt.m_cbPendingReliable} sentUnackedRel={rt.m_cbSentUnackedReliable} "
-                    + $"pendUnrel={rt.m_cbPendingUnreliable}");
-            }
-            catch (Exception ex)
-            {
-                Logger.Debug($"P2P 품질 조회 실패: {ex.Message}");
-            }
-        }
-    }
-
-    private static void LogDetailedConnectionStatus(HSteamNetConnection conn, ulong steamId)
-    {
-        try
-        {
-            int len = SteamNetworkingSockets.GetDetailedConnectionStatus(conn, out string detail, 2048);
-            if (len > 0 && !string.IsNullOrEmpty(detail))
-            {
-                Logger.Debug($"P2P 상세 steam={steamId}:\n{detail}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug($"P2P 상세 조회 실패: {ex.Message}");
-        }
-    }
-
     // Steam 세션 KICK: 로비 채팅 사유 전달 후 지연 종료 (채팅이 CM 왕복을 먼저 마치게)
     internal void RequestClose(HSteamNetConnection conn, ulong steamId, string reason)
     {
@@ -207,7 +151,6 @@ public sealed class SteamLobbyAdapter
                 {
                     _activeConnections.Add(callback.m_hConn);
                     _connectionSteamIds[callback.m_hConn] = callback.m_info.m_identityRemote.GetSteamID64();
-                    Logger.Debug($"P2P 연결 수락: {callback.m_info.m_identityRemote.GetSteamID64()}");
                 }
                 else
                 {
@@ -217,9 +160,6 @@ public sealed class SteamLobbyAdapter
             }
             case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected:
             {
-                ulong sid = callback.m_info.m_identityRemote.GetSteamID64();
-                Logger.Debug($"P2P 연결 성립: {sid}");
-                LogDetailedConnectionStatus(callback.m_hConn, sid);
                 break;
             }
             case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ClosedByPeer:

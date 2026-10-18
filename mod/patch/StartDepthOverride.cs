@@ -4,7 +4,7 @@ using Together;
 
 namespace CasuMod.Patch;
 
-// CASU_START_DEPTH 환경변수 -> 월드젠 시작 깊이 반영 (옛 모드 이식)
+// CASU_START_DEPTH 환경변수 -> 월드젠 시작 깊이 반영
 // depth-2+ 인스턴스는 biomeDepth/totalTraveled를 깊이에 맞게 설정해야 레이어 전환이
 // 올바른 레이어로 생성되고, 위치 복원의 레이어 불일치 체크가 의미를 가진다
 // depth-1은 기존 동작과 동일 (debugStartDepth=0, totalTraveled=0)

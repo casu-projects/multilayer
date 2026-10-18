@@ -69,7 +69,6 @@ public sealed class ClientSession : INetEventListener
         Transport = transport;
         State = SessionState.Accepted;
         _backendManager = new NetManager(this) { UnconnectedMessagesEnabled = false };
-        Logger.Debug($"세션 생성: id={SessionId}, transport={Transport}, player={Player.Value}");
 
         // Steam 접속 + 인트로 이름이 1바이트/문자 인코딩으로 깨진 경우(CJK) Steam 유저명으로
         // 보정한다 - SESSION_CONNECTED username과 백엔드 tail(Ver 2)에 반영되어
@@ -124,8 +123,6 @@ public sealed class ClientSession : INetEventListener
         _connectRetryCount = 0;
         _nextRetryAtUtc = null;
         State = SessionState.Swapping;
-        Logger.Debug($"세션 백엔드 교체: id={SessionId}, transport={Transport}, "
-            + $"{previousBackend} -> {backendAddr}, instance={instanceId ?? "-"}");
         ConnectToBackend(backendAddr);
         _swapping = false;
     }
@@ -146,7 +143,6 @@ public sealed class ClientSession : INetEventListener
             if (_pendingFromClient.Count >= MaxPendingReliablePackets)
             {
                 _pendingFromClient.RemoveAt(0);
-                Logger.Debug($"신뢰성 대기열 초과: id={SessionId}, 가장 오래된 패킷 1개 폐기.");
             }
             _pendingFromClient.Add((data, channel, method));
         }
@@ -164,7 +160,6 @@ public sealed class ClientSession : INetEventListener
         if (Disposed) return;
         Disposed = true;
         State = SessionState.Closed;
-        Logger.Debug($"세션 종료: id={SessionId}, transport={Transport}, player={Player.Value}");
         _backendManager.Stop();
     }
 
@@ -232,8 +227,6 @@ public sealed class ClientSession : INetEventListener
     {
         _hasEverConnectedToBackend = true;
         _connectRetryCount = 0;
-        Logger.Debug($"{Username} - 백엔드 {BackendAddr} 연결 성공 "
-            + $"(session={SessionId}, transport={Transport}, instance={InstanceId ?? "-"}).");
         State = SessionState.Active;
         foreach ((byte[] data, byte channel, DeliveryMethod method) in _pendingFromClient)
         {
@@ -262,7 +255,7 @@ public sealed class ClientSession : INetEventListener
         }
 
         // 명시적 거부 중 "월드 생성 중"만 일시적(재시도), 나머지는 확정 실패
-        // 게임의 실제 거부 메시지: "Server is generating world, please try again." (Net.cs:243)
+        // 게임의 실제 거부 메시지: "Server is generating world, please try again."
         bool isDefiniteRejection = disconnectInfo.Reason == DisconnectReason.ConnectionRejected;
         if (isDefiniteRejection && rejectReason.Contains("is generating world", StringComparison.OrdinalIgnoreCase))
         {

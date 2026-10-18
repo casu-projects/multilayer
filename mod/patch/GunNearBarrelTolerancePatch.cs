@@ -11,19 +11,11 @@ using UnityEngine;
 
 namespace CasuMod.Patch;
 
-// 총기 발사 near-barrel 검증의 RTT 오탐 국소 완화 (재발명 금지 - base가 데미지/릴레이 계속 소유)
-//
-// 배경: ServerReceiver__PlayerBodyShoot 가 클라가 보고한 발사 원점과 "서버의 현재" 총구 위치를
-//   KM.DistanceCheck(..., 10f / 2f) 로 비교해 벗어나면 발사를 거부한다. RTT 동안 플레이어/총이
-//   움직이면 오탐 -> 클라 예측 발사 롤백. 패킷에는 이미 클라가 본 ServerTick 이 실려 오지만
-//   원본은 이를 사용하지 않는다.
-//
-// 방식: 메서드 전체를 재구현하지 않고, near-barrel 검사의 KM.DistanceCheck(Vector2,Vector2,float)
-//   호출 operand 만 동일 시그니처 헬퍼로 치환한다(스택 균형 유지). 헬퍼는 클라-서버 틱 지연만큼
-//   이동 여유를 더해 RTT 를 흡수한다. base 의 총기 로직/데미지/릴레이는 그대로 유지된다.
-//
-// 안전성: IL 패턴이 바뀌면 치환 0건 -> 경고만 남기고 원본 유지(게임은 base 기본 동작). reader
-//   파싱 실패 시에도 예외를 삼키고 틱=현재로 두어 여유 0(원본에 가깝게)으로 후퇴한다.
+// 총기 near-barrel 검증의 RTT 오탐 완화 (base가 데미지/릴레이를 계속 소유).
+// ServerReceiver__PlayerBodyShoot가 클라 발사 원점과 서버 현재 총구를 DistanceCheck로 비교해
+// 벗어나면 발사를 거부하는데, RTT 동안 이동하면 오탐이 난다. 원본 메서드를 재구현하지 않고
+// DistanceCheck 호출만 동일 시그니처 헬퍼로 치환해 클라-서버 틱 지연만큼 여유를 더한다.
+// IL 패턴이 바뀌면 치환 0건으로 원본 유지, 파싱 실패 시 여유 0으로 후퇴한다.
 [HarmonyPatch(typeof(GunScript_Fire_MultiplayerPatch), "ServerReceiver__PlayerBodyShoot")]
 internal static class GunNearBarrelTolerancePatch
 {
@@ -104,10 +96,6 @@ internal static class GunNearBarrelTolerancePatch
 
         bool original = KM.DistanceCheck(in a, in b, max);
         bool relaxed = original || KM.DistanceCheck(in a, in b, max + extra);
-        if (!original && relaxed && Plugin.VerboseLogging)
-        {
-            Plugin.Log.LogInfo($"[GunFix] near-barrel 완화 적용 (lateTicks={lateTicks}, max={max:F0}, extra={extra:F1}).");
-        }
         return relaxed;
     }
 }

@@ -57,14 +57,8 @@ public static class ChatRelay
 
     private static string BuildDisplayName(ChatPayload payload)
     {
-        // 클라이언트가 이름을 "[" + name + "]: "로 감싸 표시한다 (ChatMsgContainer.Compile)
-        // 최종 표시 "[L1] [player2222]: message"를 만들기 위해 레이어 태그의 앞 '['는
-        // 생략하고, 안쪽 '['는 포함하되 닫는 ']'는 넣지 않는다 - 클라이언트가 앞 '['와
-        // 뒤 ']'를 각각 하나씩 붙인다 ("L1] [<color>이름</color>" -> "[L1] [이름]: ")
-        // Discord 배지도 동일 규칙 - "D] "를 만들면 클라이언트가 "[D] "로 완성하고,
-        // 뒤이어 내부 '[' + 유저명이 와서 "[D] [유저명]: 메시지"가 된다
-        // 레이어/배지가 없으면 내부 '['도 생략 - 클라이언트가 붙이는 단일 '['만으로
-        // "[관리자]: 메시지"가 완성된다 (이중 대괄호 방지)
+        // 클라이언트가 이름을 "[" + name + "]: "로 감싸므로, 레이어/배지 태그는 앞 '['를 생략하고
+        // 안쪽 '['만 넣어 "[L1] [이름]: 메시지"가 되게 한다 (태그 없으면 내부 '['도 생략).
         bool hasBadge = !string.IsNullOrEmpty(payload.Layer) || !string.IsNullOrEmpty(payload.Prefix);
         string badgeTag = string.IsNullOrEmpty(payload.Prefix) ? "" : BadgeTag(payload);
         string layerTag = string.IsNullOrEmpty(payload.Layer) ? "" : $"{payload.Layer}] ";

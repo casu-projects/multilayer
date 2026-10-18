@@ -12,19 +12,6 @@ public static class LockdownState
     public static ulong[] Bypass = Array.Empty<ulong>();
 }
 
-// 디버그 로그 표시 상태 - `verbose on/off` 명령이 설정 + orchestrator.json 영속화
-// 게이트웨이/에이전트/모드에 VERBOSE 메시지로 전파된다 (오케스트레이터 자체도 게이트)
-public static class VerboseState
-{
-    public static bool Active;
-
-    // 디버그급 콘솔 출력 - verbose=false면 숨김
-    public static void Line(string message)
-    {
-        if (Active) Console.WriteLine(message);
-    }
-}
-
 // 운영자 콘솔 - stdin 명령, CommandRegistry 등록 방식 (help 자동 생성)
 // exec: 매개변수 전체를 게임 콘솔 명령으로 전 인스턴스에 릴레이 / rule·run: json 수정 +
 // 전 인스턴스 실시간 반영 / lockdown: 점검 모드 토글
@@ -86,7 +73,6 @@ public sealed class OperatorConsole
         _registry.Register("ban", "유저 차단", "<player>", CmdBan);
         _registry.Register("unban", "차단 해제", "<player>", CmdUnban);
         _registry.Register("lockdown", "점검 모드 토글", CmdLockdown);
-        _registry.Register("verbose", "디버그 로그 토글", CmdVerbose);
         _registry.Register("prewarm", "레이어1 무접속 자동 종료 토글", CmdPrewarm);
         _registry.Register("connections", "연결 목록", CmdConnections);
         _registry.Register("clear", "화면 지우기", CmdClear);
@@ -336,9 +322,8 @@ public sealed class OperatorConsole
 
     private void CmdRun(string[] args) => HandleSet("run", string.Join(" ", args), isRun: true);
 
-    // 구 시스템 의미 복원 - 매개변수 전체를 게임 콘솔 명령으로 보고
-    // 지금 떠 있는 모든 인스턴스에 실행시킨다 (예: exec kill player2222)
-    // 플레이어가 없는 인스턴스는 게임 콘솔이 no-op 처리한다
+    // exec: 매개변수 전체를 게임 콘솔 명령으로 모든 인스턴스에 실행한다 (예: exec kill player2222).
+    // 플레이어가 없는 인스턴스는 게임 콘솔이 no-op 처리한다.
     private void HandleRun(string command)
     {
         if (string.IsNullOrWhiteSpace(command))
@@ -458,21 +443,6 @@ public sealed class OperatorConsole
             bannedKeys = _banList.All,
             maxPlayers = _config.MaxPlayers,
         });
-    }
-
-    // verbose - `verbose`만 입력하면 현재 상태에 따라 켬/끔 전환
-    // (lockdown과 동일한 토글 형태). orchestrator.json에도 영속 반영 +
-    // 게이트웨이/에이전트/모드 전 컴포넌트에 VERBOSE 재푸시 (재시작 없이 즉시 적용)
-    private void CmdVerbose(string[] args)
-    {
-        bool next = !VerboseState.Active;
-        VerboseState.Active = next;
-        PersistConfigBool("Verbose", next);
-        foreach (var conn in _hub.Connections.Where(c => !c.Closed))
-        {
-            _hub.SendNoAck(conn, "VERBOSE", new { on = next });
-        }
-        Console.WriteLine($"verbose {(next ? "켬" : "끔")} — orchestrator.json 반영 + 전 컴포넌트 전파.");
     }
 
     // prewarm - 레이어1 프리웜 "1시간 무접속 자동 종료" 토글 (verbose와 동일한 단순 토글)

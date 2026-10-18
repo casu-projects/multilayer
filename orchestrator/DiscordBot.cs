@@ -231,7 +231,6 @@ internal sealed class DiscordBot
         return isRole ? $" <@&{_adminUserId}>" : $" <@{_adminUserId}>";
     }
 
-    // 사망/리스폰 알림
     internal async Task SendDeathRespawnAsync(string playerName, ulong steamId, bool died, string layer)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -281,7 +280,6 @@ internal sealed class DiscordBot
         }
     }
 
-    // Steam Avatar
     private async Task<string?> FetchAvatarAsync(ulong steamId)
     {
         if (_avatarCache.TryGetValue(steamId, out string? cached))
@@ -321,7 +319,6 @@ internal sealed class DiscordBot
         return null;
     }
 
-    // Event Handlers
 
     // 봇 자체 로그 - 표준 콘솔 규격 "[HH:mm:ss orch:bot] ..."으로 출력하고
     // 릴레이 라인으로도 수집되므로 콘솔 채널 로그 릴레이에 자연히 포함된다
@@ -360,9 +357,7 @@ internal sealed class DiscordBot
                 Log($"경고: 콘솔 채널 {_consoleChannelId}을(를) 찾을 수 없습니다.");
         }
 
-        // 이전에 등록된 슬래시 명령 정리 (legacy cleanup) - 글로벌 + 봇이 속한 모든 길드
-        // 길드 명령만 지우던 구 코드는 글로벌 명령을 영구히 남겨 과거 슬래시 명령이 서버에
-        // 잔존하는 문제를 유발했다 (사용 시 "응답 없음" - 상호작용 핸들러가 없으므로)
+        // 이전에 등록된 슬래시 명령(글로벌 + 길드)을 정리한다 - 남아 있으면 "응답 없음"이 된다.
         try
         {
             int deleted = 0;

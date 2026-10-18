@@ -19,10 +19,8 @@ public static class RunModule
     private static bool _pendingReset;
     private static float _resetDeadline;
 
-    // 프리웜 월드젠 페이즈 플래그: StartRun 호출 ~ 월드젠 완료까지 true
-    // 이 구간의 접속을 "Server is generating world"로 거절해, startserver ~ 씬 로드 창에
-    // 접속이 통과해 announce(10021/10010)를 놓치고 로비에 영구 고착되는 레이스를
-    // 차단한다 (실측 - 접속은 월드젠 완료(READY) 후에만 수락된다)
+    // 프리웜 월드젠 페이즈 플래그: StartRun 호출 ~ 월드젠 완료까지 true.
+    // 이 구간 접속을 "Server is generating world"로 거절해 announce 유실/로비 고착 레이스를 차단한다.
     internal static bool PreWarmGenerating { get; private set; }
 
     // 매 프레임 호출 (OrchestratorClient.Update 경유) - 프리웜 START_RUN 재시도
@@ -74,10 +72,8 @@ public static class RunModule
             return;
         }
 
-        // 프리웜: MOD_HELLO 직후에는 PreRunScript가 아직 로드되지 않았거나, 전용 서버
-        // (startserver - 플러그인 로드 후 ~1초)가 아직 가동 전일 수 있다. 네트워크 없이
-        // StartRun을 실행하면 월드젠이 조용히 정지한다 ( 회귀). 둘 다 충족할
-        // 때까지 Update에서 재시도한다
+        // 프리웜: MOD_HELLO 직후에는 PreRunScript/서버가 아직 준비되지 않을 수 있다.
+        // 네트워크 없이 StartRun을 실행하면 월드젠이 조용히 정지하므로 둘 다 충족할 때까지 재시도한다.
         PreRunScript pre = UnityEngine.Object.FindObjectOfType<PreRunScript>();
         if (pre == null || !Net.IsRunning)
         {
@@ -106,12 +102,8 @@ public static class RunModule
         }
     }
 
-    // RESET - Prewarm 인스턴스 레이어 초기화 (오케스트레이터 유휴 발신)
-    // 프로세스 생존 상태에서 ToMainMenu(월드 폐기) -> 메인 메뉴 대기 -> 월드젠 재시작 ->
-    // INSTANCE_READY 재보고 -> 유휴 대기. _readyReported를 리셋해 두 번째 월드젠의
-    // READY 보고를 허용하고, PreWarmGenerating으로 재생성 중 접속을 거절한다
-    // 실패(90초 타임아웃) 시 PreWarmGenerating을 해제하고 오케스트레이터가
-    // 크래시 처리 -> 재스폰 폴백한다
+    // RESET: 프로세스 생존 상태에서 ToMainMenu → 재월드젠 → INSTANCE_READY 재보고 → 유휴 대기.
+    // 재생성 중 접속은 PreWarmGenerating으로 거절하고, 90초 타임아웃 시 오케스트레이터가 크래시 처리 후 재스폰한다.
     internal static void HandleReset()
     {
 
@@ -196,11 +188,9 @@ public static class RunModule
         }
     }
 
-    // INSTANCE_READY 보고 - 실제 월드젠 완료 시점 (수정)
-    // WorldgenPatches.Patched_FinishWorldGeneration의 마지막 단계인 CreatePlayerCharacters
-    // (WorldgenPatches.cs:682 - 전 바디 생성 + 오브젝트 등록 완료)에서 보고한다
-    // FinishWorldGeneration 코루틴 시작 시점에 보고하면 READY가 월드젠 완료보다 ~1초
-    // 앞서 발행되어 게이트웨이가 조기 연결/거절 폴링을 반복한다
+    // INSTANCE_READY 보고 - 실제 월드젠 완료 시점.
+    // CreatePlayerCharacters(전 바디 생성 + 오브젝트 등록 완료)에서 보고한다.
+    // 코루틴 시작 시점에 보고하면 READY가 월드젠 완료보다 ~1초 앞서 발행되어 게이트웨이가 조기 연결/거절 폴링을 반복한다.
     [HarmonyPatch(typeof(SharedMain), "CreatePlayerCharacters")]
     internal static class CreatePlayerCharacters_ReportReadyPatch
     {
@@ -236,12 +226,8 @@ public static class RunModule
         }
     }
 
-    // 프리웜 월드젠 페이즈의 접속 거절 (실측 회귀 수정)
-    // 베이스 모드의 거절 조건은 world.generatingWorld뿐이라, startserver ~ 씬 로드 창에
-    // 들어온 접속은 수락된 뒤 announce(10021/10010)를 놓쳐 로비에 영구 고착된다
-    // PreWarmGenerating 구간에는 베이스와 동일한 사유 문자열로 거절한다 - 게이트웨이는
-    // 이미 이 문자열을 "일시적 거절 -> 재시도"로 처리하므로 (ClientSession.cs) 수용 후
-    // 월드젠 완료(READY) 시점에 자연 재접속된다
+    // 프리웜 월드젠 중 접속 거절: base 거절 조건(generatingWorld)만으로는 startserver~씬 로드 창의
+    // 접속이 announce를 놓쳐 로비에 고착된다. PreWarmGenerating 구간에 동일 사유로 거절하면 게이트웨이가 재시도한다.
     [HarmonyPatch(typeof(Net), "ValidateNewClientHandshake")]
     internal static class ValidateNewClientHandshake_PreWarmRejectPatch
     {

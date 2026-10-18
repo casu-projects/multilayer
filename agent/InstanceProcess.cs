@@ -70,7 +70,6 @@ public sealed class InstanceProcess
         {
             Process process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Process.Start 반환 null");
-            Logger.Debug($"{payload.InstanceKey} 스폰 (포트 {payload.Port}, HOME {homeDir})");
 
             _ = DrainAsync(process, payload.InstanceKey);
             return new InstanceProcess(config, payload.InstanceKey, payload.Port, process);
@@ -116,13 +115,11 @@ public sealed class InstanceProcess
             if (!_process.HasExited)
             {
                 _process.Kill(entireProcessTree: true);
-                Logger.Debug($"{Key} 강제 종료.");
             }
         }
         catch (InvalidOperationException) { }
     }
 
-    // 종료 후 홈 디렉토리 정리
     public void Cleanup()
     {
         try
@@ -148,9 +145,8 @@ public sealed class InstanceProcess
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Logger.Debug($"{Key} unity.log 보존 실패: {ex.Message}");
             }
 
             if (parent != null && Directory.Exists(parent))
@@ -158,9 +154,8 @@ public sealed class InstanceProcess
                 Directory.Delete(parent, recursive: true);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Logger.Debug($"{Key} 홈 정리 실패: {ex.Message}");
         }
     }
 
@@ -194,9 +189,4 @@ public sealed class SpawnPayload
     public int Port { get; set; }
     public string? ServerName { get; set; }
     public string? ServerPassword { get; set; }
-}
-
-public sealed class VerbosePayload
-{
-    public bool On { get; set; }
 }

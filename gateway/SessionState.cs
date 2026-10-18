@@ -1,6 +1,5 @@
 namespace CasuMpGateway;
 
-// 세션 상태머신
 public enum SessionState
 {
     // 어댑터가 세션을 코어에 넘김 - 밴/유지보수/라우팅 조회

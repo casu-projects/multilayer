@@ -93,7 +93,6 @@ public sealed class MigrationCoordinator
     public int CountTargeting(string instanceKey) =>
         _transactions.Values.Count(t => t.TargetInstance == instanceKey);
 
-    // WAL
 
     private string WalPath => Path.Combine(_config.SaveRootPath, "migration-wal.json");
 
@@ -195,8 +194,7 @@ public sealed class MigrationCoordinator
     {
         try
         {
-            // System.Text.Json은 struct를 딕셔너리 키로 직렬화할 수 없다 (실측:
-            // PlayerKey 키로 기록하면 WAL이 조용히 실패) - string 키로 기록한다
+            // PlayerKey(struct)를 딕셔너리 키로 쓰면 WAL 직렬화가 조용히 실패하므로 string 키로 기록한다.
             var flat = _wal.ToDictionary(kv => kv.Key.Value, kv => kv.Value);
             string dir = _config.SaveRootPath;
             Directory.CreateDirectory(dir);
@@ -349,7 +347,7 @@ public sealed class MigrationCoordinator
             return;
         }
 
-        // 리스폰 = 완전 신규 - 옛 세이브/보류분 폐기 (단일 소유자 규칙)
+        // 리스폰 = 완전 신규 - 세이브/보류분 폐기 (단일 소유자 규칙)
         _dataStore.DeleteSave(player);
 
         if (fromDepth <= 1)
@@ -397,7 +395,6 @@ public sealed class MigrationCoordinator
             });
     }
 
-    // 진행 이벤트
 
     public void OnFreezeDone(PlayerKey player, int? epoch)
     {
@@ -468,7 +465,7 @@ public sealed class MigrationCoordinator
                         {
                             if (!ok)
                             {
-                                // 출발지 mod 응답 없음(구버전/미연결) - pre-clear 없이 진행 (크래시 위험 감수)
+                                // 출발지 mod 응답 없음(미연결) - pre-clear 없이 진행 (크래시 위험 감수)
                                 Console.WriteLine($"{tx.Player} PRE-CLEAR 전송 실패({reason}) - 생략하고 진행.");
                                 tx.PreClearDone = true;
                                 TryProceedSwap(tx);
@@ -506,7 +503,7 @@ public sealed class MigrationCoordinator
         if (!IsCurrent(tx, epoch)) return;
         if (tx.TargetInstance != null && instanceId != tx.TargetInstance)
         {
-            // 구 인스턴스로 복귀 = 스왑 실패 롤백 (게이트웨이 )
+            // 출발 인스턴스로 복귀 = 스왑 실패 롤백.
             Abort(tx, $"백엔드가 목적지가 아닌 {instanceId}에 연결됨");
             return;
         }
@@ -530,12 +527,9 @@ public sealed class MigrationCoordinator
         }
 
         JsonElement? payload = _dataStore.GetForMigration(tx.Player);
-        // ghostClientIds: 출발 인스턴스에 남아있는 다른 온라인 플레이어들의 clientId
-        // 도착 플레이어의 클라이언트가 잔존 NetPlayer를 즉시 정리하도록 10170 신호에 사용
-        // 수정: 같은 목적지로 동시 마이그레이션 중인 플레이어는 제외한다
-        // 포함하면 도착자 클라이언트가 함께 도착하는 유저의 NetPlayer를 파괴해
-        // "서로가 안 보이는" 가시성 버그가 발생한다 (Session.InstanceId는 COMMIT 전까지
-        // 출발지를 가리키므로 Migrating 상태만으로는 구분 불가)
+        // ghostClientIds: 출발 인스턴스에 남은 다른 온라인 플레이어의 clientId (정리용).
+        // 같은 목적지로 동시에 마이그레이션 중인 플레이어는 제외한다 - 포함하면 도착자가 함께
+        // 도착하는 유저의 NetPlayer를 파괴해 서로 안 보이는 버그가 난다.
         ushort[] ghostClientIds = _sessions.All
             .Where(s => s.InstanceId == tx.FromInstance
                 && s.Session != PlayerSessionState.Offline
@@ -585,7 +579,6 @@ public sealed class MigrationCoordinator
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
         if (!IsCurrent(tx, epoch)) return;
 
-        // COMMIT
         _sessions.CommitMigration(player, tx.ToDepth, tx.TargetInstance);
         _dataStore.CommitPending(player);
         if (tx.IsRespawn)
@@ -610,7 +603,6 @@ public sealed class MigrationCoordinator
                 new { playerKey = player.Value, epoch = tx.Epoch });
         }
 
-        VerboseState.Line($"{player}: COMMIT — 레이어 {tx.ToDepth} 완료 (epoch {tx.Epoch}).");
         MigrationCommitted?.Invoke(player, tx.FromDepth, tx.ToDepth, tx.IsRespawn);
     }
 
@@ -621,10 +613,9 @@ public sealed class MigrationCoordinator
         Abort(tx, $"SWAP_FAILED: {reason}");
     }
 
-    // 마이그레이션 중 플레이어 이탈 (구 인스턴스의 NetPlayer.OnDestroy 보고)
-    // 보류 데이터 확정 + 세션 Depth 증가 . Freezing(스왑 전) 상태에서만 이탈로
-    // 처리하며 그 이후는 구 인스턴스 정리 부산물로 무시한다 (실퇴장은
-    // SESSION_DISCONNECTED -> OnPlayerQuitDuringMigration이 항상 동시에 처리)
+    // 마이그레이션 중 플레이어 이탈(출발 인스턴스의 NetPlayer.OnDestroy 보고).
+    // 보류 데이터 확정 + 세션 Depth 증가. Freezing(스왑 전) 상태에서만 이탈로 처리하고,
+    // 그 이후는 출발 인스턴스 정리 부산물로 무시한다(실퇴장은 SESSION_DISCONNECTED 경로가 처리).
     public void OnPlayerLeftDuringMigration(PlayerKey player, int? epoch)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
@@ -642,12 +633,9 @@ public sealed class MigrationCoordinator
     }
 
     // 이탈 확정: 데이터는 디스크가 정본(제출 시 기록됨), 위치는 복원하지 않도록
-    // 세션 Depth만 toDepth로 증가시켜 영속화한다 (재접속 시 새 레이어 배정 +
-    // 레이어 불일치로 위치 스킵)
-    // 수정: 출발지·목적지 모드에 RELEASE를 전송해 동결을 해제한다 - 이전에는
-    // 이탈 확정 시 모드가 동결 상태로 남아, 재접속한 플레이어가 조용화 타깃 게이트
-    // (IsFrozenTarget)에 막혀 다른 플레이어 바디·월드 객체·복원 인벤토리가 전혀
-    // 동기화되지 않는 버그가 있었다 (데이터는 유실이 아니라 동기화 차단)
+    // 이탈 확정: 세션 Depth만 toDepth로 올려 재접속 시 새 레이어 배정 + 위치 복원을 스킵한다.
+    // 출발지·목적지 모드에 RELEASE를 보내 동결을 해제한다 - 해제하지 않으면 재접속자가
+    // 조용화 타깃 게이트에 막혀 다른 바디/월드 객체/복원 인벤토리가 동기화되지 않는다.
     private void EndMigrationOnLeave(Transaction tx)
     {
         if (!_transactions.Remove(tx.Player)) return;
@@ -747,7 +735,6 @@ public sealed class MigrationCoordinator
         }
     }
 
-    // 롤백
 
     private void Abort(Transaction tx, string reason)
     {
@@ -776,7 +763,7 @@ public sealed class MigrationCoordinator
         {
             if (!postSwap)
             {
-        // pre-swap 중단: 구 인스턴스의 인벤토리는 FREEZE에서 파괴됨
+        // pre-swap 중단: 출발 인스턴스의 인벤토리는 FREEZE에서 파괴됨
         // 캡처 데이터로 즉시 재적용하도록 payload를 함께 전달
         JsonElement? payload = tx.IsRespawn ? null : _dataStore.GetForMigration(tx.Player);
                 _hub.Send(fromInstance.ModConnection, "UNFREEZE",
@@ -808,8 +795,8 @@ public sealed class MigrationCoordinator
         }
     }
 
-    // epoch 검증 - 메시지의 epoch가 현재 트랜잭션과 일치하는지. epoch 부재 시
-    // 구버전 모드/게이트웨이와의 하위 호환으로 수용한다 (멱등 규칙은 오케스트레이터가 원본)
+    // epoch 검증 - 메시지의 epoch가 현재 트랜잭션과 일치하는지. 부재 시 검증을 생략한다
+    // (멱등 규칙은 오케스트레이터가 원본).
     private static bool IsCurrent(Transaction tx, int? epoch) =>
         !epoch.HasValue || epoch.Value == tx.Epoch;
 

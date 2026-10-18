@@ -70,7 +70,6 @@ public sealed class ControlChannel
             address = _localIp,
         }).Serialize());
 
-        // 보류 보고 flush
         while (_outboundReports.TryDequeue(out ControlMessage? report))
         {
             await writer.WriteLineAsync(report.Serialize().AsMemory(), ct);

@@ -2,12 +2,9 @@ using LiteNetLib.Utils;
 
 namespace CasuMpGateway;
 
-// 백엔드 신원 전달 - tail v2/v3
-// [클라 인트로 원본][Magic(2B) 0xC5A5][Ver(1B) 1|2][SteamID64(8B)][forcedClientId(2B)]
-// [isReturning(1B)][isMigratingArrival(1B)] - 고정 15바이트 tail
-// Ver 2: 뒤에 [nameLen(1B)][UTF-8 이름] 추가 - Steam 접속에서 깨진 CJK 이름을
-// Steam 유저명으로 보정해 인스턴스 playername에도 반영한다.
-// mod 쪽 OnConnectionRequest_TailV2Patch가 매직+버전 검증 후 파싱한다 (불일치 시 접속 거부).
+// 백엔드 신원 tail(고정 15B): [Magic 0xC5A5][Ver 1|2][SteamID64][forcedClientId][isReturning][isMigratingArrival].
+// Ver 2는 뒤에 [nameLen][UTF-8 이름]을 덧붙여 CJK 이름을 보정한다.
+// mod의 OnConnectionRequest_TailV2Patch가 매직/버전을 검증하고 불일치 시 접속을 거부한다.
 public static class TailV2
 {
     public const byte MagicHigh = 0xC5;

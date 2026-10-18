@@ -105,7 +105,7 @@ internal static class OnConnectionRequest_TailV2Patch
     // 매핑(ClientIdToPeerDict[ownerId]=peer) 등록 이후 실행 - 이 시점에야 10016이
     // Server_SendTo 에서 정상 peer 로 해소되어 드랍되지 않는다. ReliableOrdered 라
     // 첫 LES baseline 보다 먼저 직렬화되어 클라이언트가 재생성을 시작한다.
-    // (출발지가 FREEZE에서 보내면 SWAP 경쟁으로 유실되어 클라이언트가 옛 월드에 남으므로
+    // (출발지가 FREEZE에서 보내면 SWAP 경쟁으로 유실되어 클라이언트가 출발지 월드에 남으므로
     //  목적지 인스턴스가 도착 시 단일 발신한다.)
     private static void Postfix()
     {
@@ -135,9 +135,8 @@ internal static class MigrationArrivalTracker
     internal static readonly System.Collections.Generic.HashSet<knetid> ClientIds = new();
 }
 
-// 신원 적용: LES 는 BasePlayer.ServerCreatePlayer 로 원격 플레이어 엔티티를 생성한다.
-// tail(SteamID/이름/복귀·도착 플래그)을 여기서 반영한다. (구 CreateNetPlayerWithPeer Postfix 대체)
-// GetNextPlayerId 강제 clientId 훅은 신버전 LES 에 없어 제거 - 신원 키는 SteamID/name 기반.
+// 신원 적용: LES는 BasePlayer.ServerCreatePlayer로 원격 플레이어 엔티티를 생성하고,
+// tail(SteamID/이름/복귀·도착 플래그)을 여기서 반영한다. 신원 키는 SteamID/name 기반.
 [HarmonyPatch(typeof(BasePlayer), "ServerCreatePlayer")]
 internal static class BasePlayer_ServerCreatePlayer_ApplyIdentityPatch
 {

@@ -69,7 +69,6 @@ public sealed class InstanceManager
     public void RegisterAgent(string machineId, int capacity, string address)
     {
         _agents[machineId] = (0, capacity, address);
-        VerboseState.Line($"에이전트 등록: {machineId} (수용 {capacity}, 주소 {address})");
     }
 
     public void UnregisterAgent(string machineId)
@@ -80,7 +79,6 @@ public sealed class InstanceManager
             info.Status = InstanceStatus.Crashed;
             Console.WriteLine($"에이전트 {machineId} 이탈 — 인스턴스 {info.Key} 크래시 처리");
         }
-        VerboseState.Line($"에이전트 등록 해제: {machineId}");
     }
 
     public string? BackendAddrFor(InstanceInfo info)
@@ -106,10 +104,6 @@ public sealed class InstanceManager
         InstanceInfo? info = FindByDepth(depth);
         if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
         {
-            if (info != null)
-            {
-                VerboseState.Line($"{info.Key} 재스폰 (상태 {info.Status}).");
-            }
             info = Spawn(depth);
             if (info == null) return null;
         }
@@ -158,7 +152,6 @@ public sealed class InstanceManager
             }
         });
 
-        VerboseState.Line($"depth-{depth} 스폰 요청 → {machineId} (포트 {port})");
         return info;
     }
 
@@ -189,7 +182,6 @@ public sealed class InstanceManager
         if (info == null) return;
         info.Status = InstanceStatus.Stopping;
         _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), "STOP", new { instanceKey = key });
-        VerboseState.Line($"{key} 정지 요청.");
     }
 
     // Prewarm 인스턴스 레이어 초기화 - 프로세스 생존 상태에서 모드에 RESET을
@@ -214,13 +206,10 @@ public sealed class InstanceManager
                 info.Status = InstanceStatus.Crashed;
             }
         });
-        VerboseState.Line($"{key} 레이어 초기화 요청 (RESET).");
     }
 
-    // 프리웜 - 레이어 1을 수용량 내 최대한 스폰 (에이전트 등록마다 재실행 - 누락분 자동
-    // 보충, 기존 인스턴스는 재스폰 없음). 동시 부팅 리소스 경쟁으로 월드젠이 실패하는 것을
-    // 방지하기 위해 큐에 넣고 TickPrewarm이 순차 처리한다 (실측: 3개 동시 스폰 시 1번만
-    // 월드젠 성공)
+    // 프리웜 - 레이어 1을 수용량 내 최대한 스폰한다(누락분 자동 보충).
+    // 동시 부팅 리소스 경쟁을 피하기 위해 큐에 넣고 TickPrewarm이 순차 처리한다.
     public void PrewarmLayers()
     {
         int depth = PrewarmDepth;
@@ -311,7 +300,6 @@ public sealed class InstanceManager
         _hub.Send(_hub.ModConnection(key), "START_RUN", new { instanceKey = key });
     }
 
-    // 모드/에이전트 이벤트
 
     public void OnModHello(ControlHub.ClientConnection conn, ModHelloPayload payload)
     {
@@ -323,7 +311,6 @@ public sealed class InstanceManager
             info = new InstanceInfo { Key = key, Depth = payload.Depth, Port = payload.Port, Status = InstanceStatus.Booting };
             _instances[key] = info;
             _usedPorts.Add(payload.Port);
-            VerboseState.Line($"{key} 재수용 (기존 인스턴스).");
         }
         info.Port = payload.Port;
         info.ModConnection = conn;
@@ -331,19 +318,14 @@ public sealed class InstanceManager
         {
             info.Status = InstanceStatus.Booting;
         }
-        VerboseState.Line($"{key} 모드 연결 (포트 {payload.Port}).");
-
-        // 프리웜 (G-1 개정): START_RUN은 첫 플레이어 백엔드 연결이 아니라 모드 연결 시점에 발신
-        // 월드젠이 플레이어 없이 진행되어, 접속/마이그레이션이 목적지 READY 이후에만 이뤄진다
-        // (콜드 인스턴스의 announce 스테일 시드/월드젠 중 접속 거절 문제를 구조적으로 제거)
-        // 재수용/재시작에도 안전 - 모드 측 HandleStartRun이 이미 생성된 세계면 무시한다
+        // 프리웜: 모드 연결 시점에 START_RUN 을 보내 플레이어 없이 월드젠한다.
+        // 목적지 READY 이후에만 접속/마이그레이션이 이뤄지도록 하는 전제.
         _runNeeded.Add(key);
         TrySendStartRun(key);
     }
 
-    // 인스턴스 READY 전이 (Booting/Starting -> Ready). 실제 전이된 경우에만 true
-    // 중복 INSTANCE_READY 보고(모드 재보고 등)는 false를 반환해 호출부가
-    // ROUTE-ON-READY 푸시를 1회만 수행하도록 한다 ( 중복 푸시 회귀 수정)
+    // 인스턴스 READY 전이 (Booting/Starting -> Ready). 실제 전이된 경우에만 true를 반환해
+    // 호출부가 ROUTE-ON-READY 푸시를 1회만 수행하도록 한다.
     public bool OnInstanceReady(string key)
     {
         InstanceInfo? info = Find(key);
@@ -398,7 +380,6 @@ public sealed class InstanceManager
         }
         info.Status = InstanceStatus.Stopped;
         info.ModConnection = null;
-        VerboseState.Line($"{key} 종료 (code {code}).");
     }
 
     // 유휴 정리 ( 인스턴스 수명주기 + Prewarm 유휴 재초기화)

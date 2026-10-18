@@ -6,20 +6,16 @@ namespace CasuMpAgent;
 
 public sealed class AgentConfig
 {
-    // 오케스트레이터 IP:Port
     public string OrchestratorAddr { get; set; } = "127.0.0.1:17900";
 
     public string MachineId { get; set; } = "casu-agent-1";
 
-    // 해당 에이전트가 최대 수용 가능한 인스턴스의 수량
     public int Capacity { get; set; } = 4;
 
     public string GameExecutablePath { get; set; } = "";
 
-    // 헤드리스 모드 여부 (-batchmode -nographics)
     public bool HeadlessMode { get; set; } = true;
 
-    // STOP 시 graceful 대기 후 강제 종료 시간(초)
     public int StopGraceSeconds { get; set; } = 5;
 
     public double ReconnectIntervalSeconds { get; set; } = 2;

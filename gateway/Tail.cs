@@ -2,9 +2,6 @@ using LiteNetLib.Utils;
 
 namespace CasuMpGateway;
 
-// 백엔드 신원 tail(고정 15B): [Magic 0xC5A5][Ver 1|2][SteamID64][forcedClientId][isReturning][isMigratingArrival].
-// Ver 2는 뒤에 [nameLen][UTF-8 이름]을 덧붙여 CJK 이름을 보정한다.
-// mod의 OnConnectionRequest_TailV2Patch가 매직/버전을 검증하고 불일치 시 접속을 거부한다.
 public static class TailV2
 {
     public const byte MagicHigh = 0xC5;
@@ -40,7 +37,6 @@ public static class TailV2
         return writer;
     }
 
-    // connect data에서 tail 시작 오프셋을 찾는다. 실패 시 -1
     public static int FindTailOffset(byte[] rawData, int userDataOffset, int userDataSize)
     {
         int end = userDataOffset + userDataSize;

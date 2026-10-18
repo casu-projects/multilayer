@@ -2,9 +2,6 @@ using System.Text.Json;
 
 namespace CasuMpOrchestrator;
 
-// 플레이어 데이터 단일 소유자 - 접속 로드/퇴장 저장 + 마이그레이션
-// 인메모리 보류분 + WAL. 페이로드는 스키마의 불투명 JSON (오케스트레이터는 저장/전달만)
-// 모든 접근은 메인 스레드 전용
 public sealed class PlayerDataStore
 {
     private readonly string _saveDir;
@@ -19,26 +16,21 @@ public sealed class PlayerDataStore
     private string PathFor(PlayerKey key) =>
         Path.Combine(_saveDir, Sanitize(key.Value), "player.json");
 
-    // 퇴장/동결 시 데이터 제출. 마이그레이션이면 인메모리 보류 + 디스크 WAL,
-    // 아니면 디스크 기록만
     public void OnSubmit(PlayerKey key, JsonElement payload, bool migration)
     {
-        WriteToDisk(key, payload);
+        WriteToDisk(key, payload); // 디스크 WAL
         if (migration)
         {
-            _pending[key] = payload.Clone();
+            _pending[key] = payload.Clone(); // 마이그레이션 보류
         }
         else
         {
         }
     }
 
-    // 접속 로드 요청(모드 -> 오케스트레이터). 보류분이 있으면 그것, 없으면 디스크, 둘 다 없으면 payload=null.
-    // 마이그레이션 진행 중에는 보류분을 소비·제거하지 않는다 - 제거하면 이후 RESUME(GetForMigration)이
-    // 디스크로 폴백해 방금 제출된 최신 상태 대신 스테일 데이터를 전달할 수 있다.
     public void OnRequest(PlayerKey key, ControlHub.ClientConnection modConn, ControlHub hub, bool migrating)
     {
-        if (_pending.TryGetValue(key, out JsonElement pending))
+        if (_pending.TryGetValue(key, out JsonElement pending)) // 보류분 우선
         {
             hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = pending });
             if (!migrating) _pending.Remove(key);
@@ -63,7 +55,6 @@ public sealed class PlayerDataStore
         hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = (JsonElement?)null });
     }
 
-    // 마이그레이션 RESUME용 보류분 (없으면 디스크)
     public JsonElement? GetForMigration(PlayerKey key)
     {
         if (_pending.TryGetValue(key, out JsonElement pending))
@@ -77,11 +68,8 @@ public sealed class PlayerDataStore
         return null;
     }
 
-    // 마이그레이션 커밋 - 보류분 해제 (디스크 사본이 정본으로 남음)
     public void CommitPending(PlayerKey key) => _pending.Remove(key);
 
-    // 세이브 폐기 (리스폰 = 완전 신규 취급). 단일 소유자 규칙: 폐기는
-    // 오케스트레이터만 수행하며, 보류분과 디스크 사본을 함께 제거한다
     public void DeleteSave(PlayerKey key)
     {
         _pending.Remove(key);
@@ -102,7 +90,6 @@ public sealed class PlayerDataStore
     {
         string dir = Path.GetDirectoryName(PathFor(key))!;
         Directory.CreateDirectory(dir);
-        // 원자적 쓰기: 임시 파일 -> 이동
         string tmp = PathFor(key) + ".tmp";
         File.WriteAllText(tmp, payload.GetRawText());
         File.Move(tmp, PathFor(key), overwrite: true);

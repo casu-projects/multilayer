@@ -1,11 +1,7 @@
 namespace CasuMpOrchestrator;
 
-// 스팀 P2P 로비 EXTRADATA용 Together.MultiplayerGameRules 이진 레이아웃 구성.
-// SteamServerInfoInLobbyExtraData = [deathcounter int(4)] + [MultiplayerGameRules(108B, bool=1B, 자연 정렬)] = 112B.
-// 오프셋은 필드 순서/자연 정렬과 1:1로 맞춘다 (신 클라가 정확히 112B를 GetUnmanaged로 읽는다).
 internal static class RulesBlobBuilder
 {
-    // deathcounter(4) + MultiplayerGameRules(108)
     internal const int BlobSize = 112;
 
     internal static byte[] Build(Dictionary<string, string> data)
@@ -13,7 +9,6 @@ internal static class RulesBlobBuilder
         var buf = new byte[BlobSize];
         var span = new Span<byte>(buf);
 
-        // offset 4: MultiplayerGameRules
         const int R = 4;
         SetBool(span, R + 0, data, "sv_cheats", false);
         SetBool(span, R + 1, data, "AllowClientCheatCommands", false);
@@ -28,7 +23,6 @@ internal static class RulesBlobBuilder
         SetBool(span, R + 10, data, "UnchippedIsIndividual", true);
         SetBool(span, R + 11, data, "ConsentForFeeding", true);
         SetByte(span, R + 12, data, "ScatterMinGroupSize", 51);
-        // 13-15: padding (float 정렬)
         SetFloat(span, R + 16, data, "ScatterPunishDistance", 80f);
         SetByte(span, R + 20, data, "LayerFinishPlrPercent", 101);
         SetBool(span, R + 21, data, "LayerFinishKeepXOffset", true);
@@ -55,14 +49,12 @@ internal static class RulesBlobBuilder
         SetBool(span, R + 42, data, "AllowPush", true);
         SetBool(span, R + 43, data, "AlwaysAllowCarry", false);
         SetByte(span, R + 44, data, "PiggybackMaxStack", 1);
-        // 45-47: padding
         SetFloat(span, R + 48, data, "PiggybackWeightMultiplier", 0.8f);
         SetByte(span, R + 52, data, "MinigameMaxPlayers", 50);
         SetBool(span, R + 53, data, "SpectateWhileUnconscious", false);
         SetBool(span, R + 54, data, "EnableMP3Sync", true);
         SetByte(span, R + 55, data, "VoicechatQuality", 4);
         SetBool(span, R + 56, data, "VoicechatEnabled", true);
-        // 57-59: padding
         SetFloat(span, R + 60, data, "ProximityHearDistance", 55f);
         SetBool(span, R + 64, data, "CharacterYapPublic", true);
         SetBool(span, R + 65, data, "Teams", false);
@@ -78,7 +70,6 @@ internal static class RulesBlobBuilder
         SetFloat(span, R + 84, data, "AdditionalHealthRegen", 1f);
         SetFloat(span, R + 88, data, "AdditionalHealthDecay", 1f);
         SetBool(span, R + 92, data, "LastStandAllowed", true);
-        // 93-95: padding
         SetFloat(span, R + 96, data, "SelfharmWitnessMoodDebuff", 3f);
         SetBool(span, R + 100, data, "SavePlayerState", true);
         SetBool(span, R + 101, data, "SavePlayerInventory", true);

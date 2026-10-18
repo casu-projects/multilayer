@@ -3,8 +3,6 @@ using System.Text.Json;
 
 namespace CasuMpGateway;
 
-// 게이트웨이 코어 - 세션 레지스트리 + 라우팅 미러 + 제어 명령 처리
-// 모든 게임 데이터 경로 처리는 메인 루프 스레드에서만 일어난다
 public sealed class GatewayCore
 {
     public GatewayConfig Config { get; }
@@ -41,14 +39,11 @@ public sealed class GatewayCore
 
     public bool HasPassword => !string.IsNullOrEmpty(_serverPassword);
 
-    // AUTH_INFO 수신 여부 - 수신 전에는 서버명/인원/비밀번호 여부가 미확정이라 로비를 만들지 않는다
     public bool AuthInfoReceived { get; private set; }
 
-    // 서버 비밀번호 검증 - 미설정이면 항상 허용 (게임 서버가 최종 권위)
     public bool ValidatePassword(string? candidate) =>
         string.IsNullOrEmpty(_serverPassword) || candidate == _serverPassword;
 
-    // 오케스트레이터 종료 신호 - 전 세션 정리 후 프로세스 종료 요청
     public event Action? ShutdownRequested;
 
     private void ApplyShutdown()
@@ -65,13 +60,9 @@ public sealed class GatewayCore
         ShutdownRequested?.Invoke();
     }
 
-    // 활성 세션 수 (로비 PLRCOUNT 메타데이터용)
     public int SessionCount => _sessions.Count;
 
-    // 오케스트레이터 LOBBY_METADATA 명령 -> Steam 어댑터 전달 (없으면 무시)
     public Action<LobbyMetadataPayload>? OnLobbyMetadata { get; set; }
-
-    // 제어 채널 (ControlChannel)
 
     public void EnqueueCommand(ControlMessage msg) => _inbound.Enqueue(msg);
 
@@ -79,11 +70,9 @@ public sealed class GatewayCore
 
     public long NextSeq() => ++_seqCounter;
 
-    // 보고 메시지 (best-effort, ack 불필요)
     public void Report(string type, object? payload) =>
         _outbound.Enqueue(ControlMessage.Create(NextSeq(), type, payload));
 
-    // 재연결 후 활성 세션 전부 재보고
     public void ReportActiveSessions()
     {
         lock (_lock)
@@ -100,7 +89,6 @@ public sealed class GatewayCore
         }
     }
 
-    // 메인 루프 틱 - 제어 명령 처리 + 세션 틱
     public void Tick()
     {
         while (_inbound.TryDequeue(out ControlMessage? msg) && msg != null)
@@ -127,9 +115,6 @@ public sealed class GatewayCore
         }
     }
 
-    // 세션 수용/종료 (어댑터 호출)
-
-    // 어댑터가 새 세션을 전달 (ACCEPTED). 같은 플레이어의 기존 세션은 폐기
     public void AcceptSession(ClientSession session)
     {
         lock (_lock)
@@ -137,7 +122,7 @@ public sealed class GatewayCore
             if (_sessions.TryGetValue(session.Player, out ClientSession? old))
             {
                 _sessions.Remove(session.Player);
-                old.Kick("Reconnected from a new session.");
+                old.Kick("Reconnected from a new session."); // 중복 세션 폐기
             }
             _sessions[session.Player] = session;
         }
@@ -149,7 +134,7 @@ public sealed class GatewayCore
             username = session.Username,
         });
 
-        if (_maintenance && !IsBypassed(session))
+        if (_maintenance && !IsBypassed(session)) // 점검 모드
         {
             session.Kick(_maintenanceMessage.Length > 0 ? _maintenanceMessage : "Server is in maintenance mode.");
             RemoveSession(session, "maintenance");
@@ -162,9 +147,6 @@ public sealed class GatewayCore
             return;
         }
 
-        // 비밀번호/인원 검증 - Steam 경로의 유일한 방어선 (DirectIpAdapter는 접속 시도 단계에서
-        // 이미 거부하므로 중복 없음). 사유는 Kick -> 로비 채팅 KICK으로 전달된다. 본 세션은 이미
-        // _sessions에 추가된 상태라 인원 비교는 ">" (DirectIpAdapter는 미포함이라 ">=")
         if (!ValidatePassword(session.Password))
         {
             session.Kick("Wrong password.");
@@ -180,21 +162,16 @@ public sealed class GatewayCore
 
         lock (_lock)
         {
-            // 라우팅 결정은 오케스트레이터만 - 미러 라우트를 즉시 쓰면 재접속 플레이어가 스테일
-            // 라우트(이전 레이어/정지 인스턴스)로 오접속된다. 웜 인스턴스는 SESSION_CONNECTED
-            // 직후 ROUTE_UPDATE가 즉시 도착하므로 대기 비용이 없다
-            session.EnterRoutingWait();
+            session.EnterRoutingWait(); // 라우팅 확정 전 대기
         }
     }
 
-    // 백엔드 미연결 세션의 클라이언트 이탈 (어댑터 호출)
     public void CloseSession(ClientSession session, string reason)
     {
         if (session.Disposed) return;
         session.Dispose();
         RemoveSession(session, reason);
     }
-    // 세션 이벤트 (ClientSession -> 코어)
     public void OnSessionBackendConnected(ClientSession session)
     {
         Report("BACKEND_CONNECTED", new
@@ -209,7 +186,6 @@ public sealed class GatewayCore
         session.Kick(reason);
         RemoveSession(session, reason);
     }
-
 
     private void HandleCommand(ControlMessage msg)
     {
@@ -281,8 +257,6 @@ public sealed class GatewayCore
         lock (_lock)
         {
             _routes[PlayerKey.FromString(entry.PlayerKey)] = entry;
-            // Routing 대기 세션 + 아직 백엔드에 한 번도 연결 성공하지 못한 Connecting 세션을
-            // 재라우팅한다 (죽은 주소로 재시도 중인 세션이 새 인스턴스 주소로 전환 - 방어 2)
             if (_sessions.TryGetValue(PlayerKey.FromString(entry.PlayerKey), out ClientSession? session)
                 && IsUsableBackendAddr(entry.BackendAddr)
                 && (session.State == SessionState.Routing
@@ -301,9 +275,6 @@ public sealed class GatewayCore
         ClientSession? session;
         lock (_lock)
         {
-            // 라우트 테이블도 함께 갱신 - SWAP 후 재접속 시 스테일 라우트(이전 인스턴스)로
-            // 즉시 연결되는 것 방지 (스테일 라우트로 연결 성공하면 ROUTE_UPDATE 재라우팅이
-            // 무효화되어 이전 레이어에 고정됨). 세션 유무와 무관하게 먼저 갱신
             if (_routes.TryGetValue(key, out RouteEntry? existing))
             {
                 _routes[key] = new RouteEntry
@@ -318,19 +289,15 @@ public sealed class GatewayCore
 
             if (!_sessions.TryGetValue(key, out session))
             {
-                // 활성 세션 없음 - 마이그레이션 대상이 이미 접속 종료. 오케스트레이터가 상태 정리
                 return;
             }
         }
-        // SWAP 멱등성 : 이미 같은 목적지로 Active/Connecting/Swapping이면
-        // 재연결하지 않는다 - 중복 SWAP(오케스트레이터 재전송/재시도)으로 백엔드를 이중
-        // 연결하면 인스턴스의 "Player with this name already exists" 추방이 발생한다
         if (session.BackendAddr == payload.BackendAddr
             && session.State is SessionState.Active or SessionState.Connecting or SessionState.Swapping)
         {
             return;
         }
-        session.SwapBackend(payload.BackendAddr, payload.InstanceId);
+        session.SwapBackend(payload.BackendAddr, payload.InstanceId); // 클라 연결 유지, 백엔드 교체
     }
 
     private void ApplyKick(ControlMessage msg)
@@ -369,8 +336,6 @@ public sealed class GatewayCore
         }
     }
 
-    // AUTH_INFO (연결/재연결 시 스냅샷) - 밴 목록 단일 소유자는 오케스트레이터, 여기선 메모리
-    // 사본 교체 + 서버 비밀번호/최대 인원 저장 (파일 영속화 없음 - 재수신으로 수렴)
     private void ApplyAuthInfo(ControlMessage msg)
     {
         var payload = msg.PayloadAs<AuthInfoPayload>() ?? throw new InvalidDataException("payload 없음");
@@ -381,7 +346,6 @@ public sealed class GatewayCore
             if (!string.IsNullOrEmpty(payload.ServerName))
             {
                 _serverName = payload.ServerName!;
-                // 서버명 변경(락다운 " [MNT]" 접미 등) - 저장된 메타데이터 재푸시로 로비 이름 즉시 반영
                 if (_lastLobbyMetadata != null)
                 {
                     OnLobbyMetadata?.Invoke(_lastLobbyMetadata);
@@ -410,7 +374,6 @@ public sealed class GatewayCore
         }
         Logger.Info($"유지보수 모드 {(payload.On ? "켬" : "끔")} (bypass {_maintenanceBypass.Count}명).");
 
-        // 락다운 진입 - 현재 접속 세션 전체 추방 (bypass 제외)
         if (payload.On && payload.KickAll)
         {
             lock (_lock)
@@ -425,7 +388,6 @@ public sealed class GatewayCore
         }
     }
 
-    // 락다운 bypass 판정 - SteamID64가 허용 목록에 있으면 유지보수 중에도 통과
     private bool IsBypassed(ClientSession session) =>
         session.SteamId is ulong sid && _maintenanceBypass.Contains(sid);
 
@@ -453,10 +415,8 @@ public sealed class GatewayCore
         }
     }
 
-    // 백엔드 연결 가능한 주소인지 - 빈/무효 주소는 스테일 라우트로 취급한다
     internal static bool IsUsableBackendAddr(string? addr) =>
         !string.IsNullOrEmpty(addr) && addr.Contains(':');
-
 
     public sealed class TableSnapshot
     {
@@ -482,7 +442,6 @@ public sealed class GatewayCore
         public bool Banned { get; set; }
     }
 
-    // AUTH_INFO (오케스트레이터 -> 게이트웨이 - 밴 스냅샷 + 서버 비밀번호 + 최대 인원 + 서버명)
     public sealed class AuthInfoPayload
     {
         public string? ServerPassword { get; set; }
@@ -495,14 +454,10 @@ public sealed class GatewayCore
     {
         public bool On { get; set; }
         public string? Message { get; set; }
-        // 락다운 bypass - 유지보수 중에도 접속 허용할 SteamID64 목록
         public ulong[]? Bypass { get; set; }
-        // 켬 전환 시 현재 접속 세션 전체 추방 여부 (락다운 진입 시 true)
         public bool KickAll { get; set; }
     }
 
-    // 로비 동적 메타데이터 (오케스트레이터가 인스턴스 리포트를 합산해 전송)
-    // mod 목록은 전송하지 않는다 - EXTRADATA 와이어에는 빈 목록+false로 고정 포함
     public sealed class LobbyMetadataPayload
     {
         public int LivingCount { get; set; }

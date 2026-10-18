@@ -2,12 +2,8 @@ using System.Text.Json;
 
 namespace CasuMpOrchestrator;
 
-// 마이그레이션 트랜잭션 - FREEZE -> READY 대기 -> SWAP -> RESUME -> WORLDGEN -> COMMIT
-// 단일 기록자 규칙 enforcement + 단계별 타임아웃/롤백 + epoch 멱등 + WAL 영속
-// 모든 접근은 메인 스레드 전용
 public sealed class MigrationCoordinator
 {
-    // 게임 레이어 수 - 수동 마이그레이션(`migrate`)의 "다음 레이어" 계산/목적지 범위 검증용
     private const int MaxLayers = 5;
 
     private enum TxState
@@ -31,19 +27,11 @@ public sealed class MigrationCoordinator
         public TxState State { get; set; } = TxState.Freezing;
         public DateTime StepDeadline { get; set; }
         public int ResumeRetries { get; set; }
-        // SWAP 인플라이트: 발신~ack 수신 사이 Tick이 SWAP을 재발신해
-        // 게이트웨이가 백엔드를 이중 연결("이름 중복" 추방)하는 것을 차단한다
         public bool SwapSent { get; set; }
-        // SWAP 직전 pre-clear handshake: 출발지가 대상 클라이언트의 스테일 LES 엔티티를
-        // 비우도록 PRECLEAR 를 보낸다 (목적지 READY 후). PRECLEAR_DONE 수신 후에만 SWAP.
         public bool PreClearSent { get; set; }
         public bool PreClearDone { get; set; }
-        // WAL 복구된 트랜잭션 - 스왑 후 상태면 RESUME 재발신이 필요할 수 있다
         public bool Recovered { get; set; }
-        // 복구 후 RESUME 재발신 완료 여부
         public bool ResumeSent { get; set; }
-        // 리스폰 트랜잭션 - FREEZE 캡처 스킵 + RESUME payload null + COMMIT 시 세이브 폐기
-        // WAL에 영속되어 크래시 복구 후에도 프레시 신규 의미를 유지한다
         public bool IsRespawn { get; set; }
     }
 
@@ -69,8 +57,6 @@ public sealed class MigrationCoordinator
     private readonly Dictionary<PlayerKey, WalEntry> _wal = new();
     private int _lastEpoch;
 
-    // 마이그레이션 커밋 완료 이벤트 (player, fromDepth, toDepth, isRespawn) - Discord 알림 등 외부 구독용
-    // isRespawn: 리스폰 트랜잭션(IsRespawn=true) 여부 - 구독자가 "리스폰" vs "레이어 이동" 알림을 구분한다
     public event Action<PlayerKey, int, int, bool>? MigrationCommitted;
 
     public MigrationCoordinator(OrchestratorConfig config, ControlHub hub,
@@ -88,11 +74,8 @@ public sealed class MigrationCoordinator
 
     public IReadOnlyCollection<PlayerKey> ActiveMigrations => _transactions.Keys.ToList();
 
-    // 이 인스턴스를 목적지로 하는 진행 중 마이그레이션 수 (유휴 정리 계수용
-    // 마이그레이션 도착 대기 중인 목적지를 유휴로 오판정해 강제 정지하지 않도록 한다)
     public int CountTargeting(string instanceKey) =>
         _transactions.Values.Count(t => t.TargetInstance == instanceKey);
-
 
     private string WalPath => Path.Combine(_config.SaveRootPath, "migration-wal.json");
 
@@ -128,21 +111,18 @@ public sealed class MigrationCoordinator
                         tx.State = TxState.WaitingReady;
                         break;
                     case "Swapping":
-                        // SWAP ack 수령 상태 = 게이트웨이가 명령을 보유 - 목적지로 전진 복구
-                        // RESUME은 목적지 모드 연결 시 Tick에서 재발신한다 (멱등)
-                        tx.State = TxState.Resuming;
+                        tx.State = TxState.Resuming; // SWAP ack 후 = 게이트웨이가 명령 보유, RESUME 재발신
                         tx.ResumeSent = false;
                         MarkSessionAtTarget(tx);
                         break;
                     case "Resuming":
                     case "Worldgen":
-                        tx.State = TxState.Worldgen;
-                        MarkSessionAtTarget(tx);
+        tx.State = TxState.Worldgen; // 목적지가 데이터 보유 -> 월드젠 완료 대기
+                        MarkSessionAtTarget(tx); // 재시작 복구: 목적지로 전진
                         break;
                     case "Freezing":
                     default:
-                        // FREEZE_DONE 대기 - 자연 타임아웃/UNFREEZE 롤백 경로로 수렴
-                        tx.State = TxState.Freezing;
+                        tx.State = TxState.Freezing; // FREEZE_DONE 대기/타임아웃 롤백
                         break;
                 }
 
@@ -156,7 +136,6 @@ public sealed class MigrationCoordinator
         }
     }
 
-    // 복구 시 스왑 후 트랜잭션은 세션을 목적지로 고정 (재접속 라우팅 정합)
     private void MarkSessionAtTarget(Transaction tx)
     {
         PlayerState? state = _sessions.Get(tx.Player);
@@ -194,7 +173,6 @@ public sealed class MigrationCoordinator
     {
         try
         {
-            // PlayerKey(struct)를 딕셔너리 키로 쓰면 WAL 직렬화가 조용히 실패하므로 string 키로 기록한다.
             var flat = _wal.ToDictionary(kv => kv.Key.Value, kv => kv.Value);
             string dir = _config.SaveRootPath;
             Directory.CreateDirectory(dir);
@@ -217,8 +195,6 @@ public sealed class MigrationCoordinator
         _ => "Freezing",
     };
 
-    // 진입: LAYER_END (모드 A) / 수동 마이그레이션 (콘솔)
-
     public void OnLayerEnd(PlayerKey player, int fromDepth, int maxLayers)
     {
         if (_transactions.ContainsKey(player))
@@ -235,8 +211,6 @@ public sealed class MigrationCoordinator
         {
             return;
         }
-        // 보고된 fromDepth와 세션 레이어가 다르면 스테일 보고 (UNFREEZE 복원 후 재발화 등)로
-        // 간주하고 무시 - 잘못된 기준의 재마이그레이션 차단.
         if (fromDepth != state.Depth)
         {
             Console.WriteLine($"{player} LAYER_END 레이어 불일치 — 보고 {fromDepth}, 세션 {state.Depth} (무시).");
@@ -247,14 +221,9 @@ public sealed class MigrationCoordinator
         BeginMigration(player, fromDepth, toDepth);
     }
 
-    // 다음 레이어 계산 - MaxLayers 초과 시 1로 래핑 (LAYER_END와 동일 규칙,
-    // 수동 마이그레이션의 목적지 생략 시 사용)
     public int NextLayerDepth(int fromDepth) =>
         fromDepth < MaxLayers ? fromDepth + 1 : 1;
 
-    // 수동 마이그레이션 (운영자 콘솔 `migrate <player> [targetLayer]`)
-    // LAYER_END와 동일한 전체 트랜잭션 (FREEZE -> 목적지 월드젠 -> SWAP -> RESUME -> COMMIT)
-    // 실패 시 콘솔 피드백용 사유 문자열을 반환한다 (null = 성공)
     public string? ManualMigrate(PlayerKey player, int toDepth)
     {
         PlayerState? state = _sessions.Get(player);
@@ -285,8 +254,6 @@ public sealed class MigrationCoordinator
         return null;
     }
 
-    // 마이그레이션 트랜잭션 공통 시작부 - FREEZE 발신 + WAL 기록
-    // 호출부가 fromDepth/toDepth를 결정한다 (LAYER_END / 수동 migrate)
     private void BeginMigration(PlayerKey player, int fromDepth, int toDepth)
     {
         InstanceInfo? fromInstance = _instances.FindByDepth(fromDepth);
@@ -295,7 +262,7 @@ public sealed class MigrationCoordinator
             return;
         }
 
-        string? targetAddr = _instances.EnsureInstance(toDepth);
+        string? targetAddr = _instances.EnsureInstance(toDepth); // 없으면 스폰/부팅
         if (targetAddr == null)
         {
             Console.WriteLine($"{player} 목적지 인스턴스 확보 실패 — 중단.");
@@ -314,23 +281,16 @@ public sealed class MigrationCoordinator
         };
         tx.StepDeadline = DateTime.UtcNow + StepTimeout();
         _transactions[player] = tx;
-        _sessions.Get(player)!.Session = PlayerSessionState.Migrating;
+        _sessions.Get(player)!.Session = PlayerSessionState.Migrating; // 라우팅 잠금
         WriteWal(tx);
 
-        _hub.Send(fromInstance.ModConnection, "FREEZE",
+        _hub.Send(fromInstance.ModConnection, "FREEZE", // 출발지 동결 + 데이터 캡처
             new { playerKey = player.Value, epoch }, (ok, reason) =>
             {
                 if (!ok) Abort(tx, $"FREEZE 전송 실패: {reason}");
             });
     }
 
-    // 진입: RESPAWN (!respawn - )
-
-    // 리스폰 처리 - 완전 신규 취급 (세이브 폐기 + 세션 프레시화)
-    // fromDepth 1: 인플레이스 무로딩 리스폰 - 세이브 폐기 + 세션 프레시(온라인 유지)만,
-    // 트랜잭션 없음 (모드가 로컬 리셋을 즉시 수행 - 오케스트레이터는 데이터 계층만 담당)
-    // fromDepth N: 레이어 1 하향 마이그레이션 트랜잭션 (IsRespawn 플래그) - FREEZE 캡처
-    // 스킵 + RESUME payload null -> 목적지에서 프레시 생성 + 보급품 지급
     public void OnRespawnRequest(PlayerKey player, int fromDepth)
     {
         if (_transactions.ContainsKey(player))
@@ -347,17 +307,14 @@ public sealed class MigrationCoordinator
             return;
         }
 
-        // 리스폰 = 완전 신규 - 세이브/보류분 폐기 (단일 소유자 규칙)
-        _dataStore.DeleteSave(player);
+        _dataStore.DeleteSave(player); // 리스폰 = 완전 신규
 
         if (fromDepth <= 1)
         {
-            // Case B - 인플레이스 (레이어 1): 세션만 프레시 표기. 라우팅/접속 상태 보존
-            _sessions.ResetToFresh(player, keepOnline: true);
+            _sessions.ResetToFresh(player, keepOnline: true); // L1은 인플레이스 리스폰
             return;
         }
 
-        // Case A - 하향 마이그레이션 (레이어 1)
         _sessions.ResetToFresh(player);
         InstanceInfo? fromInstance = _instances.FindByDepth(fromDepth);
         if (fromInstance == null)
@@ -365,7 +322,7 @@ public sealed class MigrationCoordinator
             Console.WriteLine($"{player} 리스폰 — 출발 인스턴스 없음 (depth {fromDepth}) — 중단.");
             return;
         }
-        string? targetAddr = _instances.EnsureInstance(1);
+        string? targetAddr = _instances.EnsureInstance(1); // L1 목적지
         if (targetAddr == null)
         {
             Console.WriteLine($"{player} 리스폰 — 목적지 인스턴스 확보 실패 — 중단.");
@@ -388,40 +345,34 @@ public sealed class MigrationCoordinator
         state.Session = PlayerSessionState.Migrating;
         WriteWal(tx);
 
-        _hub.Send(fromInstance.ModConnection, "FREEZE",
+        _hub.Send(fromInstance.ModConnection, "FREEZE", // 리스폰: 캡처 스킵 + 목적지 프레시 생성
             new { playerKey = player.Value, epoch, respawn = true }, (ok, reason) =>
             {
                 if (!ok) Abort(tx, $"FREEZE 전송 실패: {reason}");
             });
     }
 
-
     public void OnFreezeDone(PlayerKey player, int? epoch)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx) || tx.State != TxState.Freezing) return;
         if (!IsCurrent(tx, epoch)) return;
 
-        tx.State = TxState.WaitingReady;
-        // READY 대기는 콜드 인스턴스 부팅+월드젠 여유 (기본 5분) - 출발지는 FREEZE로
-        // 이미 조용화되어 있어 클라이언트는 로딩 화면에서 안전하게 대기한다
+        tx.State = TxState.WaitingReady; // 목적지 READY 게이트
         tx.StepDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(_config.MigrationReadyWaitTimeoutSeconds);
         WriteWal(tx);
 
         TryProceedSwap(tx);
     }
 
-    // 출발지가 대상 클라이언트의 스테일 엔티티 정리를 마침 - SWAP 진행
     public void OnPreClearDone(PlayerKey player, int? epoch)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx) || tx.State != TxState.WaitingReady) return;
         if (!IsCurrent(tx, epoch)) return;
 
-        tx.PreClearDone = true;
+        tx.PreClearDone = true; // 출발지 엔티티 정리 완료
         TryProceedSwap(tx);
     }
 
-    // 목적지 READY 확인 후 SWAP 발행 ( READY 게이트). 인플라이트(SwapSent)면
-    // 재발신하지 않는다. 미READY면 Tick이 재시도
     private void TryProceedSwap(Transaction tx)
     {
         if (tx.State != TxState.WaitingReady) return;
@@ -430,7 +381,6 @@ public sealed class MigrationCoordinator
         InstanceInfo? target = _instances.Find(tx.TargetInstance ?? "");
         if (target == null || target.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
         {
-            // 목적지가 죽은 상태 - 재스폰 후 대기 지속 (READY 대기 타임아웃이 상한)
             _instances.EnsureInstance(tx.ToDepth);
             tx.TargetInstance = _instances.FindByDepth(tx.ToDepth)?.Key;
             return;
@@ -443,20 +393,14 @@ public sealed class MigrationCoordinator
         string? addr = _instances.BackendAddrFor(target);
         if (addr == null) return;
 
-        // SWAP 직전 pre-clear handshake: 출발지(아직 대상 클라이언트와 연결 유지 중)에
-        // PRECLEAR 를 보내 클라이언트의 스테일 LES 엔티티를 비우게 하고, PRECLEAR_DONE
-        // 을 받은 뒤에만 SWAP 한다. 목적지 첫 baseline 이 빈 EntitiesDict 에 적용되어
-        // ExecuteRpcs IndexOutOfRange 크래시가 사라진다. (출발지가 없는 경우 생략하고 진행)
-        if (!tx.PreClearDone)
+        if (!tx.PreClearDone) // SWAP 직전: 대상 클라 스테일 엔티티 정리 핸드셰이크
         {
             if (!tx.PreClearSent)
             {
                 InstanceInfo? from = _instances.Find(tx.FromInstance);
                 if (from?.ModConnection != null && !from.ModConnection.Closed)
                 {
-                    tx.PreClearSent = true;
-                    // PRECLEAR_DONE 미수신 시 무한 대기 방지 - 마감 후에는 best-effort 로 진행한다
-                    // (pre-clear 는 크래시 방지용 개선이므로, 여기서 트랜잭션을 죽이지 않는다)
+                    tx.PreClearSent = true; // 미응답 시 best-effort로 SWAP 진행
                     tx.StepDeadline = DateTime.UtcNow + PreClearWaitTimeout();
                     Console.WriteLine($"{tx.Player} → PRE-CLEAR 발신 (출발지 {tx.FromInstance})");
                     _hub.Send(from.ModConnection, "PRECLEAR",
@@ -465,7 +409,6 @@ public sealed class MigrationCoordinator
                         {
                             if (!ok)
                             {
-                                // 출발지 mod 응답 없음(미연결) - pre-clear 없이 진행 (크래시 위험 감수)
                                 Console.WriteLine($"{tx.Player} PRE-CLEAR 전송 실패({reason}) - 생략하고 진행.");
                                 tx.PreClearDone = true;
                                 TryProceedSwap(tx);
@@ -483,19 +426,15 @@ public sealed class MigrationCoordinator
         tx.SwapSent = true;
         _hub.Send(_hub.GatewayConnection, "SWAP",
             new { playerKey = tx.Player.Value, instanceId = tx.TargetInstance, backendAddr = addr, epoch = tx.Epoch },
-            (ok, reason) =>
+            (ok, reason) => // 클라 연결 유지, 백엔드만 교체
             {
                 if (!ok) { Abort(tx, $"SWAP 실패: {reason}"); return; }
-                // SWAP ack = 게이트웨이가 명령 보유 - WAL 상태를 Swapping으로 전이
-                // (이 시점 이후 오케스트레이터가 죽어도 게이트웨이가 스왑을 수행하므로
-                // 복구는 "전진"(RESUME 재발신)으로 수렴한다.)
-                tx.State = TxState.Swapping;
+                tx.State = TxState.Swapping; // 게이트웨이가 명령 보유 -> WAL 전이
                 tx.StepDeadline = DateTime.UtcNow + StepTimeout();
                 WriteWal(tx);
             });
     }
 
-    // 게이트웨이 BACKEND_CONNECTED - 스왑 완료 시점 (목적지가 월드 준비 후 접속 성공)
     public void OnBackendConnected(PlayerKey player, string instanceId, int? epoch)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
@@ -503,8 +442,7 @@ public sealed class MigrationCoordinator
         if (!IsCurrent(tx, epoch)) return;
         if (tx.TargetInstance != null && instanceId != tx.TargetInstance)
         {
-            // 출발 인스턴스로 복귀 = 스왑 실패 롤백.
-            Abort(tx, $"백엔드가 목적지가 아닌 {instanceId}에 연결됨");
+            Abort(tx, $"백엔드가 목적지가 아닌 {instanceId}에 연결됨"); // 출발지로 복귀 = 스왑 실패
             return;
         }
 
@@ -516,21 +454,16 @@ public sealed class MigrationCoordinator
         SendResume(tx);
     }
 
-    // RESUME 전송 (데이터는 보류분/디스크, ghostClientIds 재산출). ack 수령 시 WAL 전이
     private void SendResume(Transaction tx)
     {
         ControlHub.ClientConnection? targetConn = _hub.ModConnection(tx.TargetInstance ?? "");
         if (targetConn == null)
         {
-            // 목적지 모드 미연결 (부팅/크래시) - Tick이 재시도 (Resuming 타임아웃이 상한)
             return;
         }
 
-        JsonElement? payload = _dataStore.GetForMigration(tx.Player);
-        // ghostClientIds: 출발 인스턴스에 남은 다른 온라인 플레이어의 clientId (정리용).
-        // 같은 목적지로 동시에 마이그레이션 중인 플레이어는 제외한다 - 포함하면 도착자가 함께
-        // 도착하는 유저의 NetPlayer를 파괴해 서로 안 보이는 버그가 난다.
-        ushort[] ghostClientIds = _sessions.All
+        JsonElement? payload = _dataStore.GetForMigration(tx.Player); // 마이그레이션 데이터
+        ushort[] ghostClientIds = _sessions.All // 출발지 잔류자 정리용, 동시 도착자는 제외
             .Where(s => s.InstanceId == tx.FromInstance
                 && s.Session != PlayerSessionState.Offline
                 && s.Key != tx.Player
@@ -540,7 +473,6 @@ public sealed class MigrationCoordinator
 
         if (tx.IsRespawn)
         {
-            // 리스폰: 데이터 없음 - 목적지가 프레시 생성 (payload 부재 + respawn 플래그)
             _hub.Send(targetConn, "RESUME",
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch, respawn = true, ghostClientIds = ghostClientIds },
                 (ok, reason) =>
@@ -561,7 +493,6 @@ public sealed class MigrationCoordinator
                     WriteWal(tx); // WAL "Resuming" = 목적지가 데이터 보유
                 });
         }
-        // 고스트 추적 로깅 - 순차 마이그레이션에서 잔류자 없는데 고스트가 포함된 이상 케이스의 원인 특정용
     }
 
     public void OnResumeDone(PlayerKey player, int? epoch)
@@ -571,7 +502,6 @@ public sealed class MigrationCoordinator
         tx.State = TxState.Worldgen;
         tx.StepDeadline = DateTime.UtcNow + StepTimeout();
         WriteWal(tx);
-        // 이후 WORLDGEN_DONE 대기
     }
 
     public void OnWorldgenDone(PlayerKey player, int? epoch)
@@ -579,12 +509,11 @@ public sealed class MigrationCoordinator
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
         if (!IsCurrent(tx, epoch)) return;
 
-        _sessions.CommitMigration(player, tx.ToDepth, tx.TargetInstance);
-        _dataStore.CommitPending(player);
+        _sessions.CommitMigration(player, tx.ToDepth, tx.TargetInstance); // 라우팅 확정
+        _dataStore.CommitPending(player); // 보류분 확정
         if (tx.IsRespawn)
         {
-            // 리스폰 안전망: 캡처 스킵/세이브 폐기 상태의 최종 확인 (이상 시 재폐기)
-            _dataStore.DeleteSave(player);
+            _dataStore.DeleteSave(player); // 리스폰 세이브 폐기
         }
         _transactions.Remove(player);
         RemoveWal(player);
@@ -592,10 +521,9 @@ public sealed class MigrationCoordinator
         InstanceInfo? fromInstance = _instances.Find(tx.FromInstance);
         if (fromInstance != null)
         {
-            _hub.Send(fromInstance.ModConnection, "RELEASE",
+            _hub.Send(fromInstance.ModConnection, "RELEASE", // 양쪽 동결 해제
                 new { playerKey = player.Value, epoch = tx.Epoch });
         }
-        // RESUME 시 목적지 인스턴스도 동결됨 - RELEASE로 해제 (이후 퇴장 저장 정상화)
         InstanceInfo? targetInstance = _instances.Find(tx.TargetInstance ?? "");
         if (targetInstance != null && targetInstance.Key != tx.FromInstance)
         {
@@ -606,16 +534,12 @@ public sealed class MigrationCoordinator
         MigrationCommitted?.Invoke(player, tx.FromDepth, tx.ToDepth, tx.IsRespawn);
     }
 
-    // 게이트웨이 SWAP_FAILED 보고 - 트랜잭션 중단
     public void OnSwapFailed(PlayerKey player, string reason)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
         Abort(tx, $"SWAP_FAILED: {reason}");
     }
 
-    // 마이그레이션 중 플레이어 이탈(출발 인스턴스의 NetPlayer.OnDestroy 보고).
-    // 보류 데이터 확정 + 세션 Depth 증가. Freezing(스왑 전) 상태에서만 이탈로 처리하고,
-    // 그 이후는 출발 인스턴스 정리 부산물로 무시한다(실퇴장은 SESSION_DISCONNECTED 경로가 처리).
     public void OnPlayerLeftDuringMigration(PlayerKey player, int? epoch)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
@@ -625,17 +549,12 @@ public sealed class MigrationCoordinator
         EndMigrationOnLeave(tx);
     }
 
-    // 마이그레이션 중 플레이어 퇴장 (게이트웨이 SESSION_DISCONNECTED - 실퇴장)
     public void OnPlayerQuitDuringMigration(PlayerKey player)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
         EndMigrationOnLeave(tx);
     }
 
-    // 이탈 확정: 데이터는 디스크가 정본(제출 시 기록됨), 위치는 복원하지 않도록
-    // 이탈 확정: 세션 Depth만 toDepth로 올려 재접속 시 새 레이어 배정 + 위치 복원을 스킵한다.
-    // 출발지·목적지 모드에 RELEASE를 보내 동결을 해제한다 - 해제하지 않으면 재접속자가
-    // 조용화 타깃 게이트에 막혀 다른 바디/월드 객체/복원 인벤토리가 동기화되지 않는다.
     private void EndMigrationOnLeave(Transaction tx)
     {
         if (!_transactions.Remove(tx.Player)) return;
@@ -652,7 +571,6 @@ public sealed class MigrationCoordinator
             _sessions.Persist(state);
         }
 
-        // 동결 해제 (퇴장이므로 UNFREEZE의 로딩 복구 경로 대신 RELEASE - epoch 가드로 멱등)
         InstanceInfo? fromInstance = _instances.Find(tx.FromInstance);
         if (fromInstance != null)
         {
@@ -668,8 +586,6 @@ public sealed class MigrationCoordinator
 
     }
 
-    // 인스턴스 READY 통지 - WaitingReady 트랜잭션의 SWAP을 즉시 발행한다
-    // (ROUTE-ON-READY 연동: Tick 폴링 대신 READY 이벤트 기반)
     public void OnInstanceReady(string instanceKey)
     {
         foreach (Transaction tx in _transactions.Values.Where(t =>
@@ -679,41 +595,35 @@ public sealed class MigrationCoordinator
         }
     }
 
-    // 틱: READY 게이트 재시도 + RESUME 재발신 + 타임아웃
-
     public void Tick()
     {
         DateTime now = DateTime.UtcNow;
         foreach (Transaction tx in _transactions.Values.ToList())
         {
-            // READY 게이트 재시도 (목적지 부팅 완료 대기)
             if (tx.State == TxState.WaitingReady)
             {
                 if (tx.SwapSent)
                 {
-                    // 인플라이트 중 목적지 사망 - 재스폰 후 SWAP 재발행 준비
                     InstanceInfo? target = _instances.Find(tx.TargetInstance ?? "");
                     if (target == null || target.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
                     {
-                        _instances.EnsureInstance(tx.ToDepth);
+                        _instances.EnsureInstance(tx.ToDepth); // 인플라이트 중 목적지 사망 -> 재스폰
                         tx.TargetInstance = _instances.FindByDepth(tx.ToDepth)?.Key;
                         tx.SwapSent = false;
                     }
                 }
                 else
                 {
-                    // PRE-CLEAR 응답 지연: 트랜잭션을 죽이지 않고 pre-clear 없이 진행한다
                     if (tx.PreClearSent && !tx.PreClearDone && now >= tx.StepDeadline)
                     {
-                        tx.PreClearDone = true;
+                        tx.PreClearDone = true; // PRECLEAR 미응답 -> best-effort
                         tx.StepDeadline = now + StepTimeout();
                     }
                     TryProceedSwap(tx);
                 }
             }
 
-            // 복구 트랜잭션: WAL "Swapping" (RESUME 미발신) -> 목적지 모드 연결 시 재발신
-            if (tx.State == TxState.Resuming && !tx.ResumeSent)
+            if (tx.State == TxState.Resuming && !tx.ResumeSent) // 복구: 목적지 모드 연결 시 재발신
             {
                 if (_hub.ModConnection(tx.TargetInstance ?? "") != null)
                 {
@@ -724,7 +634,7 @@ public sealed class MigrationCoordinator
 
             if (now < tx.StepDeadline) continue;
 
-            if (tx.State == TxState.Resuming && tx.ResumeRetries < 2)
+            if (tx.State == TxState.Resuming && tx.ResumeRetries < 2) // RESUME 2회까지 재시도
             {
                 tx.ResumeRetries++;
                 tx.StepDeadline = now + StepTimeout();
@@ -735,23 +645,18 @@ public sealed class MigrationCoordinator
         }
     }
 
-
     private void Abort(Transaction tx, string reason)
     {
         if (!_transactions.Remove(tx.Player)) return;
         RemoveWal(tx.Player);
         Console.WriteLine($"{tx.Player} 중단: {reason} — 롤백.");
 
-        bool postSwap = tx.State is TxState.Resuming or TxState.Worldgen;
+        bool postSwap = tx.State is TxState.Resuming or TxState.Worldgen; // 스왑 이후 실패 여부
 
         PlayerState? state = _sessions.Get(tx.Player);
         if (state != null)
         {
-            // 실패해도 세션을 목적지로 배치 - 재접속 시 목적지 레이어로 라우팅되고,
-            // 저장 위치의 레이어(출발지) != 목적지 레이어라 위치 복원이 자동 스킵되어
-            // 목적지 기본 시작 위치에 스폰된다 (레이어 끝 스폰 -> LAYER_END 재발화 -> 이중 전진 차단).
-            // 목적지 인스턴스도 유휴 오판정으로 강제 정지되지 않게 세션에 고정한다.
-            state.Session = PlayerSessionState.OnLayer;
+            state.Session = PlayerSessionState.OnLayer; // 실패해도 목적지로 배치 -> 재접속 유도
             state.InstanceId = tx.TargetInstance;
             state.Depth = tx.ToDepth;
             _sessions.Persist(state);
@@ -763,9 +668,7 @@ public sealed class MigrationCoordinator
         {
             if (!postSwap)
             {
-        // pre-swap 중단: 출발 인스턴스의 인벤토리는 FREEZE에서 파괴됨
-        // 캡처 데이터로 즉시 재적용하도록 payload를 함께 전달
-        JsonElement? payload = tx.IsRespawn ? null : _dataStore.GetForMigration(tx.Player);
+                JsonElement? payload = tx.IsRespawn ? null : _dataStore.GetForMigration(tx.Player); // 인벤토리 복원용
                 _hub.Send(fromInstance.ModConnection, "UNFREEZE",
                     new { playerKey = tx.Player.Value, epoch = tx.Epoch, payload = payload });
             }
@@ -775,7 +678,6 @@ public sealed class MigrationCoordinator
                     new { playerKey = tx.Player.Value, epoch = tx.Epoch });
             }
         }
-        // RESUME 시 목적지 인스턴스도 동결됨 - 함께 해제 (퇴장 저장 스킵 방지)
         InstanceInfo? targetInstance = _instances.Find(tx.TargetInstance ?? "");
         if (targetInstance != null && targetInstance.Key != tx.FromInstance)
         {
@@ -783,29 +685,21 @@ public sealed class MigrationCoordinator
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch });
         }
 
-        // 실패 추방 - 유저가 수동으로 나갔다 들어오지 않아도 복구되도록 강제 재접속
-        // 모든 실패(단계 타임아웃 포함)에 적용: FREEZE로 파괴된 인벤토리는 재접속 시
-        // 세이브 캡처로 복구되므로, 킥이 항상 깨끗한 재접속 복구 경로를 보장한다
-        // post-swap(월드젠 타임아웃 등 - 유저가 목적지 로딩에 갇힘) -> 목적지, 그 외 -> 출발지
         string? kickInstance = postSwap ? tx.TargetInstance : tx.FromInstance;
         if (kickInstance != null)
         {
-            _hub.Send(_hub.ModConnection(kickInstance), "KICK_PLAYER",
+            _hub.Send(_hub.ModConnection(kickInstance), "KICK_PLAYER", // 실패 추방 -> 재접속 복구 경로
                 new { playerKey = tx.Player.Value, reason = "Migration Failed. Please reconnect." });
         }
     }
 
-    // epoch 검증 - 메시지의 epoch가 현재 트랜잭션과 일치하는지. 부재 시 검증을 생략한다
-    // (멱등 규칙은 오케스트레이터가 원본).
     private static bool IsCurrent(Transaction tx, int? epoch) =>
         !epoch.HasValue || epoch.Value == tx.Epoch;
 
-    // 다른 플레이어가 같은 목적지로 마이그레이션 진행 중인지 (고스트 제외 판정)
     private bool MigratingToSameTarget(Transaction tx, PlayerKey other) =>
         _transactions.TryGetValue(other, out Transaction? t) && t.TargetInstance == tx.TargetInstance;
 
     private TimeSpan StepTimeout() => TimeSpan.FromSeconds(_config.MigrationStepTimeoutSeconds);
 
-    // PRECLEAR_DONE 대기 상한 - 초과 시 pre-clear 없이 SWAP 진행 (best-effort)
     private static TimeSpan PreClearWaitTimeout() => TimeSpan.FromSeconds(4);
 }

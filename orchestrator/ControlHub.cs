@@ -13,9 +13,6 @@ public enum ClientKind
     Mod,
 }
 
-// 제어 허브 - TCP 리스너로 게이트웨이/노드 에이전트/모드 3종 클라이언트를 수용
-// JSON 라인 + seq-ack . 모든 상태 접근은 메인 스레드(Tick)에서만, 네트워크 루프는
-// 백그라운드 스레드에서 큐로만 소통한다
 public sealed class ControlHub
 {
     public sealed class ClientConnection
@@ -24,7 +21,6 @@ public sealed class ControlHub
         public TcpClient Tcp { get; init; } = null!;
         public ClientKind Kind { get; set; } = ClientKind.Unknown;
 
-        // HELLO로 확정되는 신원
         public int? GatewayVersion { get; set; }
         public string? MachineId { get; set; }
         public int AgentCapacity { get; set; }
@@ -162,10 +158,8 @@ public sealed class ControlHub
         }
     }
 
-
     public long NextSeq() => ++_seqCounter;
 
-    // 제어 채널 연결 목록 (메인 스레드 전용)
     public IReadOnlyList<ClientConnection> Connections
     {
         get { lock (_connections) { return _connections.ToList(); } }
@@ -175,7 +169,6 @@ public sealed class ControlHub
     public ClientConnection? AgentConnection(string machineId) => Connections.FirstOrDefault(c => c.Kind == ClientKind.Agent && c.MachineId == machineId && !c.Closed);
     public ClientConnection? ModConnection(string instanceKey) => Connections.FirstOrDefault(c => c.Kind == ClientKind.Mod && c.InstanceKey == instanceKey && !c.Closed);
 
-    // 명령 전송 + ack/타임아웃 콜백 ( 3초 × 3회 재전송). 콜백은 메인 스레드에서 실행
     public bool Send(ClientConnection? conn, string type, object? payload, Action<bool, string?>? onResult = null)
     {
         if (conn == null || conn.Closed)
@@ -186,7 +179,7 @@ public sealed class ControlHub
 
         var msg = ControlMessage.Create(NextSeq(), type, payload);
         conn.Outbound.Enqueue(msg);
-        conn.PendingAcks[msg.Seq] = new PendingCommand
+        conn.PendingAcks[msg.Seq] = new PendingCommand // ack/타임아웃 추적
         {
             Msg = msg,
             Deadline = DateTime.UtcNow + TimeSpan.FromSeconds(_config.CommandRetryIntervalSeconds),
@@ -196,14 +189,12 @@ public sealed class ControlHub
         return true;
     }
 
-    // 보고/응답 메시지 (ack 불필요)
     public void SendNoAck(ClientConnection? conn, string type, object? payload)
     {
         if (conn == null || conn.Closed) return;
         conn.Outbound.Enqueue(ControlMessage.Create(NextSeq(), type, payload));
     }
 
-    // 수신 메시지 디스패치 (메인 스레드 Tick에서 호출)
     public void DrainInbound(Action<ClientConnection, ControlMessage> dispatch)
     {
         while (_inbound.TryDequeue(out var item))
@@ -212,14 +203,13 @@ public sealed class ControlHub
         }
     }
 
-    // ACK 완료 처리 + 재전송/타임아웃 + 연결 종료 처리 (메인 스레드 Tick에서 호출)
     public void Tick()
     {
         while (_ackCompletions.TryDequeue(out var ack))
         {
             if (ack.Conn.PendingAcks.TryRemove(ack.Seq, out PendingCommand? pending))
             {
-                pending.OnResult?.Invoke(ack.Ok, ack.Reason);
+                pending.OnResult?.Invoke(ack.Ok, ack.Reason); // ack 완료 콜백
             }
         }
 
@@ -234,12 +224,12 @@ public sealed class ControlHub
                 {
                     pending.Retries++;
                     pending.Deadline = now + TimeSpan.FromSeconds(_config.CommandRetryIntervalSeconds);
-                    conn.Outbound.Enqueue(pending.Msg);
+                    conn.Outbound.Enqueue(pending.Msg); // 재전송
                 }
                 else
                 {
                     conn.PendingAcks.TryRemove(seq, out _);
-                    pending.OnResult?.Invoke(false, "ack timeout");
+                    pending.OnResult?.Invoke(false, "ack timeout"); // 타임아웃
                 }
             }
         }
@@ -256,11 +246,10 @@ public sealed class ControlHub
                 pending.OnResult?.Invoke(false, "connection closed");
             }
             conn.PendingAcks.Clear();
-            OnConnectionClosed?.Invoke(conn);
+            OnConnectionClosed?.Invoke(conn); // 연결 종료 통지
         }
     }
 
-    // 연결 종료 통지 (에이전트/모드/게이트웨이 이탈 처리용 - 메인 스레드에서 실행)
     public event Action<ClientConnection>? OnConnectionClosed;
 
     private static bool IsOk(ControlMessage msg) => msg.PayloadAs<AckPayload>()?.Ok ?? false;

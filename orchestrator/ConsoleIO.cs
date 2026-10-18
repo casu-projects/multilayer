@@ -2,16 +2,10 @@ using System.Text;
 
 namespace CasuMpOrchestrator;
 
-// 대화형 콘솔 입출력 중앙화 - 백그라운드 로그가 입력 중인 줄을 침범하지 않도록 지우고
-// 출력 후 재렌더하며 ↑/↓ 히스토리를 지원한다. stdin/stdout 리다이렉트 시 일반 WriteLine 폴백
-// 모든 stdout은 이 클래스(또는 타임스탬프 래퍼 경유)를 거치며, ANSI/입력줄은 래퍼 이전의
-// 원본 writer에 직접 쓴다 (래퍼의 부분 쓰기 버퍼링 우회 + 재귀 차단)
 internal static class ConsoleIO
 {
-    // 대화형 여부 - stdin/stdout이 모두 TTY일 때만 입력 편집/보호가 동작
     internal static readonly bool Interactive = !Console.IsInputRedirected && !Console.IsOutputRedirected;
 
-    // 입력줄 프롬프트 (예: "> help")
     private const string Prompt = "> ";
 
     private static readonly object Lock = new();
@@ -23,14 +17,10 @@ internal static class ConsoleIO
     private const int MaxHistory = 200;
     private static int _historyIndex = -1;
 
-    // 타임스탬프 래퍼에 감싸지기 전의 원본 stdout (SetOut 전에 캡처)
     private static TextWriter? _rawOut;
 
-    // 원본 stdout 캡처 (Program.Main - SetOut 전에 호출)
     internal static void Init(TextWriter rawOut) => _rawOut = rawOut;
 
-    // 유일한 로그 출력 진입점 (Console.WriteLine 대체): 입력줄을 지우고 로그를
-    // 출력한 뒤 프롬프트+버퍼를 재렌더하고 커서를 복원한다
     internal static void WriteLine(string message)
     {
         if (!Interactive)
@@ -60,7 +50,6 @@ internal static class ConsoleIO
         }
     }
 
-    // 대화형 stdin 리더 시작 시 1회 호출 - 프롬프트 표시
     internal static void ShowPrompt()
     {
         if (!Interactive) return;
@@ -72,8 +61,6 @@ internal static class ConsoleIO
         }
     }
 
-    // 줄 단위 에디터: 에코/백스페이스/삭제/커서 이동을 처리하고 Enter 시 완성된
-    // 라인을 반환, 그 외 null
     internal static string? HandleKey(ConsoleKeyInfo key)
     {
         if (!_lineActive) return null;
@@ -85,7 +72,7 @@ internal static class ConsoleIO
                 case ConsoleKey.Enter:
                 {
                     _rawOut?.Write('\n');
-                    string result = Buffer.ToString();
+                    string result = Buffer.ToString(); // 입력 완료
                     if (!string.IsNullOrEmpty(result))
                     {
                         History.Add(result);
@@ -100,7 +87,7 @@ internal static class ConsoleIO
                     return result;
                 }
 
-                case ConsoleKey.UpArrow:
+                case ConsoleKey.UpArrow: // 이전 히스토리
                     if (History.Count == 0) return null;
                     if (_historyIndex == -1)
                     {
@@ -117,7 +104,7 @@ internal static class ConsoleIO
                     LoadHistory();
                     return null;
 
-                case ConsoleKey.DownArrow:
+                case ConsoleKey.DownArrow: // 다음 히스토리, 끝이면 새 입력
                     if (_historyIndex < 0) return null;
                     _historyIndex++;
                     if (_historyIndex >= History.Count)
@@ -133,7 +120,7 @@ internal static class ConsoleIO
                     }
                     return null;
 
-                case ConsoleKey.Backspace:
+                case ConsoleKey.Backspace: // 커서 앞 삭제
                     if (_cursorPos > 0)
                     {
                         Buffer.Remove(_cursorPos - 1, 1);
@@ -142,7 +129,7 @@ internal static class ConsoleIO
                     }
                     return null;
 
-                case ConsoleKey.Delete:
+                case ConsoleKey.Delete: // 커서 뒤 삭제
                     if (_cursorPos < Buffer.Length)
                     {
                         Buffer.Remove(_cursorPos, 1);
@@ -194,7 +181,6 @@ internal static class ConsoleIO
         }
     }
 
-    // 전체 줄을 지우고 재렌더한 뒤 커서를 복원한다
     private static void Redraw()
     {
         _lineActive = true;
@@ -207,15 +193,13 @@ internal static class ConsoleIO
         }
     }
 
-    // 터미널 화면 지우기 (대화형 전용 - 리다이렉트 환경은 no-op)
-    // 입력줄을 보호하며 ANSI clear screen 후 프롬프트를 재렌더한다
     internal static void ClearScreen()
     {
         if (!Interactive) return;
 
         lock (Lock)
         {
-            _rawOut?.Write("\x1b[2J\x1b[H");
+            _rawOut?.Write("\x1b[2J\x1b[H"); // ANSI 화면 지우기
             if (_lineActive)
             {
                 _rawOut?.Write(Prompt + Buffer);
@@ -228,7 +212,6 @@ internal static class ConsoleIO
         }
     }
 
-    // 종료 시 호출 - ">" 프롬프트를 정리해 종료 메시지가 깔끔하게 표시되게 한다
     internal static void DisableInteractive()
     {
         if (!Interactive) return;
@@ -244,7 +227,6 @@ internal static class ConsoleIO
         }
     }
 
-    // 히스토리 항목을 버퍼에 로드 후 재렌더
     private static void LoadHistory()
     {
         string entry = History[_historyIndex];

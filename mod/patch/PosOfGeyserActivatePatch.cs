@@ -5,7 +5,6 @@ using UnityEngine;
 
 namespace CasuMod.Patch;
 
-// 간헐천 활성화의 조건을 호스트의 카메라 위치 대신 근처에 살아있는 유저의 카메라 위치로 변경
 [HarmonyPatch(typeof(GeyserScript), "OnTriggerEnter2D")]
 internal static class PosOfGeyserActivatePatch
 {
@@ -35,10 +34,6 @@ internal static class PosOfGeyserActivatePatch
     }
 }
 
-// 서버 게이저 유체 커버 - 활성화 창(4.5초) 동안 같은 열(y+0..9)의 **빈 타일만** 게이저 타입으로
-// 채운다. 클라이언트는 순정 모드로 자기 Random 위치에 로컬 펌프하므로, 서버가 열의 빈 타일을
-// 미리 채워 두면 클라 펌프 위치가 항상 서버 싱크 상태에 포함되어 싱크가 클라 유체를 지우지
-// 않는다. 기존 fluid는 덮어쓰지 않는다 - 시뮬 결과(녹조류 변환 등)를 되돌리지 않게.
 [HarmonyPatch(typeof(GeyserScript), "Update")]
 internal static class GeyserServerFillEmptyTilesPatch
 {

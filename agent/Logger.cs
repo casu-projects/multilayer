@@ -2,8 +2,6 @@ using System.Collections.Concurrent;
 
 namespace CasuMpAgent;
 
-// 오케스트레이터 로그 릴레이
-// 게임 stdout 로그까지 합쳐서 전송, 포화 시 오래된 항목부터 드랍 (로그가 보고/ACK 큐를 막지 않게 분리)
 public static class Logger
 {
     private const int MaxQueued = 4096;
@@ -21,7 +19,6 @@ public static class Logger
         Enqueue(message, source);
     }
 
-    // 콘솔 전용 - 릴레이 없음 (연결 오류 등 오케스트레이터 콘솔 도배 방지)
     public static void Local(string message) => System.Console.WriteLine(message);
 
     private static void Enqueue(string message, string source)

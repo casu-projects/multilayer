@@ -8,9 +8,6 @@ using LiteNetLib.Utils;
 
 namespace CasuMod;
 
-// 크로스 인스턴스 공지(사망/퇴장/접속/레이어 이동/리스폰)를 오케스트레이터 경유로 전 레이어에 전파한다.
-// base 공지는 타겟 지정이 불가능해 CLIENT_ChatMessage(type 2, name="*") 와이어로 보낸다.
-// 접속/퇴장은 base 로컬 공지를 억제하고 모드가 동일 포맷으로 만들어 발신 레이어 즉시 표시 + 타 레이어 전송한다.
 public static class AnnounceRelay
 {
     public const string KindDeath = "death";
@@ -19,20 +16,16 @@ public static class AnnounceRelay
     public const string KindJoin = "join";
     public const string KindRespawn = "respawn";
 
-    // 접속 공지 - base 와 동일 포맷. 발신 레이어 즉시 표시 + 타 레이어 크로스 전송
     internal static void SendJoin(ScavPlayer plr, string text)
     {
         SendLocalAndRelay(KindJoin, plr, text);
     }
 
-    // 퇴장 공지 - base 와 동일 포맷
     internal static void SendLeave(ScavPlayer plr, string text)
     {
         SendLocalAndRelay(KindLeave, plr, text);
     }
 
-    // 사망 공지 - text 는 base 가 생성한 사망 사유 포함 원문(태그 해석 완료).
-    // 발신 레이어는 base 로컬 공지가 담당하므로 로컬 표시 없이 타 레이어에만 전송한다
     internal static void SendDeath(ScavPlayer plr, string text)
     {
         if (plr == null || string.IsNullOrEmpty(text)) return;
@@ -46,12 +39,11 @@ public static class AnnounceRelay
         });
     }
 
-    // 로컬 즉시 표시 + 오케스트레이터로 전 레이어 릴레이 (발신 레이어는 Handle 에서 제외)
     private static void SendLocalAndRelay(string kind, ScavPlayer plr, string text)
     {
         if (plr == null || string.IsNullOrEmpty(text)) return;
-        SendChatAnnouncementTo(text, new List<knetid>(ServerMain.AllClientIds));
-        OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
+        SendChatAnnouncementTo(text, new List<knetid>(ServerMain.AllClientIds)); // 발신 레이어 즉시 표시
+        OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new // 타 레이어 릴레이
         {
             kind,
             playerKey = MigrationModule.PlayerKeyOf(plr),
@@ -61,7 +53,6 @@ public static class AnnounceRelay
         });
     }
 
-    // 오케스트레이터 ANNOUNCE 수신 처리 (메인 스레드) - 본인 제외 공지
     internal static void Handle(AnnouncePayload payload)
     {
         if (payload == null) return;
@@ -71,14 +62,12 @@ public static class AnnounceRelay
             case KindDeath:
             case KindJoin:
             case KindLeave:
-                // 발신 레이어는 이미 로컬로 표시했다 - 중복 방지
                 if (!string.IsNullOrEmpty(payload.OriginInstance)
                     && OrchestratorClient.Instance != null
                     && payload.OriginInstance == OrchestratorClient.Instance.InstanceKey)
                 {
-                    return;
+                    return; // 발신 레이어는 제외(이미 즉시 표시됨)
                 }
-                // join/leave/death 는 base 포맷 원문(text)을 그대로 사용
                 if (string.IsNullOrEmpty(payload.Text)) return;
                 SendAnnouncementExcluding(payload.PlayerKey, payload.Text);
                 break;
@@ -93,7 +82,6 @@ public static class AnnounceRelay
         }
     }
 
-    // 본인(playerKey) 제외 타겟 전송 - 바닐라 전체 고정 공지의 와이어 미러
     private static void SendAnnouncementExcluding(string playerKey, string message)
     {
         knetid? exclude = FindClientId(playerKey);
@@ -104,18 +92,15 @@ public static class AnnounceRelay
         SendChatAnnouncementTo(message, targets);
     }
 
-    // 개인 채팅 공지 (특정 클라이언트 1명)
     internal static void SendChatAnnouncementTo(string message, knetid clientId)
     {
         SendChatAnnouncementTo(message, new List<knetid> { clientId });
     }
 
-    // CLIENT_ChatMessage type 2 (name="*") 타겟 전송 - 시스템 메시지 통일 ("[*]: 메시지" 표시)
-    // 클라가 Lang.MsgTryParse 로 <key:>/<parsebreak> 를 해석한다 (base 로케일/포맷 그대로 표시)
     internal static void SendChatAnnouncementTo(string message, List<knetid> targets)
     {
         if (targets.Count == 0) return;
-        var writer = Net.CreateWriter((Enum)NetmsgId.CLIENT_ChatMessage);
+        var writer = Net.CreateWriter((Enum)NetmsgId.CLIENT_ChatMessage); // type 2, name="*" 와이어
         writer.Put((byte)2);
         writer.Put("*");
         writer.Put("");
@@ -123,7 +108,6 @@ public static class AnnounceRelay
         Net.Server_SendToClients(DeliveryMethod.ReliableOrdered, in writer, targets);
     }
 
-    // playerKey(NAME_/STEAM_)로 이 인스턴스의 clientId 검색 (없으면 null - 다른 레이어)
     private static knetid? FindClientId(string playerKey)
     {
         if (string.IsNullOrEmpty(playerKey)) return null;
@@ -136,8 +120,6 @@ public static class AnnounceRelay
     }
 }
 
-// ANNOUNCE payload - death/join/leave: Text(base 포맷 원문) / migration: FromDepth/ToDepth 포함
-// originInstance: 발신 레이어 (해당 레이어는 로컬 표시가 담당 - 중복 방지)
 public sealed class AnnouncePayload
 {
     public string Kind { get; set; } = "";

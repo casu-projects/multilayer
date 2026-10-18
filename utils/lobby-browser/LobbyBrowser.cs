@@ -9,7 +9,6 @@ internal sealed class LobbyBrowser
 {
     private const uint AppId = 4576510;
 
-    // 로비 데이터 키 = "COOP_MOD_" + suffix
     private const string KeyPrefix = "COOP_MOD_";
 
     private const string SuffixLobbyName = "LOBBYNAME";
@@ -30,7 +29,6 @@ internal sealed class LobbyBrowser
     private static string? Meta(IReadOnlyDictionary<string, string> md, string suffix) =>
         md.TryGetValue(KeyPrefix + suffix, out string? v) && !string.IsNullOrEmpty(v) ? v : null;
 
-    // EXTRADATA 규칙 구조체 크기 = deathcounter(4) + rules(108) = 112B
     private const int ExtraDataOffset = 112;
 
     private SteamClient? _steamClient;
@@ -138,7 +136,6 @@ internal sealed class LobbyBrowser
             return;
         }
 
-        // --filter: 버전 태그에 지정 문자열이 포함된 로비만
         IReadOnlyList<SteamMatchmaking.Lobby> lobbies = callback.Lobbies;
         if (_versionFilter != null)
         {
@@ -230,7 +227,6 @@ internal sealed class LobbyBrowser
             if (!string.IsNullOrEmpty(livingCount)) Console.WriteLine($"    Survived:  {livingCount}/{plrDisplay}");
             if (!string.IsNullOrEmpty(avgMood)) Console.WriteLine($"    AvgMood:   {avgMood}");
 
-            // mods: EXTRADATA 우선, 없으면 COOP_MOD_MODS 키(': ' 구분) 사용
             string[] mods = extraData?.Mods ?? Array.Empty<string>();
             if (mods.Length == 0 && !string.IsNullOrEmpty(modsKey))
                 mods = modsKey.Split(':', StringSplitOptions.RemoveEmptyEntries);
@@ -248,7 +244,6 @@ internal sealed class LobbyBrowser
         _lobbyListReceived = true;
     }
 
-    // EXTRADATA: base64 → [2B ushort prefix + GZip] → [rules struct][steamIds][bool enforceModList][string[] modListGuids]
     private static ExtraData DecodeExtraData(string base64)
     {
         try
@@ -305,12 +300,10 @@ internal sealed class LobbyBrowser
                 offset += 8;
             }
 
-            // enforceModList (1B bool)
             if (offset + 1 > decompressed.Length)
                 return new ExtraData(ids, Array.Empty<string>());
             offset += 1;
 
-            // modListGuids (string[]): ushort count + LiteNetLib Put(string) each
             if (offset + 2 > decompressed.Length)
                 return new ExtraData(ids, Array.Empty<string>());
             int modCount = BitConverter.ToUInt16(decompressed, offset);
@@ -320,7 +313,6 @@ internal sealed class LobbyBrowser
             for (int i = 0; i < modCount; i++)
             {
                 if (offset >= decompressed.Length) break;
-                // LiteNetLib 7-bit encoded string length
                 int strLen = 0;
                 int shift = 0;
                 while (offset < decompressed.Length)

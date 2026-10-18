@@ -12,37 +12,25 @@ using UnityEngine;
 
 namespace CasuMod;
 
-// 플레이어 데이터 세이브/로드 - 오케스트레이터 단일 소유자 모델
-// 직렬화는 바닐라 SaveSystem과 동일한 메커니즘 (body/limbs 전체 상태 + [Saveable] 컴포넌트
-// + 계층 인벤토리 + 레시피 + 캐릭터 신원)
 public static class SaveModule
 {
-    // 플레이어 데이터 수신 대기 큐 (PLAYER_DATA_RESPONSE / RESUME -> Body.Start 소비)
-    internal static readonly ConcurrentDictionary<string, JObject> PendingData = new();
+    internal static readonly ConcurrentDictionary<string, JObject> PendingData = new(); // RESUME/RESPONSE 데이터
 
-    private static readonly ConcurrentDictionary<string, (float X, float Y, int Layer)> PendingPositions = new();
+    private static readonly ConcurrentDictionary<string, (float X, float Y, int Layer)> PendingPositions = new(); // 스폰 위치
 
-    // 퇴장 시 저장된 드랍 아이템 - 재접속 시 LateSpawnLocation(스폰 위치 확정)에서 드랍한다.
-    // 도착 시퀀스 게이트를 동일하게 적용해 직전 방문의 잔존물 오염을 차단한다.
-    private static readonly ConcurrentDictionary<string, JArray> PendingDrops = new();
+    private static readonly ConcurrentDictionary<string, JArray> PendingDrops = new(); // 퇴장 시 드랍 아이템
     private static readonly ConcurrentDictionary<string, long> DropSeq = new();
 
-    // 데이터 수명주기 - 모든 푸시/위치 큐 쓰기는 로컬 단조 시퀀스(_seq)로 스탬프하고,
-    // 접속(CreateNetPlayerWithPeer) 시 OnPlayerArrival이 도착 시퀀스를 기록한다
-    // 직전 방문의 잔존물(seq <= 도착)은 소비 게이트에서 스킵·제거되고, 이번 방문의
-    // 신선 푸시만 Body.Start/위치 적용이 소비한다 (늦은 푸시는 다음 방문에 자동 무력화)
-    private static long _seq;
+    private static long _seq; // 도착 게이트용 단조 시퀀스
     private static readonly ConcurrentDictionary<string, long> PendingSeq = new();
     private static readonly ConcurrentDictionary<string, long> PositionSeq = new();
     private static readonly ConcurrentDictionary<string, long> ArrivalSeq = new();
 
-    // 바디 중심 기준 아래로 바닥을 확인하는 거리 (바디 높이 5 절반 2.5f + 0.5f)
     private const float FloorCheckDistance = 3f;
 
-    // 접속/재접속 시 도착 시퀀스 기록 + 직전 방문 잔존물 정리 (바디 스폰보다 먼저 호출)
     internal static void OnPlayerArrival(string persistentId)
     {
-        ArrivalSeq[persistentId] = Interlocked.Increment(ref _seq);
+        ArrivalSeq[persistentId] = Interlocked.Increment(ref _seq); // 직전 방문 데이터 무효화
         PendingData.TryRemove(persistentId, out _);
         PendingSeq.TryRemove(persistentId, out _);
         PositionSeq.TryRemove(persistentId, out _);
@@ -51,7 +39,6 @@ public static class SaveModule
         PendingDrops.TryRemove(persistentId, out _);
     }
 
-    // 푸시 저장 (도착 스탬프 포함). RESUME/RESPONSE 공용
     internal static void SetPending(string persistentId, JObject data)
     {
         PendingData[persistentId] = data;
@@ -64,14 +51,12 @@ public static class SaveModule
         PendingSeq.TryRemove(persistentId, out _);
     }
 
-    // 도착 epoch 게이트가 통과한 신선 푸시만 소비 (아니면 제거 후 false)
-    // 직전 방문 잔존물/가비지가 이번 방문의 복원을 오염시키는 것을 차단한다
     private static bool TryTakePending(string persistentId, out JObject data)
     {
         if (!ArrivalSeq.TryGetValue(persistentId, out long arrival)) arrival = long.MinValue;
         long seq = 0;
         bool has = PendingData.TryGetValue(persistentId, out data);
-        bool fresh = has && PendingSeq.TryGetValue(persistentId, out seq) && seq > arrival;
+        bool fresh = has && PendingSeq.TryGetValue(persistentId, out seq) && seq > arrival; // 도착 이후 푸시만 소비
         if (fresh)
         {
             PendingData.TryRemove(persistentId, out _);
@@ -84,13 +69,12 @@ public static class SaveModule
         return false;
     }
 
-    // 위치 큐도 동일 게이트 - 직전 방문의 스테일 위치는 소비하지 않는다
     private static bool TryTakePendingPosition(string persistentId, out (float X, float Y, int Layer) pos)
     {
         if (!ArrivalSeq.TryGetValue(persistentId, out long arrival)) arrival = long.MinValue;
         long seq = 0;
         bool has = PendingPositions.TryGetValue(persistentId, out pos);
-        bool fresh = has && PositionSeq.TryGetValue(persistentId, out seq) && seq > arrival;
+        bool fresh = has && PositionSeq.TryGetValue(persistentId, out seq) && seq > arrival; // 스테일 위치 스킵
         if (fresh)
         {
             PendingPositions.TryRemove(persistentId, out _);
@@ -102,11 +86,10 @@ public static class SaveModule
         return false;
     }
 
-
     public static JObject SerializePlayer(ScavPlayer plr)
     {
         Body body = plr.body;
-        var root = new JObject
+        var root = new JObject // 바디/스킬/림브/컴포넌트/인벤토리/위치 전체 직렬화
         {
             ["version"] = 1,
             ["body"] = SerializeFields(body),
@@ -130,14 +113,13 @@ public static class SaveModule
         return root;
     }
 
-    // 플레이어 데이터 제출 (퇴장/동결) -> 오케스트레이터
     public static void SubmitPlayer(ScavPlayer plr)
     {
         if (plr == null || plr.body == null) return;
         try
         {
             JObject data = SerializePlayer(plr);
-            OrchestratorClient.Instance?.SendEvent("PLAYER_DATA_SUBMIT",
+            OrchestratorClient.Instance?.SendEvent("PLAYER_DATA_SUBMIT", // 직렬화 후 제출
                 new { playerKey = MigrationModule.PlayerKeyOf(plr), payload = data });
         }
         catch (System.Exception ex)
@@ -146,8 +128,6 @@ public static class SaveModule
         }
     }
 
-    // PLAYER_DATA_RESPONSE (접속 로드 응답) - pending 큐에 저장
-    // payload가 없으면 "데이터 없음" - 잔존 엔트리를 정리하고 기본 상태로 진행
     internal static void HandlePlayerDataResponse(ControlMessage msg)
     {
         string playerKey = msg.PayloadAs<PlayerKeyPayload>()?.PlayerKey ?? "";
@@ -159,19 +139,17 @@ public static class SaveModule
         }
         if (payload == null || payload.Type != JTokenType.Object)
         {
-            RemovePending(playerKey); // 데이터 없음 - 이전 잔존 엔트리 정리
+            RemovePending(playerKey); // 데이터 없음 - 잔존 엔트리 정리
             return;
         }
         SetPending(playerKey, (JObject)payload);
     }
 
-    // 복원 (Body.Start에서)
-
     internal static void RestorePlayer(Body body, ScavPlayer plr, JObject root)
     {
         try
         {
-            RestoreBodyFields(body, root["body"]);
+            RestoreBodyFields(body, root["body"]); // 바디/림브/인벤토리/위치 복원
             RestoreSkills(body, root["skills"]);
             RestoreLimbs(body, root["limbs"]);            ApplyComponents(body.gameObject, root["bodyComponents"]);
             ApplyLimbComponents(body, root["limbComponents"]);
@@ -188,10 +166,7 @@ public static class SaveModule
         }
     }
 
-
-    // 직렬화 제외 필드 - 온도계 transient 상태: tempCheckTime(냉각 1초 게이트)이 새 프로세스에서
-    // 복원되면 게이트가 영구 스킵되어 냉각이 멈춘다. temperature/wetness/clothingTemperature는 재계산 대상.
-    private static readonly HashSet<string> TransientFieldBlacklist = new()
+    private static readonly HashSet<string> TransientFieldBlacklist = new() // transient - 복원 시 제외
     {
         "tempCheckTime",
         "temperature",
@@ -219,10 +194,6 @@ public static class SaveModule
             else if (f.IsDefined(typeof(JsonPropertyAttribute), false)
                      && !typeof(UnityEngine.Object).IsAssignableFrom(f.FieldType))
             {
-                // [JsonProperty] 클래스 타입 필드 (예: WaterContainerItem.stack - List<LiquidStack>,
-                // NonDescriptCan.liquidIds - List<string>) - base SaveSystem은 Newtonsoft로
-                // 직렬화하므로(액체 상태 등) 동일하게 처리한다. 화이트리스트(IsSavableType)가
-                // 클래스 타입을 걸러 유실되던 문제 해결
                 try { result[f.Name] = JToken.FromObject(f.GetValue(obj)); }
                 catch { }
             }
@@ -248,7 +219,6 @@ public static class SaveModule
             else if (f.IsDefined(typeof(JsonPropertyAttribute), false)
                      && !typeof(UnityEngine.Object).IsAssignableFrom(f.FieldType))
             {
-                // 클래스 타입 - JSON에서 새 인스턴스로 복원 (기존 참조 교체)
                 try { f.SetValue(target, prop.Value.ToObject(f.FieldType)); }
                 catch { }
             }
@@ -273,8 +243,6 @@ public static class SaveModule
         }
     }
 
-    // 컴포넌트 ([Saveable] - )
-
     private static JObject SerializeComponents(GameObject go)
     {
         var result = new JObject();
@@ -298,8 +266,6 @@ public static class SaveModule
             Component c = go.GetComponent(t);
             if (c == null)
             {
-                // 런타임 추가 [Saveable] 컴포넌트 - GetComponent 실패 시 AddComponent 폴백
-                // 직렬화는 MonoBehaviour만 대상이므로 안전하다
                 if (!typeof(Component).IsAssignableFrom(t) || !t.IsSubclassOf(typeof(MonoBehaviour))) continue;
                 try { c = go.AddComponent(t); }
                 catch (System.Exception ex)
@@ -322,10 +288,6 @@ public static class SaveModule
         }
     }
 
-    // 타입 이름 -> Type 해석. Type.GetType은 호출 어셈블리/mscorlib만 검색하므로,
-    // 게임 어셈블리(Assembly-CSharp)의 [Saveable] 컴포넌트(WaterContainerItem 등)는
-    // 이름만으로 조회하면 null이 되어 복원이 조용히 스킵된다 - 로드된 어셈블리를 전부
-    // 검색해 해석한다
     private static Type ResolveType(string name)
     {
         Type t = Type.GetType(name);
@@ -337,7 +299,6 @@ public static class SaveModule
         }
         return null;
     }
-
 
     private static JArray SerializeInventory(Body body)
     {
@@ -383,9 +344,6 @@ public static class SaveModule
         return e;
     }
 
-    // 유저 퇴장 시: 바디 근처(반경 10 블럭)에 드랍된 월드 아이템(transform.parent == null)을
-    // 직렬화해 저장하고 원본을 파괴한다. 재접속 시 중복 생성을 막기 위해 저장 후 월드에서
-    // 제거한다. 누가 드랍했든 관계없이 범위 내 모든 드랍 아이템을 대상으로 한다.
     private const float DropItemCaptureRadius = 10f;
 
     private static JArray SerializeDroppedItems(Body body)
@@ -409,7 +367,6 @@ public static class SaveModule
             if (hit == null) continue;
             Item item = hit.GetComponent<Item>();
             if (item == null) continue;
-            // 월드에 독립적으로 떠 있는 드랍 아이템만 (인벤토리/컨테이너/착용 제외)
             if (item.transform.parent != null) continue;
 
             try
@@ -435,7 +392,6 @@ public static class SaveModule
 
                 items.Add(e);
 
-                // 저장 후 월드에서 제거 - 재접속 시 중복 생성 방지
                 NetObjectRegistry.SafeDestroyObject(item.gameObject);
             }
             catch (System.Exception ex)
@@ -512,7 +468,6 @@ public static class SaveModule
         return item;
     }
 
-
     private static JObject SerializeRecipes()
     {
         var saved = new JArray();
@@ -575,15 +530,12 @@ public static class SaveModule
     {
         if (root["lastHappiness"] is JArray lh)
         {
-        // Body.lastHappiness는 SerializeFields에 포함되므로 여기서는 건너뜀 (중복 방지)
         }
         if (PlayerCamera.main != null && root["caloriesConsumed"] is JValue cc)
         {
             PlayerCamera.main.caloriesConsumed = cc.Value<int>();
         }
     }
-
-    // 위치 (바닐라 스폰 위치 전송 시점에 적용 - LateSpawnLocation Prefix)
 
     private static void QueuePosition(Body body, ScavPlayer plr, JToken token)
     {
@@ -596,7 +548,6 @@ public static class SaveModule
         PositionSeq[pid] = Interlocked.Increment(ref _seq);
     }
 
-    // 퇴장 시 저장된 드랍 아이템 큐잉 (RestorePlayer에서 호출 - 스폰 위치 확정 시 소비)
     private static void QueueDroppedItems(ScavPlayer plr, JToken token)
     {
         if (token is not JArray drops) return;
@@ -605,7 +556,6 @@ public static class SaveModule
         DropSeq[pid] = Interlocked.Increment(ref _seq);
     }
 
-    // 신선한 드랍 아이템 큐만 소비 (직전 방문 잔존물은 게이트로 제거)
     private static bool TryTakePendingDrops(string persistentId, out JArray drops)
     {
         drops = null;
@@ -623,17 +573,13 @@ public static class SaveModule
         return drops != null && drops.Count > 0;
     }
 
-    // 저장 위치 적용 - 바닐라 스폰 위치 전송(LateSpawnLocation) 시점에 호출되어
-    // 클라이언트가 처음 받는 스폰 위치가 저장 위치가 되게 한다. 성공 시 true - 호출부가
-    // 바닐라 스폰 계산을 스킵한다.
     internal static bool TryApplyPendingPosition(ScavPlayer plr, NetBody pb)
     {
         if (plr == null || pb == null || WorldGeneration.world == null) return false;
         if (!TryTakePendingPosition(MigrationModule.PlayerKeyOf(plr), out var p)) return false;
 
-        if (p.Layer != WorldGeneration.world.biomeDepth)
+        if (p.Layer != WorldGeneration.world.biomeDepth) // 레이어 불일치(마이그레이션) -> 기본 스폰
         {
-            // 레이어 불일치 - 마이그레이션/레이어 전환: 위치 복원 없이 새 레이어 기본 스폰 사용
             return false;
         }
 
@@ -641,23 +587,17 @@ public static class SaveModule
             Mathf.Clamp(p.X, -WorldGeneration.world.halfWidth, WorldGeneration.world.halfWidth),
             Mathf.Clamp(p.Y, -WorldGeneration.world.halfHeight, WorldGeneration.world.halfHeight));
 
-        Vector2? safe = FindSafePosition(pos);
+        Vector2? safe = FindSafePosition(pos); // 막힌 위치면 주변 안전 위치 탐색
         if (safe == null)
         {
-            // 안전 위치 탐색 실패 - 적용 포기, 바닐라 기본 스폰(LateSpawnLocation)으로 폴백
             return false;
         }
 
         pb.body.transform.position = safe.Value;
-        // 바닐라 스폰 플로우가 저장 위치를 덮어쓰지 않도록 플래그 설정 (PlayerSavedState.Apply와 동일 규약)
-        plr.ServerPlayerState.did_give_spawn_location_from_a_save = true;
+        plr.ServerPlayerState.did_give_spawn_location_from_a_save = true; // 바닐라 스폰 덮어쓰기 방지
         return true;
     }
 
-    // 바닐라 스폰 위치 계산(LateSpawnLocation)을 저장 위치로 대체 - 저장된 위치가
-    // 있으면 그 위치를 적용하고 바닐라(기본 스폰/타인 근처) 계산을 스킵한다. 이후 바닐라가
-    // "Sending a spawn location"으로 현재 위치를 클라이언트에 전송하므로, 클라이언트가
-    // 처음 받는 스폰 위치가 저장 위치가 된다
     [HarmonyPatch(typeof(ServerMain), nameof(ServerMain.LateSpawnLocation))]
     internal static class ServerMain_LateSpawnLocation_SavedPositionPatch
     {
@@ -666,21 +606,19 @@ public static class SaveModule
             if (b == null || b.plr == null) return true;
             if (TryApplyPendingPosition(b.plr, b))
             {
-                return false;
+                return false; // 저장 위치 적용 -> 바닐라 계산 스킵
             }
             return true;
         }
     }
 
-    // 퇴장 시 저장된 드랍 아이템을 스폰 위치 확정 후 드랍한다. LateSpawnLocation은 재접속/마이그레이션/신규
-    // 모두에서 첫 스폰 시 1회 호출되고, 위치가 최종 확정된 뒤 클라 스폰 위치가 전송되므로 함께 보인다.
     [HarmonyPatch(typeof(ServerMain), nameof(ServerMain.LateSpawnLocation))]
     internal static class ServerMain_LateSpawnLocation_DroppedItemsRestorePatch
     {
         private static void Postfix(NetBody b)
         {
             if (b == null || b.plr == null) return;
-            if (!TryTakePendingDrops(MigrationModule.PlayerKeyOf(b.plr), out JArray drops)) return;
+            if (!TryTakePendingDrops(MigrationModule.PlayerKeyOf(b.plr), out JArray drops)) return; // 스폰 확정 후 드랍 복원
 
             Vector2 spawnPos = b.body != null ? (Vector2)b.body.transform.position : Vector2.zero;
             foreach (JObject entry in drops.OfType<JObject>())
@@ -697,21 +635,17 @@ public static class SaveModule
         }
     }
 
-    // 저장된 드랍 아이템 엔트리를 월드에 스폰한다 (상태/컨테이너/컴포넌트 복원)
     private static void SpawnDroppedItem(JObject entry, Vector2 basePos)
     {
         string id = entry.Value<string>("id");
         if (string.IsNullOrEmpty(id)) return;
 
-        // 스폰 위치 주변에 약간 퍼뜨려 겹침 방지
         Vector2 pos = basePos + UnityEngine.Random.insideUnitCircle * 0.5f;
         GameObject obj = Utils.Create(id, pos, 0f);
         if (obj == null) return;
         Item item = obj.GetComponent<Item>();
         if (item == null) { UnityEngine.Object.Destroy(obj); return; }
 
-        // 월드 생성이 아직 완료되지 않은 시점(LateSpawnLocation)에 생성될 수 있어,
-        // 중력을 무시해 아래로 떨어지지 않도록 고정한다. 월드 생성 후 물리가 활성화된다.
         if (item.rb != null)
         {
             item.rb.gravityScale = 0f;
@@ -725,7 +659,6 @@ public static class SaveModule
         ApplyDroppedContents(item, entry["contents"]);
     }
 
-    // 드랍 아이템의 컨테이너 내용물 복원 (BuildItemEntry의 contents 역순)
     private static void ApplyDroppedContents(Item item, JToken token)
     {
         if (token is not JArray contents || contents.Count == 0) return;
@@ -750,8 +683,6 @@ public static class SaveModule
         }
     }
 
-    // 저장 위치 walkability 검사 + 막혀 있으면 근처 안전 위치 탐색 (나선 반경 8 타일)
-    // 실패 시 null - 호출부가 기본 스폰으로 폴백한다
     private static Vector2? FindSafePosition(Vector2 pos)
     {
         if (IsWalkable(pos)) return pos;
@@ -777,9 +708,6 @@ public static class SaveModule
         return null;
     }
 
-    // 바디 콜라이더 크기 기준으로 Ground 블록과 겹치지 않고 발 아래 3f 내 바닥이
-    // 있는지 검사 (LateJoinSpawnPatch와 동일 시맨틱 - 공중 스폰/낙사 방지)
-    // 바디 중심 기준 3f = 바디 높이(5) 절반 2.5f + 0.5f 아래 바닥까지 감지
     private static bool IsWalkable(Vector2 pos)
     {
         try
@@ -798,14 +726,9 @@ public static class SaveModule
         }
     }
 
-
-    // 바디 생성 시 복원 . 데이터 미수신 시 짧은 대기 후 기본 상태
     [HarmonyPatch(typeof(Body), "Start")]
     internal static class Body_Start_RestorePatch
     {
-        // 베이스 모드의 인메모리 저장(server_lastplayerstates) 이중 복원 차단.
-        // 우리 시스템(오케스트레이터 단일 소유자)이 정본이므로, 같은 인스턴스 재접속/롤백 시
-        // 베이스 PlayerSavedState.Apply가 아이템을 중복 생성하는 것을 방지한다.
         [HarmonyPriority(Priority.First)]
         private static void Prefix(Body __instance)
         {
@@ -824,8 +747,6 @@ public static class SaveModule
                 DateTime deadline = DateTime.UtcNow.AddSeconds(2);
                 while (DateTime.UtcNow < deadline)
                 {
-                    // 응답 디스패치는 Update에서만 일어나는데, 여기서 메인 스레드를 블로킹하면
-                    // Update가 실행될 수 없다 - 대기 중에도 큐를 직접 처리해 응답을 반영한다
                     OrchestratorClient.Instance?.ProcessInbound();
                     if (TryTakePending(pid, out data)) break;
                     System.Threading.Thread.Sleep(25);
@@ -834,25 +755,17 @@ public static class SaveModule
             if (data != null)
             {
                 RestorePlayer(__instance, plr, data);
-                // 저장 위치 적용은 월드젠 완료 시점까지 지연한다 - 바닐라 스폰 리로케이션이
-                // 저장 위치를 덮어쓰는 경합을 피하기 위해 바닐라 스폰 적용 이후에 적용한다.
             }
             else
             {
-                GrantStartingSupplies(__instance, plr);
+                GrantStartingSupplies(__instance, plr); // 데이터 없음 -> 신규 보급품
             }
         }
     }
 
-    // 세이브 데이터가 없는 신규 플레이어에게 시작 보급품 지급 (플레이어별 개별 판정 - B)
-    // 바닐라 지급은 totalTraveled=1 소진(FinishWorldGeneration)으로 전부 억제되어 있으므로,
-    // 여기서 바닐라 NetBody.CreateNewPlayerCharacter의 지급 로직을 대신 수행한다
-    // 리스폰(!respawn - 인플레이스)에서도 재사용한다
     internal static void GrantStartingSupplies(Body body, ScavPlayer plr)
     {
-        // 바닐라 조건 미러링 - 시작 보급품은 첫 레이어 신규 런 전용
-        // totalTraveled는 FinishWorldGeneration에서 1로 소진되므로 첫 레이어 판정에는 biomeDepth를 쓴다
-        if (WorldGeneration.world == null
+        if (WorldGeneration.world == null // 첫 레이어 신규 런만 지급
             || WorldGeneration.world.biomeDepth != 0
             || (int)WorldGeneration.world.biomeOverride != 0
             || SaveSystem.loadedRun)
@@ -878,14 +791,13 @@ public static class SaveModule
 
     }
 
-    // 퇴장 저장 - 마이그레이션 중(FREEZE 후)이면 건너뜀
     [HarmonyPatch(typeof(ScavPlayer), nameof(ScavPlayer.OnDestroy))]
     internal static class NetPlayer_OnDestroy_SubmitPatch
     {
         private static void Prefix(ScavPlayer __instance)
         {
             if (__instance == null) return;
-            if (MigrationModule.IsFrozen(MigrationModule.PlayerKeyOf(__instance))) return;
+            if (MigrationModule.IsFrozen(MigrationModule.PlayerKeyOf(__instance))) return; // 동결 중 = 캡처가 정본
             if (__instance.body != null)
             {
                 SubmitPlayer(__instance);

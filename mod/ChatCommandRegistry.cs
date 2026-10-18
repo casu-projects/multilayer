@@ -4,8 +4,6 @@ using Together;
 
 namespace CasuMod;
 
-// 등록된 인게임 채팅 명령 정의 - "!" 접두사 라우터(Chat_CommandRouterPatch)가
-// 레지스트리에서 찾아 Handler로 디스패치한다. Usage는 !help 자동 생성에 쓰인다
 public sealed class ChatCommand
 {
     public ChatCommand(string name, string description, string usage, Action<ScavPlayer, string[]> handler)
@@ -22,8 +20,6 @@ public sealed class ChatCommand
     public Action<ScavPlayer, string[]> Handler { get; }
 }
 
-// 채팅 명령 레지스트리 - 이름 대소문자 무시, !help 자동 생성(All) 지원
-// ChatCommands의 하드코딩 TryHandle 체인을 대체한다
 public sealed class ChatCommandRegistry
 {
     private readonly Dictionary<string, ChatCommand> _commands = new(StringComparer.OrdinalIgnoreCase);

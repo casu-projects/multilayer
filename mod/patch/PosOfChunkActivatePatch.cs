@@ -6,8 +6,6 @@ using UnityEngine.Tilemaps;
 
 namespace CasuMod.Patch;
 
-// 청크 활성화의 위치를 호스트의 카메라 대신 각 유저의 카메라 위치로 변경
-// 액체, 오브젝트, 몬스터 AI의 이동이 롤백되는 문제를 해결
 [HarmonyPatch]
 internal static class PosOfChunkActivatePatch
 {
@@ -26,7 +24,6 @@ internal static class PosOfChunkActivatePatch
         TilemapRenderer[,] renderChunks = WorldGeneration.world.renderChunks;
         if (renderChunks == null) return;
 
-        // 실제 유저 접속하지 않아서 하나도 준비되지 않은 접속/월드젠 틈에는 기존 상태를 건드리지 않게 설정
         bool hasReadyPlayer = false;
         foreach (ScavPlayer player in ScavPlayer.AllLivingPlayers)
         {
@@ -46,8 +43,6 @@ internal static class PosOfChunkActivatePatch
             if (renderer == null) continue;
             aliveRenderers.Add(renderer);
 
-            // 멀티 모드가 이미 관리하는 플레이어의 가시 그리드를 그대로 가져와서 사용
-            // 이러면 레이어 전체를 갱신 할 필요도 없고, 여러 플레이어가 멀리 떨어져 있어도 각자의 주변만 활성화 된다
             bool interested = SharedMain.PositionIsInSimulatedChunk(
                 renderer.transform.position);
 
@@ -63,7 +58,6 @@ internal static class PosOfChunkActivatePatch
             renderer.enabled = lingering;
         }
 
-        // 월드가 재생성되면 파괴된 Renderer 키가 여전히 남으니. 조금이라도 꾸준히 치워준다
         var stale = new List<TilemapRenderer>();
         foreach (TilemapRenderer renderer in LastInterestedAt.Keys)
         {
@@ -87,8 +81,6 @@ internal static class HeadlessChunkVisibility_SharedMainUpdateHook
     }
 }
 
-// 게임 원본 기준으로는 월드 밖에 주차된 서버 카메라를 기준으로 청크를 다시 꺼버리지만
-// 데디케이트 서버에서만 그 방식을 건너뛰고 플레이중인 유저 기준으로 갱신을 사용하게 만듬
 [HarmonyPatch]
 internal static class HeadlessChunkVisibility_UpdateChunkVisibilityHook
 {

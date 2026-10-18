@@ -8,7 +8,6 @@ internal static class DisableItemDropWhenLeavePatch
 {
     private static bool Prefix(ScavPlayer __instance)
     {
-        // 로컬 placeholder 바디(PlayerCamera.main.body)는 유지한다
         if (__instance == null || __instance.IsLocal)
             return false;
 

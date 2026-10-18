@@ -22,19 +22,13 @@ public sealed class InstanceInfo
     public DateTime LastNonIdleAt { get; set; } = DateTime.UtcNow;
     public int ConnectedCount { get; set; }
     public ControlHub.ClientConnection? ModConnection { get; set; }
-    // 마지막 레이어 초기화(RESET) 이후 플레이어가 접속했었는지 - Prewarm 인스턴스의
-    // 유휴 재초기화를 "점유 사이클당 1회"로 제한 (플레이어 없이 무한 월드젠 루프 방지)
     public bool HasPlayedSinceReset { get; set; }
 }
 
-// 인스턴스 수명주기 - 노드 에이전트 경유 스폰/정지, READY 검증
-// 모든 접근은 메인 스레드 전용
 public sealed class InstanceManager
 {
-    // 프리웜 고정 레이어 - 에이전트 등록 시 항상 스폰/유지 (유휴 시 RESET 후 대기)
     private const int PrewarmDepth = 1;
 
-    // 레이어1 프리웜 무접속 자동 종료 유예 (1시간 고정) - 초과 시 프로세스 정지(자원 회수)
     private static readonly TimeSpan PrewarmIdleShutdownDelay = TimeSpan.FromHours(1);
 
     private readonly OrchestratorConfig _config;
@@ -52,8 +46,6 @@ public sealed class InstanceManager
 
     public IReadOnlyCollection<InstanceInfo> All => _instances.Values.ToList();
 
-    // 레이어1 프리웜 1시간 무접속 자동 종료 (orchestrator.json PrewarmIdleShutdown, 기본 ON)
-    // prewarm 명령 토글 - OFF면 레이어1은 종료되지 않는다(항상 프리웜)
     public bool PrewarmIdleShutdownEnabled
     {
         get => _config.PrewarmIdleShutdown;
@@ -63,8 +55,6 @@ public sealed class InstanceManager
     public InstanceInfo? Find(string key) => _instances.TryGetValue(key, out var info) ? info : null;
 
     public InstanceInfo? FindByDepth(int depth) => _instances.Values.FirstOrDefault(i => i.Depth == depth);
-
-    // 에이전트 등록 (AGENT_HELLO)
 
     public void RegisterAgent(string machineId, int capacity, string address)
     {
@@ -85,7 +75,6 @@ public sealed class InstanceManager
     {
         if (info.MachineId != null && _agents.TryGetValue(info.MachineId, out var agent))
             return $"{agent.Address}:{info.Port}";
-        // 스폰 없이 재수용된 인스턴스: 모드 연결의 원격 IP 사용
         if (info.ModConnection != null
             && info.ModConnection.Tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep)
         {
@@ -94,11 +83,6 @@ public sealed class InstanceManager
         return null;
     }
 
-    // 스폰 (G-2 파라미터 세트)
-
-    // 해당 depth의 인스턴스를 보장 (없으면 SPAWN). 백엔드 주소 반환 - 부팅 중이어도
-    // 게이트웨이가 백엔드 재시도로 커버 . Stopped/Crashed 기록은 죽은 프로세스이므로
-    // 재스폰한다 (유휴 정지 후 재접속 시 고아 주소로 라우팅되는 것 방지)
     public string? EnsureInstance(int depth)
     {
         InstanceInfo? info = FindByDepth(depth);
@@ -118,7 +102,6 @@ public sealed class InstanceManager
             return null;
         }
 
-        // 배치: 수용량 대비 사용량이 가장 적은 에이전트
         string? machineId = SelectMachine();
         if (machineId == null)
         {
@@ -166,7 +149,6 @@ public sealed class InstanceManager
         throw new InvalidOperationException("인스턴스 포트 고갈");
     }
 
-    // 에이전트 선택 - 수용량 대비 사용량이 가장 낮은 에이전트
     private string? SelectMachine()
     {
         return _agents
@@ -184,9 +166,6 @@ public sealed class InstanceManager
         _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), "STOP", new { instanceKey = key });
     }
 
-    // Prewarm 인스턴스 레이어 초기화 - 프로세스 생존 상태에서 모드에 RESET을
-    // 발신해 ToMainMenu -> 재월드젠 후 READY 재보고를 유도한다 (유휴 대기 유지 - 부팅 비용 제거)
-    // 실패(모드 미연결/ack 타임아웃) 시 Crashed 처리 - 다음 EnsureInstance가 재스폰 폴백
     public void ResetInstance(string key)
     {
         InstanceInfo? info = Find(key);
@@ -208,8 +187,6 @@ public sealed class InstanceManager
         });
     }
 
-    // 프리웜 - 레이어 1을 수용량 내 최대한 스폰한다(누락분 자동 보충).
-    // 동시 부팅 리소스 경쟁을 피하기 위해 큐에 넣고 TickPrewarm이 순차 처리한다.
     public void PrewarmLayers()
     {
         int depth = PrewarmDepth;
@@ -220,7 +197,6 @@ public sealed class InstanceManager
         }
         if (existing != null && existing.Status is InstanceStatus.Starting or InstanceStatus.Booting or InstanceStatus.IdleReset)
         {
-            // 이미 부팅/월드젠 중 - 그 인스턴스가 순차 처리의 현재 항목
             if (_prewarmInFlight < 0) _prewarmInFlight = depth;
             return;
         }
@@ -233,15 +209,12 @@ public sealed class InstanceManager
     private readonly Queue<int> _prewarmQueue = new();
     private int _prewarmInFlight = -1;
 
-    // 순차 프리웜 진행 (메인 루프 틱) - 현재 항목이 READY(월드젠 완료)가 되면
-    // 다음을 스폰한다. 실패(스폰 불가/크래시) 시 현재 항목을 버리고 다음으로 넘어간다
-    // (누락분은 다음 에이전트 등록의 PrewarmLayers가 재보충)
     public void TickPrewarm()
     {
         if (_prewarmInFlight >= 0)
         {
             InstanceInfo? info = FindByDepth(_prewarmInFlight);
-            if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
+        if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed) // 없거나 죽었으면 재스폰
             {
                 _prewarmInFlight = -1; // 실패 - 다음 항목으로
             }
@@ -274,32 +247,25 @@ public sealed class InstanceManager
                 _prewarmInFlight = depth;
                 return; // 스폰됨 - READY까지 대기
             }
-            // 스폰 불가 (에이전트 없음/수용량 초과) - 이 항목은 스킵, 다음 시도
         }
     }
 
-    // 런 시작 대기 표시 (G-1 개정) - 스폰 시점과 모드 연결(MOD_HELLO) 시점에
-    // 표시되고, MOD_HELLO에서 바로 START_RUN을 전송한다. 인스턴스 수명당 1회 전송
-    // (프리웜: 월드젠은 플레이어 접속과 무관하게 인스턴스 부팅 직후 시작)
     private readonly HashSet<string> _runNeeded = new();
 
     public void MarkRunNeeded(string? key)
     {
         if (key == null) return;
-        // 이미 실행 중(READY/IDLE)인 인스턴스는 런 시작 불필요 (인스턴스 수명당 1회)
         InstanceInfo? info = Find(key);
         if (info != null && info.Status is InstanceStatus.Ready or InstanceStatus.Idle)
             return;
         _runNeeded.Add(key);
     }
 
-    // 대기 중이던 START_RUN 전송 (인스턴스 수명당 1회)
     public void TrySendStartRun(string key)
     {
         if (!_runNeeded.Remove(key)) return;
         _hub.Send(_hub.ModConnection(key), "START_RUN", new { instanceKey = key });
     }
-
 
     public void OnModHello(ControlHub.ClientConnection conn, ModHelloPayload payload)
     {
@@ -307,7 +273,6 @@ public sealed class InstanceManager
         InstanceInfo? info = Find(key);
         if (info == null)
         {
-            // 오케스트레이터 재시작 후 기존 인스턴스 재수용
             info = new InstanceInfo { Key = key, Depth = payload.Depth, Port = payload.Port, Status = InstanceStatus.Booting };
             _instances[key] = info;
             _usedPorts.Add(payload.Port);
@@ -318,24 +283,18 @@ public sealed class InstanceManager
         {
             info.Status = InstanceStatus.Booting;
         }
-        // 프리웜: 모드 연결 시점에 START_RUN 을 보내 플레이어 없이 월드젠한다.
-        // 목적지 READY 이후에만 접속/마이그레이션이 이뤄지도록 하는 전제.
         _runNeeded.Add(key);
         TrySendStartRun(key);
     }
 
-    // 인스턴스 READY 전이 (Booting/Starting -> Ready). 실제 전이된 경우에만 true를 반환해
-    // 호출부가 ROUTE-ON-READY 푸시를 1회만 수행하도록 한다.
     public bool OnInstanceReady(string key)
     {
         InstanceInfo? info = Find(key);
         if (info == null) return false;
-        // 정지/크래시 중인 인스턴스는 READY로 부활시키지 않는다 (중복 정지 방지)
         if (info.Status != InstanceStatus.Booting && info.Status != InstanceStatus.Starting
             && info.Status != InstanceStatus.IdleReset)
             return false;
-        info.Status = InstanceStatus.Ready;
-        // 유휴 유예 기준 갱신 - 부팅/리셋 완료 후 유휴 타이머를 깨끗하게 재시작
+        info.Status = InstanceStatus.Ready; // READY 전이
         info.LastNonIdleAt = DateTime.UtcNow;
         return true;
     }
@@ -378,17 +337,14 @@ public sealed class InstanceManager
         {
             _agents[info.MachineId] = (Math.Max(0, agent.Used - 1), agent.Capacity, agent.Address);
         }
-        info.Status = InstanceStatus.Stopped;
+        info.Status = InstanceStatus.Stopped; // 종료
         info.ModConnection = null;
     }
-
-    // 유휴 정리 ( 인스턴스 수명주기 + Prewarm 유휴 재초기화)
 
     public void TickIdle(DateTime now, Func<string, int> connectedCountForInstance)
     {
         foreach (InstanceInfo info in _instances.Values.ToList())
         {
-            // Starting/Booting/IdleReset은 유휴 판정 대상 아님 (부팅/리셋 중 - READY 대기)
             if (info.Status is not (InstanceStatus.Ready or InstanceStatus.Idle))
                 continue;
 
@@ -411,7 +367,6 @@ public sealed class InstanceManager
             bool isPrewarm = info.Depth == PrewarmDepth;
             if (isPrewarm)
             {
-                // 1시간 무접속 -> 자동 종료 (자원 회수, prewarm 토글 ON). 이후 접속 시 콜드 스폰
                 if (PrewarmIdleShutdownEnabled && now - info.LastNonIdleAt >= PrewarmIdleShutdownDelay)
                 {
                     Console.WriteLine($"{info.Key} 유휴 초과(1시간) — 정지.");
@@ -421,12 +376,10 @@ public sealed class InstanceManager
 
                 if (!info.HasPlayedSinceReset)
                 {
-                    // 이미 초기화된 신선한 월드 - 플레이어 없이 무한 재월드젠 금지
                     info.Status = InstanceStatus.Idle;
                     continue;
                 }
 
-                // Prewarm 인스턴스 - 프로세스 생존 + 레이어 초기화 후 유휴 대기
                 info.HasPlayedSinceReset = false;
                 ResetInstance(info.Key);
                 continue;

@@ -3,12 +3,8 @@ using System.Text.Json.Serialization;
 
 namespace CasuMpGateway;
 
-// 제어 프로토콜 메시지 . JSON 라인 + seq-ack
-// 대소문자 무시 파싱 - 양쪽 구현체의 키 케이스 불일치로 인한 조용한 실패 방지
 public sealed class ControlMessage
 {
-    // 직렬화 하드닝 : AllowNamedFloatingPointLiterals - NaN/Infinity
-    // 포함 페이로드도 예외 없이 왕복 (연결 끊김/루프 방지 - 오케스트레이터와 동일 규약)
     private static readonly JsonSerializerOptions ParseOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -54,7 +50,6 @@ public sealed class ControlMessage
             Payload = JsonSerializer.SerializeToElement(new { ok, reason }, ParseOptions),
         };
     }
-
 
     public T? PayloadAs<T>() where T : class =>
         Payload is JsonElement el ? el.Deserialize<T>(ParseOptions) : null;

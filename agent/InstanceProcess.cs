@@ -2,7 +2,6 @@ using System.Diagnostics;
 
 namespace CasuMpAgent;
 
-// 단일 인스턴스 프로세스 (스폰/감시/정지)
 public sealed class InstanceProcess
 {
     private readonly AgentConfig _config;
@@ -24,7 +23,6 @@ public sealed class InstanceProcess
         _stdin = process.StandardInput;
     }
 
-    // SPAWN 페이로드 수신 시 프로세스 실행
     public static InstanceProcess? Spawn(AgentConfig config, SpawnPayload payload)
     {
         if (string.IsNullOrEmpty(config.GameExecutablePath))
@@ -60,7 +58,6 @@ public sealed class InstanceProcess
         psi.Environment["HOME"] = homeDir;
         psi.Environment["XDG_CONFIG_HOME"] = Path.Combine(homeDir, ".config");
 
-        // 신규 모드(CasuAgent)용 - 인스턴스가 오케스트레이터에 직접 연결하도록 환경변수 주입
         psi.Environment["CASU_START_DEPTH"] = payload.Depth.ToString();
         psi.Environment["CASU_INSTANCE_KEY"] = payload.InstanceKey;
         psi.Environment["CASU_PORT"] = payload.Port.ToString();
@@ -98,7 +95,6 @@ public sealed class InstanceProcess
         }
     }
 
-    // stdin으로 quit 전달 -> 유예 대기 -> 강제 종료
     public void Stop()
     {
         try

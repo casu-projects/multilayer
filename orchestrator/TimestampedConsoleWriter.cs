@@ -2,7 +2,6 @@ using System.Text;
 
 namespace CasuMpOrchestrator;
 
-// Timestamp 및 송신자를 접두사에 추가한 ConsoleIO.WriteLine 확장 로깅 시스템
 public sealed class TimestampedConsoleWriter : TextWriter
 {
     public static TimestampedConsoleWriter? Instance { get; private set; }

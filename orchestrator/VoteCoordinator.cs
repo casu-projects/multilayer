@@ -1,7 +1,5 @@
 namespace CasuMpOrchestrator;
 
-// 크로스 인스턴스 투표 시스템
-// VOTE_START(모드) -> VOTE_RUN 브로드캐스트 -> VOTE_TALLY 통해 합산 -> VOTE_RESULT 확정
 public sealed class VoteCoordinator
 {
     public readonly record struct VoteFinalizeResult(
@@ -94,7 +92,6 @@ public sealed class VoteCoordinator
     }
 }
 
-// VOTE_START (mod -> orchestrator)
 public sealed class VoteStartMarker
 {
     public string VoteId { get; set; } = "";
@@ -105,7 +102,6 @@ public sealed class VoteStartMarker
     public Dictionary<string, string> Payload { get; set; } = new();
 }
 
-// VOTE_TALLY (mod -> orchestrator)
 public sealed class VoteTallyMarker
 {
     public string VoteId { get; set; } = "";

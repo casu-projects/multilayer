@@ -5,8 +5,6 @@ using LiteNetLib.Utils;
 
 namespace CasuMpGateway;
 
-// 단일 클라이언트 세션 (상태머신 + 투명 중계 + 백엔드 연결/스왑)
-// 모든 NetManager 접근은 메인 루프 스레드에서만 일어난다
 public sealed class ClientSession : INetEventListener
 {
     private static long _nextSessionId;
@@ -32,8 +30,6 @@ public sealed class ClientSession : INetEventListener
     public string Username { get; }
     public ulong? SteamId { get; }
 
-    // 핸드셰이크에서 파싱한 서버 비밀번호 (DirectIpAdapter와 동일 규약 - Steam 경로 검증용
-    // 파싱 실패 시 빈 문자열 - 게임 서버가 최종 검증하므로 안전)
     public string Password { get; }
     public SessionState State { get; private set; }
     public string? InstanceId { get; private set; }
@@ -44,13 +40,10 @@ public sealed class ClientSession : INetEventListener
     public bool IsReturningPlayer { get; private set; }
     public bool IsMigratingArrival { get; private set; }
 
-    // 이 세션이 백엔드에 한 번이라도 연결 성공했는지 (재라우팅 대상 판정용)
     public bool HasEverConnectedToBackend => _hasEverConnectedToBackend;
 
-    // Steam 이름 보정 결과 - tail(Ver 2)에 실어 인스턴스 playername도 보정한다 (없으면 null)
     private readonly string? _tailName;
 
-    // 라우팅 대기 시작 시각 (Routing 상태 타임아웃용)
     public DateTime? RoutingWaitStartedAt { get; set; }
 
     internal ClientSession(IClientSink clientSink, byte[] intro, PlayerKey player,
@@ -60,8 +53,6 @@ public sealed class ClientSession : INetEventListener
         _intro = intro;
         Player = player;
         _core = core;
-        // 핸드셰이크에서 username/password 파싱 (DirectIpAdapter와 동일 규약). Steam 경로는
-        // username이 비어 전달되므로 여기서 채운다 (보고/Discord/!list 표시용 - 게임 서버가 최종 검증)
         HandshakeReader.TryParseCredentials(intro, out string introUsername, out string pw);
         Username = !string.IsNullOrEmpty(username) ? username : introUsername;
         Password = pw;
@@ -70,9 +61,6 @@ public sealed class ClientSession : INetEventListener
         State = SessionState.Accepted;
         _backendManager = new NetManager(this) { UnconnectedMessagesEnabled = false };
 
-        // Steam 접속 + 인트로 이름이 1바이트/문자 인코딩으로 깨진 경우(CJK) Steam 유저명으로
-        // 보정한다 - SESSION_CONNECTED username과 백엔드 tail(Ver 2)에 반영되어
-        // 오케스트레이터/인스턴스 표시가 정상화된다.
         if (steamId is ulong sid && SteamNameResolver.IsBrokenName(Username))
         {
             string? steamName = SteamNameResolver.ResolveName(sid);
@@ -84,14 +72,12 @@ public sealed class ClientSession : INetEventListener
         }
     }
 
-    // 라우팅 대기 진입 (모르는 유저 - 오케스트레이터 ROUTE_UPDATE 대기)
     public void EnterRoutingWait()
     {
         State = SessionState.Routing;
         RoutingWaitStartedAt = DateTime.UtcNow;
     }
 
-    // 라우팅 배정 (테이블 미러 or 오케스트레이터 ROUTE_UPDATE)
     public void BeginRoute(string backendAddr, ushort clientId, bool isReturning, string? instanceId)
     {
         BackendAddr = backendAddr;
@@ -103,7 +89,6 @@ public sealed class ClientSession : INetEventListener
         ConnectToBackend(backendAddr);
     }
 
-    // 마이그레이션 스왑 - 클라이언트 연결은 유지, 백엔드만 교체 (스왑 중 클라 패킷 드랍)
     public void SwapBackend(string backendAddr, string? instanceId)
     {
         string previousBackend = BackendAddr;
@@ -117,17 +102,14 @@ public sealed class ClientSession : INetEventListener
         _pendingFromClient.Clear();
 
         BackendAddr = backendAddr;
-        // 새 백엔드(목적지 인스턴스)는 부팅 중일 수 있다 - 최초 연결처럼 재시도가
-        // 동작하도록 상태 초기화 (_hasEverConnectedToBackend=true면 재시도가 스킵되어 튕김)
         _hasEverConnectedToBackend = false;
         _connectRetryCount = 0;
         _nextRetryAtUtc = null;
-        State = SessionState.Swapping;
+        State = SessionState.Swapping; // 스왑 중 클라 패킷 드랍
         ConnectToBackend(backendAddr);
         _swapping = false;
     }
 
-    // 클라이언트 -> 백엔드 전달. 백엔드 미연결 시 버퍼 후 연결 시 플러시
     public void ForwardFromClient(byte[] data, byte channel, DeliveryMethod method)
     {
         if (_backendPeer != null && _backendPeer.ConnectionState == ConnectionState.Connected)
@@ -138,17 +120,14 @@ public sealed class ClientSession : INetEventListener
             or DeliveryMethod.ReliableUnordered
             or DeliveryMethod.ReliableSequenced)
         {
-            // 미연결 중 발생한 입력을 나중에 내보내면 더 큰 문제가 생기므로 신뢰성 메시지만
-            // 잠깐 보관하고 대기열도 무한정 키우지 않는다
             if (_pendingFromClient.Count >= MaxPendingReliablePackets)
             {
                 _pendingFromClient.RemoveAt(0);
             }
-            _pendingFromClient.Add((data, channel, method));
+            _pendingFromClient.Add((data, channel, method)); // 백엔드 미연결 시 신뢰 패킷 버퍼
         }
     }
 
-    // KICK - 클라이언트 연결 종료 + 세션 정리
     public void Kick(string reason)
     {
         _clientSink.DisconnectClient(reason);
@@ -159,11 +138,10 @@ public sealed class ClientSession : INetEventListener
     {
         if (Disposed) return;
         Disposed = true;
-        State = SessionState.Closed;
+        State = SessionState.Closed; // 세션 종료
         _backendManager.Stop();
     }
 
-    // 메인 루프 틱: 백엔드 수신 이벤트 폴링 + 재시도 실행
     public void Tick()
     {
         _backendManager.PollEvents();
@@ -182,7 +160,6 @@ public sealed class ClientSession : INetEventListener
         State = SessionState.Connecting;
         if (!GatewayCore.IsUsableBackendAddr(addr))
         {
-            // 빈/무효 주소 - 연결 시도 자체를 하지 않고 재시도 대기 (예외 -> 추방 방지)
             _nextRetryAtUtc = DateTime.UtcNow + TimeSpan.FromSeconds(_core.Config.BackendRetryIntervalSeconds);
             return;
         }
@@ -190,9 +167,6 @@ public sealed class ClientSession : INetEventListener
         {
             var (host, port) = SplitAddr(addr);
             _backendManager.PollEvents();
-            // 재라우팅/재시도 경쟁 방어 : 폴로 인해 직전 연결이 방금 성립된
-            // 상태면 재연결을 스킵한다 - 안 하면 중복 백엔드 접속으로 인스턴스의
-            // "Player with this name already exists" 추방(확정 실패 -> KICK)이 발생한다
             if (State == SessionState.Active && _backendPeer != null
                 && _backendPeer.ConnectionState == ConnectionState.Connected)
             {
@@ -218,8 +192,6 @@ public sealed class ClientSession : INetEventListener
         int idx = addr.LastIndexOf(':');
         return (addr[..idx], int.Parse(addr[(idx + 1)..]));
     }
-
-    // INetEventListener (백엔드)
 
     public void OnConnectionRequest(ConnectionRequest request) => request.Reject();
 
@@ -254,8 +226,6 @@ public sealed class ClientSession : INetEventListener
             disconnectInfo.AdditionalData.TryGetString(out rejectReason);
         }
 
-        // 명시적 거부 중 "월드 생성 중"만 일시적(재시도), 나머지는 확정 실패
-        // 게임의 실제 거부 메시지: "Server is generating world, please try again."
         bool isDefiniteRejection = disconnectInfo.Reason == DisconnectReason.ConnectionRejected;
         if (isDefiniteRejection && rejectReason.Contains("is generating world", StringComparison.OrdinalIgnoreCase))
         {

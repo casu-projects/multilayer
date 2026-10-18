@@ -7,11 +7,6 @@ using Together;
 
 namespace CasuMod.Patch;
 
-// 마이그레이션 도착 클라는 출발지의 ServerTick을 학습한 상태로 입력을 보낸다(StateA = 출발지 틱).
-// 도착지 tick이 뒤처져 있으면 ServerEntityManager.Deserialize의 게이트
-// (SequenceDiff(StateA, base.Tick) > 0 || StateB > base.Tick)가 모든 입력을 "invalid sequence"로
-// 거부해 플레이어가 Active로 전환되지 못하고 WorldPlacePlayer에서 무한 대기한다.
-// 도착 후 첫 입력에서 StateA/StateB를 파싱해 도착지 tick을 그보다 앞서도록 정렬한다.
 [HarmonyPatch(typeof(ScavEntityTypesMap), "ServerReceiver__LiteEntitySystem")]
 internal static class MigrationTickAlignPatch
 {
@@ -20,8 +15,6 @@ internal static class MigrationTickAlignPatch
     private static PropertyInfo _serverManagerProp;
     private static FieldInfo _tickField;
 
-    // 리더는 메시지 id(224) 1바이트를 이미 소비한 상태로 핸들러에 들어온다.
-    // 다음 바이트가 LES 패킷 타입이고, 그 뒤 FirstInputHeader(4) + InputPacketHeader(StateA,StateB,...) 순.
     private const byte LtInputPacket = 2;
 
     private static void Prefix(knetid clientId, NetDataReader reader)
@@ -44,7 +37,7 @@ internal static class MigrationTickAlignPatch
 
         if (desired == tick) return;
 
-        _tickField.SetValue(mgr, desired);
+        _tickField.SetValue(mgr, desired); // 도착지 tick을 클라 StateA/B보다 앞서도록
     }
 
     private static bool TryReadStates(NetDataReader reader, out ushort stateA, out ushort stateB)

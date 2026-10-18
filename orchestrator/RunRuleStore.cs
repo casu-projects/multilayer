@@ -2,8 +2,6 @@ using System.Text.Json;
 
 namespace CasuMpOrchestrator;
 
-// run/rule 값 중앙 저장공간
-// 시작 시 로드하여 보관, MOD_HELLO 수신 시 송신한 인스턴스에 값 전송
 public sealed class RunRuleStore
 {
     private readonly string _runPath;

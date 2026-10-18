@@ -8,7 +8,6 @@ namespace CasuMpAgent;
 
 internal static class Program
 {
-    // SHUTDOWN 수신 시 메인 루프 종료 요청
     private static Action? _shutdownRequested;
     private static void Main(string[] args)
     {
@@ -144,7 +143,6 @@ internal static class Program
         }
         return "127.0.0.1";
     }
-
 
     private static bool IsPortFreeOnOs(int port)
     {

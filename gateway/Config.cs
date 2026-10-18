@@ -5,7 +5,6 @@ namespace CasuMpGateway;
 
 public sealed class GatewayConfig
 {
-    // 오케스트레이터 IP:Port
     public string OrchestratorAddr { get; set; } = "127.0.0.1:17900";
 
     public int DirectListenPort { get; set; } = 7790;
@@ -16,15 +15,12 @@ public sealed class GatewayConfig
 
     public string SteamVersionTag { get; set; } = "7.0.1_MPv5.0.0";
 
-    // 서버 브라우저 Description(COOP_MOD_DESCRIPTION)으로 노출할 MOTD 문자열.
     public string Motd { get; set; } = "";
 
     public double BackendRetryIntervalSeconds { get; set; } = 0.5;
 
-    // 백엔드 연결 최대 재시도 (0.5s x 600 = 5분 - 콜드 인스턴스 부팅+월드젠 동안 거절 반복)
     public int BackendMaxRetries { get; set; } = 600;
 
-    // 모르는 유저 라우팅 대기 타임아웃(초) - 콜드 인스턴스 부팅 대기라 넉넉히 유지
     public double RoutingWaitTimeoutSeconds { get; set; } = 300;
 
     public double CommandRetryIntervalSeconds { get; set; } = 3;
@@ -47,7 +43,6 @@ public sealed class GatewayConfig
     }
 }
 
-// 라우팅 테이블 엔트리 - 오케스트레이터 원본의 미러
 public sealed class RouteEntry
 {
     [JsonPropertyName("playerKey")]

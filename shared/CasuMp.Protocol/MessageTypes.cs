@@ -3,29 +3,15 @@ namespace CasuMp.Protocol;
 public static class MessageTypes
 {
     public const string Ack = "ACK";
-    public const string AckReply = "ACK_REPLY";
 
-    public const string GatewayHello = "GATEWAY_HELLO";
     public const string AgentHello = "AGENT_HELLO";
     public const string AgentHelloAck = "AGENT_HELLO_ACK";
     public const string ModHello = "MOD_HELLO";
     public const string ModHelloAck = "MOD_HELLO_ACK";
 
-    public const string AuthInfo = "AUTH_INFO";
-    public const string Maintenance = "MAINTENANCE";
-    public const string TableSnapshot = "TABLE_SNAPSHOT";
-    public const string RouteUpdate = "ROUTE_UPDATE";
-    public const string Swap = "SWAP";
-    public const string SwapFailed = "SWAP_FAILED";
-    public const string Kick = "KICK";
-    public const string Ban = "BAN";
     public const string Shutdown = "SHUTDOWN";
-    public const string LobbyMetadata = "LOBBY_METADATA";
     public const string Log = "LOG";
 
-    public const string SessionConnected = "SESSION_CONNECTED";
-    public const string SessionDisconnected = "SESSION_DISCONNECTED";
-    public const string BackendConnected = "BACKEND_CONNECTED";
 
     public const string InstanceReady = "INSTANCE_READY";
     public const string InstanceFault = "INSTANCE_FAULT";

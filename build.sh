@@ -10,7 +10,7 @@ rm -f "$DIST"/casu-* "$DIST"/CasuMod.dll "$DIST"/libsteam_api.so "$DIST"/steam_a
 rm -rf "$TMP"
 mkdir -p "$TMP"
 
-for p in orchestrator agent gateway; do
+for p in server agent steam; do
   echo "── $p 퍼블리시..."
   (cd "$ROOT/$p" && dotnet publish -c Release -r linux-x64 --self-contained true \
      -p:PublishSingleFile=true \
@@ -19,9 +19,9 @@ for p in orchestrator agent gateway; do
      -o "$TMP" 2>&1 | tail -1)
 done
 
-mv "$TMP/CasuMpOrchestrator" "$DIST/casu-orchestrator"
-mv "$TMP/CasuMpAgent"         "$DIST/casu-agent"
-mv "$TMP/CasuMpGateway"       "$DIST/casu-gateway"
+mv "$TMP/CasuMpServer" "$DIST/casu-server"
+mv "$TMP/CasuMpAgent"  "$DIST/casu-agent"
+mv "$TMP/CasuMpSteam"  "$DIST/casu-steam"
 [ -f "$TMP/libsteam_api.so" ] && mv "$TMP/libsteam_api.so" "$DIST/"
 [ -f "$TMP/steam_appid.txt" ] && mv "$TMP/steam_appid.txt" "$DIST/"
 [ -f "$ROOT/../assets/dependency/casualties-together/libsteam_api.so" ] && cp "$ROOT/../assets/dependency/casualties-together/libsteam_api.so" "$DIST/"
@@ -38,26 +38,10 @@ echo "── mod 빌드..."
 (cd "$ROOT/mod" && dotnet build -c Release -p:DebugType=None 2>&1 | tail -1)
 cp "$ROOT/mod/bin/Release/CasuMod.dll" "$DIST/"
 
-echo "── utils/lobby-browser 빌드..."
-(cd "$ROOT/utils/lobby-browser" && dotnet publish -c Release -r linux-x64 --self-contained true \
-   -p:PublishSingleFile=true \
-   -p:IncludeNativeLibrariesForSelfExtract=true \
-   -p:DebugType=None -p:DebugSymbols=false \
-   -o "$TMP" 2>&1 | tail -1)
-mv "$TMP/SteamLobbyBrowser" "$DIST/casu-lobby-browser"
-
-echo "── utils/steam-login 빌드..."
-(cd "$ROOT/utils/steam-login" && dotnet publish -c Release -r linux-x64 --self-contained true \
-   -p:PublishSingleFile=true \
-   -p:IncludeNativeLibrariesForSelfExtract=true \
-   -p:DebugType=None -p:DebugSymbols=false \
-   -o "$TMP" 2>&1 | tail -1)
-mv "$TMP/SteamLogin" "$DIST/casu-steam-login"
-
 [ -f "$DIST/run.json" ]  || cp "$ROOT/../assets/multilayer-default-jsons/run.json"  "$DIST/"
 [ -f "$DIST/rule.json" ] || cp "$ROOT/../assets/multilayer-default-jsons/rule.json" "$DIST/"
 
-for p in orchestrator agent gateway mod utils/lobby-browser utils/steam-login; do
+for p in server agent steam mod; do
   rm -rf "$ROOT/$p/bin" "$ROOT/$p/obj"
 done
 

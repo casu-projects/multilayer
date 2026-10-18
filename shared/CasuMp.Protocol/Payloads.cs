@@ -3,11 +3,6 @@ using System.Collections.Generic;
 
 namespace CasuMp.Protocol;
 
-public sealed class HelloVersion
-{
-    public int Version { get; set; }
-}
-
 public sealed class AgentHelloPayload
 {
     public string MachineId { get; set; } = "";
@@ -76,16 +71,6 @@ public sealed class PlayerKeyPayload
 {
     public string PlayerKey { get; set; } = "";
     public int Epoch { get; set; } = -1;
-}
-
-public sealed class InstancePayload
-{
-    public string InstanceId { get; set; } = "";
-}
-
-public sealed class SwapFailedPayload
-{
-    public string? Reason { get; set; }
 }
 
 public sealed class ChatPayload
@@ -176,57 +161,14 @@ public sealed class VoteRejectedPayload
     public string Reason { get; set; } = "";
 }
 
-public sealed class RouteEntry
-{
-    public string PlayerKey { get; set; } = "";
-    public string InstanceId { get; set; } = "";
-    public ushort ClientId { get; set; }
-    public string BackendAddr { get; set; } = "";
-    public bool IsReturning { get; set; }
-}
-
-public sealed class TableSnapshot
-{
-    public RouteEntry[] Entries { get; set; } = Array.Empty<RouteEntry>();
-}
-
-public sealed class SwapPayload
-{
-    public string PlayerKey { get; set; } = "";
-    public string InstanceId { get; set; } = "";
-    public string BackendAddr { get; set; } = "";
-}
-
-public sealed class KickPayload
-{
-    public string PlayerKey { get; set; } = "";
-    public string? Reason { get; set; }
-}
-
-public sealed class BanPayload
-{
-    public string PlayerKey { get; set; } = "";
-    public bool Banned { get; set; }
-}
-
-public sealed class AuthInfoPayload
-{
-    public string? ServerPassword { get; set; }
-    public string? ServerName { get; set; }
-    public string[] BannedKeys { get; set; } = Array.Empty<string>();
-    public int MaxPlayers { get; set; }
-}
-
-public sealed class MaintenancePayload
-{
-    public bool On { get; set; }
-    public string? Message { get; set; }
-    public ulong[]? Bypass { get; set; }
-    public bool KickAll { get; set; }
-}
-
 public sealed class LobbyMetadataPayload
 {
+    public string? ServerName { get; set; }
+    public string? VersionTag { get; set; }
+    public string? Motd { get; set; }
+    public int MaxPlayers { get; set; }
+    public bool HasPassword { get; set; }
+    public int PlayerCount { get; set; }
     public int LivingCount { get; set; }
     public int HappinessSum { get; set; }
     public ulong[]? SteamIds { get; set; }

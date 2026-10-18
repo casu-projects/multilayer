@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>CasuMpServer</AssemblyName>
+    <RootNamespace>CasuMpServer</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- 제어 허브(ControlHub): 에이전트/모드 클라이언트를 TCP로 수용. Direct IP/Steam 브리지도 이 프로세스가 수용. -->
+
+  <!-- Discord 관리 봇 (D1) — 구 시스템과 동일 버전 (검증됨) -->
+  <ItemGroup>
+    <PackageReference Include="Discord.Net.WebSocket" Version="3.20.1" />
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Spectre.Console" Version="0.49.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="LiteNetLib">
+      <HintPath>../../assets/dependency/casualties-together/LiteNetLib.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\shared\CasuMp.Protocol\CasuMp.Protocol.csproj" />
+    <ProjectReference Include="..\shared\CasuMp.Runtime\CasuMp.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="CasuMp.Protocol" />
+    <Using Include="CasuMp.Runtime" />
+  </ItemGroup>
+
+</Project>

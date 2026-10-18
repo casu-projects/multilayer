@@ -29,12 +29,24 @@
 
   <ItemGroup>
     <PackageReference Include="SteamKit2" Version="3.4.0" />
+    <PackageReference Include="Polly.Contrib.WaitAndRetry" Version="1.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\shared\CasuMp.Protocol\CasuMp.Protocol.csproj" />
+    <ProjectReference Include="..\shared\CasuMp.Runtime\CasuMp.Runtime.csproj" />
+    <ProjectReference Include="..\shared\CasuMp.SteamSession\CasuMp.SteamSession.csproj" />
   </ItemGroup>
 
   <!-- Steamworks.NET 런타임 의존성 — assets/dependency/casualties-together/ 의 네이티브 라이브러리를 출력에 복사 -->
   <ItemGroup>
     <None Include="../../assets/dependency/casualties-together/libsteam_api.so" Link="libsteam_api.so" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../assets/dependency/casualties-together/steam_appid.txt" Link="steam_appid.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="CasuMp.Protocol" />
+    <Using Include="CasuMp.Runtime" />
   </ItemGroup>
 
 </Project>

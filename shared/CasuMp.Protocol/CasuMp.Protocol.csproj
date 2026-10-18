@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>CasuMp.Protocol</AssemblyName>
+    <RootNamespace>CasuMp.Protocol</RootNamespace>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+</Project>

@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System.Text.Json;
 
 namespace CasuMpOrchestrator;
@@ -55,7 +56,7 @@ public sealed class PlayerSessionStore
         {
             state = new PlayerState { Key = key, ClientId = AllocateClientId(), Depth = 1 };
             _players[key] = state;
-            Console.WriteLine($"신규 플레이어: {key} (clientId {state.ClientId})");
+            Log.Info($"신규 플레이어: {key} (clientId {state.ClientId})");
             SaveOne(state);
         }
 
@@ -65,13 +66,13 @@ public sealed class PlayerSessionStore
         }
 
         state.Session = PlayerSessionState.Connecting;
-        Console.WriteLine($"{key} 접속 — 레이어 {state.Depth} 배정.");
+        Log.Info($"{key} 접속 — 레이어 {state.Depth} 배정.");
 
         string? backendAddr = _instances.EnsureInstance(state.Depth);
         if (backendAddr == null)
         {
-            Console.WriteLine($"{key} 인스턴스 없음 — 배정 실패.");
-            _hub.Send(_hub.GatewayConnection, "KICK", new { playerKey = key.Value, reason = "Server is busy, please try again." });
+            Log.Info($"{key} 인스턴스 없음 — 배정 실패.");
+            _hub.Send(_hub.GatewayConnection, MessageTypes.Kick, new { playerKey = key.Value, reason = "Server is busy, please try again." });
             state.Session = PlayerSessionState.Offline;
             return;
         }
@@ -85,7 +86,7 @@ public sealed class PlayerSessionStore
         }
         else
         {
-            Console.WriteLine($"{key} 접속 — {instance?.Key} 준비 대기 (ROUTE-ON-READY).");
+            Log.Info($"{key} 접속 — {instance?.Key} 준비 대기 (ROUTE-ON-READY).");
         }
     }
 
@@ -95,7 +96,7 @@ public sealed class PlayerSessionStore
         string? backendAddr = instance != null ? _instances.BackendAddrFor(instance) : null;
         if (backendAddr == null) return;
 
-        _hub.Send(_hub.GatewayConnection, "ROUTE_UPDATE", new
+        _hub.Send(_hub.GatewayConnection, MessageTypes.RouteUpdate, new
         {
             playerKey = state.Key.Value,
             instanceId = instance.Key,
@@ -126,7 +127,7 @@ public sealed class PlayerSessionStore
         if (state.Session == PlayerSessionState.Migrating) return; // 마이그레이션은 코디네이터가 관리
         state.Session = PlayerSessionState.OnLayer;
         state.InstanceId = instanceId;
-        Console.WriteLine($"{key} ON_LAYER ({instanceId}).");
+        Log.Info($"{key} ON_LAYER ({instanceId}).");
     }
 
     public void OnSessionDisconnected(PlayerKey key)
@@ -134,7 +135,7 @@ public sealed class PlayerSessionStore
         if (!_players.TryGetValue(key, out PlayerState? state)) return;
         if (state.Session == PlayerSessionState.Migrating) return; // 코디네이터가 확정 처리
         state.Session = PlayerSessionState.Offline;
-        Console.WriteLine($"{key} 오프라인.");
+        Log.Info($"{key} 오프라인.");
     }
 
     public void OnInstanceExited(string instanceKey)
@@ -160,7 +161,7 @@ public sealed class PlayerSessionStore
         state.Session = PlayerSessionState.OnLayer;
         state.IsReturning = true;
         SaveOne(state);
-        Console.WriteLine($"{key} 마이그레이션 커밋 → 레이어 {newDepth}.");
+        Log.Info($"{key} 마이그레이션 커밋 → 레이어 {newDepth}.");
     }
 
     public void PersistAllOffline()
@@ -170,7 +171,7 @@ public sealed class PlayerSessionStore
             state.Session = PlayerSessionState.Offline;
             SaveOne(state);
         }
-        Console.WriteLine($"전 세션 Offline 영속화 ({_players.Count}명).");
+        Log.Info($"전 세션 Offline 영속화 ({_players.Count}명).");
     }
 
     public void ResetToFresh(PlayerKey key, bool keepOnline = false)
@@ -211,7 +212,7 @@ public sealed class PlayerSessionStore
             })
             .Where(e => e.backendAddr.Length > 0)
             .ToArray();
-        _hub.SendNoAck(_hub.GatewayConnection, "TABLE_SNAPSHOT", new { entries }); // 라우팅 테이블 미러
+        _hub.SendNoAck(_hub.GatewayConnection, MessageTypes.TableSnapshot, new { entries }); // 라우팅 테이블 미러
     }
 
     private ushort AllocateClientId()
@@ -221,15 +222,14 @@ public sealed class PlayerSessionStore
             _nextClientId = (ushort)((_nextClientId + 1) % ushort.MaxValue);
             if (_nextClientId == 0) _nextClientId = 1;
         }
-        File.WriteAllText(_clientIdPath, JsonSerializer.Serialize(new { next = _nextClientId }));
+        AtomicJsonFile.Write(_clientIdPath, JsonSerializer.Serialize(new { next = _nextClientId }));
         return _nextClientId;
     }
 
     private void SaveOne(PlayerState state)
     {
         string dir = Path.Combine(_sessionDir, Sanitize(state.Key.Value));
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, "session.json"), JsonSerializer.Serialize(new
+        AtomicJsonFile.Write(Path.Combine(dir, "session.json"), JsonSerializer.Serialize(new
         {
             state.ClientId,
             state.Depth,
@@ -271,7 +271,7 @@ public sealed class PlayerSessionStore
             }
             catch { }
         }
-        Console.WriteLine($"복원: {_players.Count}명");
+        Log.Info($"복원: {_players.Count}명");
     }
 
     private static string Sanitize(string s)

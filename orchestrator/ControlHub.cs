@@ -1,7 +1,9 @@
+using CasuMp.Protocol;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading.Channels;
 
 namespace CasuMpOrchestrator;
 
@@ -31,7 +33,8 @@ public sealed class ControlHub
 
         public bool Closed { get; set; }
 
-        public readonly ConcurrentQueue<ControlMessage> Outbound = new();
+        public readonly Channel<ControlMessage> Outbound = Channel.CreateUnbounded<ControlMessage>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
         public readonly ConcurrentDictionary<long, PendingCommand> PendingAcks = new();
     }
 
@@ -64,7 +67,7 @@ public sealed class ControlHub
     public void Start()
     {
         _listener.Start();
-        Console.WriteLine($"리스너 시작 :{_config.Port}");
+        Log.Info($"리스너 시작 :{_config.Port}");
         _ = AcceptLoopAsync();
     }
 
@@ -95,7 +98,7 @@ public sealed class ControlHub
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
-                Console.WriteLine($"수락 오류: {ex.Message}");
+                Log.Info($"수락 오류: {ex.Message}");
             }
         }
     }
@@ -114,6 +117,7 @@ public sealed class ControlHub
         cts.Cancel();
         try { await Task.WhenAll(readTask, writeTask); } catch { }
 
+        conn.Outbound.Writer.TryComplete();
         _closedConnections.Enqueue(conn);
     }
 
@@ -131,7 +135,7 @@ public sealed class ControlHub
                 continue;
             }
 
-            if (msg.Type == "ACK")
+            if (msg.Type == MessageTypes.Ack)
             {
                 _ackCompletions.Enqueue((conn, msg.Seq, IsOk(msg), GetReason(msg)));
             }
@@ -144,17 +148,15 @@ public sealed class ControlHub
 
     private async Task WriteLoopAsync(ClientConnection conn, StreamWriter writer, CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            if (conn.Outbound.TryDequeue(out ControlMessage? msg))
+            await foreach (ControlMessage msg in conn.Outbound.Reader.ReadAllAsync(ct))
             {
-                try { await writer.WriteLineAsync(msg.Serialize().AsMemory(), ct); }
-                catch { break; }
+                await writer.WriteLineAsync(msg.Serialize().AsMemory(), ct);
             }
-            else
-            {
-                await Task.Delay(5, ct);
-            }
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 
@@ -178,7 +180,7 @@ public sealed class ControlHub
         }
 
         var msg = ControlMessage.Create(NextSeq(), type, payload);
-        conn.Outbound.Enqueue(msg);
+        conn.Outbound.Writer.TryWrite(msg);
         conn.PendingAcks[msg.Seq] = new PendingCommand // ack/타임아웃 추적
         {
             Msg = msg,
@@ -192,7 +194,7 @@ public sealed class ControlHub
     public void SendNoAck(ClientConnection? conn, string type, object? payload)
     {
         if (conn == null || conn.Closed) return;
-        conn.Outbound.Enqueue(ControlMessage.Create(NextSeq(), type, payload));
+        conn.Outbound.Writer.TryWrite(ControlMessage.Create(NextSeq(), type, payload));
     }
 
     public void DrainInbound(Action<ClientConnection, ControlMessage> dispatch)
@@ -224,7 +226,7 @@ public sealed class ControlHub
                 {
                     pending.Retries++;
                     pending.Deadline = now + TimeSpan.FromSeconds(_config.CommandRetryIntervalSeconds);
-                    conn.Outbound.Enqueue(pending.Msg); // 재전송
+                    conn.Outbound.Writer.TryWrite(pending.Msg); // 재전송
                 }
                 else
                 {

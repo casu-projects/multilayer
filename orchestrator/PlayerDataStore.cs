@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System.Text.Json;
 
 namespace CasuMpOrchestrator;
@@ -32,7 +33,7 @@ public sealed class PlayerDataStore
     {
         if (_pending.TryGetValue(key, out JsonElement pending)) // 보류분 우선
         {
-            hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = pending });
+            hub.SendNoAck(modConn, MessageTypes.PlayerDataResponse, new { playerKey = key.Value, payload = pending });
             if (!migrating) _pending.Remove(key);
             return;
         }
@@ -43,16 +44,16 @@ public sealed class PlayerDataStore
             try
             {
                 var doc = JsonDocument.Parse(File.ReadAllBytes(path));
-                hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = doc.RootElement });
+                hub.SendNoAck(modConn, MessageTypes.PlayerDataResponse, new { playerKey = key.Value, payload = doc.RootElement });
                 return;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"{key} 디스크 로드 실패: {ex.Message} — 기본 상태 제공.");
+                Log.Info($"{key} 디스크 로드 실패: {ex.Message} — 기본 상태 제공.");
             }
         }
 
-        hub.SendNoAck(modConn, "PLAYER_DATA_RESPONSE", new { playerKey = key.Value, payload = (JsonElement?)null });
+        hub.SendNoAck(modConn, MessageTypes.PlayerDataResponse, new { playerKey = key.Value, payload = (JsonElement?)null });
     }
 
     public JsonElement? GetForMigration(PlayerKey key)
@@ -82,17 +83,13 @@ public sealed class PlayerDataStore
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{key} 세이브 폐기 실패: {ex.Message}");
+            Log.Info($"{key} 세이브 폐기 실패: {ex.Message}");
         }
     }
 
     private void WriteToDisk(PlayerKey key, JsonElement payload)
     {
-        string dir = Path.GetDirectoryName(PathFor(key))!;
-        Directory.CreateDirectory(dir);
-        string tmp = PathFor(key) + ".tmp";
-        File.WriteAllText(tmp, payload.GetRawText());
-        File.Move(tmp, PathFor(key), overwrite: true);
+        AtomicJsonFile.Write(PathFor(key), payload.GetRawText());
     }
 
     private static string Sanitize(string s)

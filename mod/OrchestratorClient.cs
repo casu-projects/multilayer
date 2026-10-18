@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System;
 using System.IO;
 using System.Threading;
@@ -16,6 +17,7 @@ public sealed class OrchestratorClient : MonoBehaviour
 
     private readonly ConcurrentQueue<ControlMessage> _inbound = new();
     private readonly ConcurrentQueue<ControlMessage> _outbound = new();
+    private readonly SemaphoreSlim _outboundSignal = new(0, 1);
 
     private Thread _thread;
     private volatile bool _running;
@@ -65,7 +67,7 @@ public sealed class OrchestratorClient : MonoBehaviour
         if (!_connected || _readyReportedOnConnection) return;
         if (!CasualtiesTogetherUtils.Util.IsWorldGenerated()) return;
         _readyReportedOnConnection = true;
-        SendEvent("INSTANCE_READY", new { instanceKey = InstanceKey });
+        SendEvent(MessageTypes.InstanceReady, new { instanceKey = InstanceKey });
     }
 
     public void ProcessInbound()
@@ -80,6 +82,7 @@ public sealed class OrchestratorClient : MonoBehaviour
     public void SendEvent(string type, object payload)
     {
         _outbound.Enqueue(ControlMessage.Create(0, type, payload));
+        SignalOutbound();
     }
 
     public void WaitForOutboundFlush(int timeoutMs)
@@ -96,80 +99,81 @@ public sealed class OrchestratorClient : MonoBehaviour
     private void Ack(ControlMessage msg, bool ok, string reason = null)
     {
         _outbound.Enqueue(ControlMessage.Ack(msg.Seq, ok, reason));
+        SignalOutbound();
     }
 
     private void HandleIncoming(ControlMessage msg)
     {
         switch (msg.Type)
         {
-            case "START_RUN":
+            case MessageTypes.StartRun:
                 RunModule.HandleStartRun();
                 Ack(msg, true);
                 break;
-            case "SHUTDOWN":
+            case MessageTypes.Shutdown:
                 RunModule.HandleShutdown();
                 Ack(msg, true);
                 break;
-            case "RESET":
+            case MessageTypes.Reset:
                 RunModule.HandleReset();
                 Ack(msg, true);
                 break;
-            case "FREEZE":
+            case MessageTypes.Freeze:
                 MigrationModule.HandleFreeze(msg);
                 Ack(msg, true);
                 break;
-            case "PRECLEAR":
+            case MessageTypes.PreClear:
                 MigrationModule.HandlePreClear(msg);
                 Ack(msg, true);
                 break;
-            case "UNFREEZE":
+            case MessageTypes.Unfreeze:
                 MigrationModule.HandleUnfreeze(msg);
                 Ack(msg, true);
                 break;
-            case "RESUME":
+            case MessageTypes.Resume:
                 MigrationModule.HandleResume(msg);
                 Ack(msg, true);
                 break;
-            case "TRIGGER_WORLDGEN":
+            case MessageTypes.TriggerWorldgen:
                 MigrationModule.HandleTriggerWorldgen(msg.PayloadAs<PlayerKeyPayload>()?.PlayerKey ?? "");
                 Ack(msg, true);
                 break;
-            case "RELEASE":
+            case MessageTypes.Release:
                 MigrationModule.HandleRelease(msg.PayloadAs<PlayerKeyPayload>()?.PlayerKey ?? "",
                     msg.PayloadAs<PlayerKeyPayload>()?.Epoch ?? -1);
                 Ack(msg, true);
                 break;
-            case "PLAYER_DATA_RESPONSE":
+            case MessageTypes.PlayerDataResponse:
                 SaveModule.HandlePlayerDataResponse(msg);
                 break;
-            case "MOD_HELLO_ACK":
+            case MessageTypes.ModHelloAck:
                 break;
-            case "RUN_RULES_STATE":
+            case MessageTypes.RunRulesState:
                 RunRuleState.Apply(msg.PayloadAs<RunRulesPayload>());
                 break;
-            case "CHAT":
+            case MessageTypes.Chat:
                 ChatRelay.Receive(msg.PayloadAs<ChatPayload>());
                 break;
-            case "ANNOUNCE":
+            case MessageTypes.Announce:
                 AnnounceRelay.Handle(msg.PayloadAs<AnnouncePayload>());
                 break;
-            case "VOTE_RUN":
+            case MessageTypes.VoteRun:
                 VoteRelay.HandleRun(msg.PayloadAs<VoteRunPayload>());
                 break;
-            case "VOTE_RESULT":
+            case MessageTypes.VoteResult:
                 VoteRelay.HandleResult(msg.PayloadAs<VoteResultPayload>());
                 break;
-            case "VOTE_REJECTED":
+            case MessageTypes.VoteRejected:
                 VoteRelay.HandleRejected(msg.PayloadAs<VoteRejectedPayload>());
                 break;
-            case "LIST_RESULT":
+            case MessageTypes.ListResult:
                 ChatCommands.HandleListResult(msg);
                 break;
-            case "CONSOLE":
+            case MessageTypes.Console:
                 RunModule.HandleConsole(msg.PayloadAs<ConsolePayload>()?.Command ?? "");
                 Ack(msg, true);
                 break;
-            case "KICK_PLAYER":
+            case MessageTypes.KickPlayer:
                 HandleKickPlayer(msg);
                 break;
             default:
@@ -220,7 +224,7 @@ public sealed class OrchestratorClient : MonoBehaviour
                 }
                 _everConnected = true;
 
-                writer.WriteLine(ControlMessage.Create(1, "MOD_HELLO", new
+                writer.WriteLine(ControlMessage.Create(1, MessageTypes.ModHello, new
                 {
                     instanceKey = InstanceKey,
                     port = InstancePort,
@@ -260,18 +264,30 @@ public sealed class OrchestratorClient : MonoBehaviour
         }
     }
 
+    private void SignalOutbound()
+    {
+        if (_outboundSignal.CurrentCount != 0) return;
+        try { _outboundSignal.Release(); }
+        catch (SemaphoreFullException) { }
+    }
+
     private async Task WriteLoopAsync(StreamWriter writer, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            if (_outbound.TryDequeue(out ControlMessage msg))
+            try
+            {
+                await _outboundSignal.WaitAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            while (_outbound.TryDequeue(out ControlMessage msg))
             {
                 try { await writer.WriteLineAsync(msg.Serialize()); }
-                catch { break; }
-            }
-            else
-            {
-                await Task.Delay(5, ct);
+                catch { return; }
             }
         }
     }

@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using CasuMod.Patch;
 using System;
 using System.Collections.Generic;
@@ -48,7 +49,7 @@ public sealed class MigrationModule : MonoBehaviour
                 _reported.Add(pid);
                 int fromDepth = WorldGeneration.world.biomeDepth + 1;
                 int maxLayers = WorldGeneration.world.amountOfLayers;
-                OrchestratorClient.Instance.SendEvent("LAYER_END", new // 마이그레이션 트랜잭션 시작
+                OrchestratorClient.Instance.SendEvent(MessageTypes.LayerEnd, new // 마이그레이션 트랜잭션 시작
                 {
                     playerKey = pid,
                     fromDepth,
@@ -76,7 +77,7 @@ public sealed class MigrationModule : MonoBehaviour
         ScavPlayer plr = FindByPersistentId(playerKey);
         if (plr == null || plr.body == null)
         {
-            OrchestratorClient.Instance?.SendEvent("FREEZE_DONE", new { playerKey, epoch });
+            OrchestratorClient.Instance?.SendEvent(MessageTypes.FreezeDone, new { playerKey, epoch });
             return;
         }
 
@@ -119,7 +120,7 @@ public sealed class MigrationModule : MonoBehaviour
 
         Util.DelayCallLambda(1f, (Action)(() => // 파괴/정리 시간 확보 후 완료
         {
-            OrchestratorClient.Instance?.SendEvent("FREEZE_DONE", new { playerKey, epoch });
+            OrchestratorClient.Instance?.SendEvent(MessageTypes.FreezeDone, new { playerKey, epoch });
         }));
     }
 
@@ -139,7 +140,7 @@ public sealed class MigrationModule : MonoBehaviour
             ScavPlayer found = FindByPersistentId(playerKey);
             if (found == null)
             {
-                OrchestratorClient.Instance?.SendEvent("PRECLEAR_DONE", new { playerKey, epoch });
+                OrchestratorClient.Instance?.SendEvent(MessageTypes.PreClearDone, new { playerKey, epoch });
                 return;
             }
             playerId = found.playerId;
@@ -150,7 +151,7 @@ public sealed class MigrationModule : MonoBehaviour
 
         Util.DelayCallLambda(1.5f, (Action)(() => // SWAP 전 완료 통지
         {
-            OrchestratorClient.Instance?.SendEvent("PRECLEAR_DONE", new { playerKey, epoch });
+            OrchestratorClient.Instance?.SendEvent(MessageTypes.PreClearDone, new { playerKey, epoch });
         }));
     }
 
@@ -204,13 +205,13 @@ public sealed class MigrationModule : MonoBehaviour
         if (playerKey == "")
         {
             Plugin.Log.LogWarning($"[Migration] RESUME 형식 오류: {playerKey}");
-            OrchestratorClient.Instance?.SendEvent("RESUME_DONE", new { playerKey, epoch });
+            OrchestratorClient.Instance?.SendEvent(MessageTypes.ResumeDone, new { playerKey, epoch });
             return;
         }
         if (!respawn && (payload == null || payload.Type != JTokenType.Object))
         {
             Plugin.Log.LogWarning($"[Migration] RESUME 형식 오류: {playerKey}");
-            OrchestratorClient.Instance?.SendEvent("RESUME_DONE", new { playerKey, epoch });
+            OrchestratorClient.Instance?.SendEvent(MessageTypes.ResumeDone, new { playerKey, epoch });
             return;
         }
         if (respawn)
@@ -223,7 +224,7 @@ public sealed class MigrationModule : MonoBehaviour
         }
         FrozenPlayers[playerKey] = epoch; // 도착지에서도 동결
 
-        OrchestratorClient.Instance?.SendEvent("RESUME_DONE", new { playerKey, epoch });
+        OrchestratorClient.Instance?.SendEvent(MessageTypes.ResumeDone, new { playerKey, epoch });
     }
 
     internal static void HandleTriggerWorldgen(string playerKey)
@@ -279,7 +280,7 @@ public sealed class MigrationModule : MonoBehaviour
             string pid = PlayerKeyOf(plr);
             if (IsFrozen(pid))
             {
-                OrchestratorClient.Instance?.SendEvent("WORLDGEN_DONE", new { playerKey = pid, epoch = FrozenEpoch(pid) }); // 월드젠 완료
+                OrchestratorClient.Instance?.SendEvent(MessageTypes.WorldgenDone, new { playerKey = pid, epoch = FrozenEpoch(pid) }); // 월드젠 완료
             }
         }
     }
@@ -293,7 +294,7 @@ public sealed class MigrationModule : MonoBehaviour
             string pid = PlayerKeyOf(__instance);
             if (IsFrozen(pid))
             {
-                OrchestratorClient.Instance?.SendEvent("PLAYER_LEFT", // 동결 중 퇴장 보고
+                OrchestratorClient.Instance?.SendEvent(MessageTypes.PlayerLeft, // 동결 중 퇴장 보고
                     new { playerKey = pid, epoch = FrozenEpoch(pid) });
             }
         }

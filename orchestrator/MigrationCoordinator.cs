@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System.Text.Json;
 
 namespace CasuMpOrchestrator;
@@ -132,7 +133,7 @@ public sealed class MigrationCoordinator
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"WAL 로드 실패: {ex.Message}");
+            Log.Info($"WAL 로드 실패: {ex.Message}");
         }
     }
 
@@ -174,15 +175,11 @@ public sealed class MigrationCoordinator
         try
         {
             var flat = _wal.ToDictionary(kv => kv.Key.Value, kv => kv.Value);
-            string dir = _config.SaveRootPath;
-            Directory.CreateDirectory(dir);
-            string tmp = WalPath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(flat));
-            File.Move(tmp, WalPath, overwrite: true);
+            AtomicJsonFile.Write(WalPath, JsonSerializer.Serialize(flat));
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"WAL 저장 실패: {ex.Message}");
+            Log.Info($"WAL 저장 실패: {ex.Message}");
         }
     }
 
@@ -213,7 +210,7 @@ public sealed class MigrationCoordinator
         }
         if (fromDepth != state.Depth)
         {
-            Console.WriteLine($"{player} LAYER_END 레이어 불일치 — 보고 {fromDepth}, 세션 {state.Depth} (무시).");
+            Log.Info($"{player} LAYER_END 레이어 불일치 — 보고 {fromDepth}, 세션 {state.Depth} (무시).");
             return;
         }
 
@@ -265,7 +262,7 @@ public sealed class MigrationCoordinator
         string? targetAddr = _instances.EnsureInstance(toDepth); // 없으면 스폰/부팅
         if (targetAddr == null)
         {
-            Console.WriteLine($"{player} 목적지 인스턴스 확보 실패 — 중단.");
+            Log.Info($"{player} 목적지 인스턴스 확보 실패 — 중단.");
             return;
         }
 
@@ -284,7 +281,7 @@ public sealed class MigrationCoordinator
         _sessions.Get(player)!.Session = PlayerSessionState.Migrating; // 라우팅 잠금
         WriteWal(tx);
 
-        _hub.Send(fromInstance.ModConnection, "FREEZE", // 출발지 동결 + 데이터 캡처
+        _hub.Send(fromInstance.ModConnection, MessageTypes.Freeze, // 출발지 동결 + 데이터 캡처
             new { playerKey = player.Value, epoch }, (ok, reason) =>
             {
                 if (!ok) Abort(tx, $"FREEZE 전송 실패: {reason}");
@@ -319,13 +316,13 @@ public sealed class MigrationCoordinator
         InstanceInfo? fromInstance = _instances.FindByDepth(fromDepth);
         if (fromInstance == null)
         {
-            Console.WriteLine($"{player} 리스폰 — 출발 인스턴스 없음 (depth {fromDepth}) — 중단.");
+            Log.Info($"{player} 리스폰 — 출발 인스턴스 없음 (depth {fromDepth}) — 중단.");
             return;
         }
         string? targetAddr = _instances.EnsureInstance(1); // L1 목적지
         if (targetAddr == null)
         {
-            Console.WriteLine($"{player} 리스폰 — 목적지 인스턴스 확보 실패 — 중단.");
+            Log.Info($"{player} 리스폰 — 목적지 인스턴스 확보 실패 — 중단.");
             return;
         }
 
@@ -345,7 +342,7 @@ public sealed class MigrationCoordinator
         state.Session = PlayerSessionState.Migrating;
         WriteWal(tx);
 
-        _hub.Send(fromInstance.ModConnection, "FREEZE", // 리스폰: 캡처 스킵 + 목적지 프레시 생성
+        _hub.Send(fromInstance.ModConnection, MessageTypes.Freeze, // 리스폰: 캡처 스킵 + 목적지 프레시 생성
             new { playerKey = player.Value, epoch, respawn = true }, (ok, reason) =>
             {
                 if (!ok) Abort(tx, $"FREEZE 전송 실패: {reason}");
@@ -402,14 +399,14 @@ public sealed class MigrationCoordinator
                 {
                     tx.PreClearSent = true; // 미응답 시 best-effort로 SWAP 진행
                     tx.StepDeadline = DateTime.UtcNow + PreClearWaitTimeout();
-                    Console.WriteLine($"{tx.Player} → PRE-CLEAR 발신 (출발지 {tx.FromInstance})");
-                    _hub.Send(from.ModConnection, "PRECLEAR",
+                    Log.Info($"{tx.Player} → PRE-CLEAR 발신 (출발지 {tx.FromInstance})");
+                    _hub.Send(from.ModConnection, MessageTypes.PreClear,
                         new { playerKey = tx.Player.Value, epoch = tx.Epoch },
                         (ok, reason) =>
                         {
                             if (!ok)
                             {
-                                Console.WriteLine($"{tx.Player} PRE-CLEAR 전송 실패({reason}) - 생략하고 진행.");
+                                Log.Info($"{tx.Player} PRE-CLEAR 전송 실패({reason}) - 생략하고 진행.");
                                 tx.PreClearDone = true;
                                 TryProceedSwap(tx);
                             }
@@ -424,7 +421,7 @@ public sealed class MigrationCoordinator
         }
 
         tx.SwapSent = true;
-        _hub.Send(_hub.GatewayConnection, "SWAP",
+        _hub.Send(_hub.GatewayConnection, MessageTypes.Swap,
             new { playerKey = tx.Player.Value, instanceId = tx.TargetInstance, backendAddr = addr, epoch = tx.Epoch },
             (ok, reason) => // 클라 연결 유지, 백엔드만 교체
             {
@@ -473,7 +470,7 @@ public sealed class MigrationCoordinator
 
         if (tx.IsRespawn)
         {
-            _hub.Send(targetConn, "RESUME",
+            _hub.Send(targetConn, MessageTypes.Resume,
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch, respawn = true, ghostClientIds = ghostClientIds },
                 (ok, reason) =>
                 {
@@ -484,7 +481,7 @@ public sealed class MigrationCoordinator
         }
         else
         {
-            _hub.Send(targetConn, "RESUME",
+            _hub.Send(targetConn, MessageTypes.Resume,
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch, payload = payload, ghostClientIds = ghostClientIds },
                 (ok, reason) =>
                 {
@@ -521,13 +518,13 @@ public sealed class MigrationCoordinator
         InstanceInfo? fromInstance = _instances.Find(tx.FromInstance);
         if (fromInstance != null)
         {
-            _hub.Send(fromInstance.ModConnection, "RELEASE", // 양쪽 동결 해제
+            _hub.Send(fromInstance.ModConnection, MessageTypes.Release, // 양쪽 동결 해제
                 new { playerKey = player.Value, epoch = tx.Epoch });
         }
         InstanceInfo? targetInstance = _instances.Find(tx.TargetInstance ?? "");
         if (targetInstance != null && targetInstance.Key != tx.FromInstance)
         {
-            _hub.Send(targetInstance.ModConnection, "RELEASE",
+            _hub.Send(targetInstance.ModConnection, MessageTypes.Release,
                 new { playerKey = player.Value, epoch = tx.Epoch });
         }
 
@@ -574,13 +571,13 @@ public sealed class MigrationCoordinator
         InstanceInfo? fromInstance = _instances.Find(tx.FromInstance);
         if (fromInstance != null)
         {
-            _hub.Send(fromInstance.ModConnection, "RELEASE",
+            _hub.Send(fromInstance.ModConnection, MessageTypes.Release,
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch });
         }
         InstanceInfo? targetInstance = _instances.Find(tx.TargetInstance ?? "");
         if (targetInstance != null && targetInstance.Key != tx.FromInstance)
         {
-            _hub.Send(targetInstance.ModConnection, "RELEASE",
+            _hub.Send(targetInstance.ModConnection, MessageTypes.Release,
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch });
         }
 
@@ -649,7 +646,7 @@ public sealed class MigrationCoordinator
     {
         if (!_transactions.Remove(tx.Player)) return;
         RemoveWal(tx.Player);
-        Console.WriteLine($"{tx.Player} 중단: {reason} — 롤백.");
+        Log.Info($"{tx.Player} 중단: {reason} — 롤백.");
 
         bool postSwap = tx.State is TxState.Resuming or TxState.Worldgen; // 스왑 이후 실패 여부
 
@@ -669,26 +666,26 @@ public sealed class MigrationCoordinator
             if (!postSwap)
             {
                 JsonElement? payload = tx.IsRespawn ? null : _dataStore.GetForMigration(tx.Player); // 인벤토리 복원용
-                _hub.Send(fromInstance.ModConnection, "UNFREEZE",
+                _hub.Send(fromInstance.ModConnection, MessageTypes.Unfreeze,
                     new { playerKey = tx.Player.Value, epoch = tx.Epoch, payload = payload });
             }
             else
             {
-                _hub.Send(fromInstance.ModConnection, "UNFREEZE",
+                _hub.Send(fromInstance.ModConnection, MessageTypes.Unfreeze,
                     new { playerKey = tx.Player.Value, epoch = tx.Epoch });
             }
         }
         InstanceInfo? targetInstance = _instances.Find(tx.TargetInstance ?? "");
         if (targetInstance != null && targetInstance.Key != tx.FromInstance)
         {
-            _hub.Send(targetInstance.ModConnection, "UNFREEZE",
+            _hub.Send(targetInstance.ModConnection, MessageTypes.Unfreeze,
                 new { playerKey = tx.Player.Value, epoch = tx.Epoch });
         }
 
         string? kickInstance = postSwap ? tx.TargetInstance : tx.FromInstance;
         if (kickInstance != null)
         {
-            _hub.Send(_hub.ModConnection(kickInstance), "KICK_PLAYER", // 실패 추방 -> 재접속 복구 경로
+            _hub.Send(_hub.ModConnection(kickInstance), MessageTypes.KickPlayer, // 실패 추방 -> 재접속 복구 경로
                 new { playerKey = tx.Player.Value, reason = "Migration Failed. Please reconnect." });
         }
     }

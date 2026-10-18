@@ -1,23 +1,16 @@
+using CasuMp.Protocol;
 using CasuMod;
 using System;
 using System.Reflection;
 using HarmonyLib;
 using Together;
 using LiteNetLib;
-using LiteNetLib.Utils;
 
 namespace CasuMod.Patch;
 
 [HarmonyPatch]
 internal static class OnConnectionRequest_TailV2Patch
 {
-    private const byte MagicHigh = 0xC5;
-    private const byte MagicLow = 0xA5;
-    private const byte Version1 = 1;
-    private const byte Version2 = 2;
-    private const int FixedTailSize = 15;   // 이름 제외 고정부
-    private const int MaxNameBytes = 128;   // 역탐색 범위 상한
-
     private static ulong? _pendingSteamId;
     private static ushort? _pendingClientId;
     private static bool? _pendingIsReturning;
@@ -29,7 +22,7 @@ internal static class OnConnectionRequest_TailV2Patch
     private static MethodBase TargetMethod() =>
         AccessTools.Method(typeof(TransportLiteNetLib), "LiteNetLib.INetEventListener.OnConnectionRequest");
 
-    private static void Prefix(ConnectionRequest request, ref bool __runOriginal)
+    private static void Prefix(ConnectionRequest request)
     {
         _pendingSteamId = null;
         _pendingClientId = null;
@@ -41,53 +34,14 @@ internal static class OnConnectionRequest_TailV2Patch
         byte[] raw = request.Data.RawData;
         int offset = request.Data.UserDataOffset;
         int size = request.Data.UserDataSize;
-        if (size < FixedTailSize)
+        if (!TailCodec.TryFind(raw, offset, size, out TailInfo tail))
             return;
 
-        int tailStart = -1; // 끝에서 Magic 역탐색 (이름 바이트 상한)
-        int searchEnd = Math.Max(offset, offset + size - FixedTailSize - MaxNameBytes);
-        for (int i = offset + size - 2; i >= searchEnd; i--)
-        {
-            if (raw[i] == MagicHigh && raw[i + 1] == MagicLow
-                && i + 3 < raw.Length
-                && (raw[i + 2] == Version1 || raw[i + 2] == Version2))
-            {
-                tailStart = i;
-                break;
-            }
-        }
-        if (tailStart < 0)
-            return;
-
-        byte version = raw[tailStart + 2];
-        if (version != Version1 && version != Version2) // 버전 스큐 -> 접속 거부
-        {
-            Plugin.Log.LogError($"[Identity] tail v2 불일치 (Magic/Ver) — 접속 거부. "
-                + "게이트웨이와 모드 버전을 맞춰야 합니다.");
-            var reject = new NetDataWriter();
-            reject.Put("Version mismatch: gateway/mod protocol skew.");
-            request.Reject(reject);
-            __runOriginal = false;
-            return;
-        }
-
-        if (tailStart + FixedTailSize > offset + size)
-            return;
-
-        var r = new NetDataReader(raw, tailStart + 3, tailStart + FixedTailSize);
-        _pendingSteamId = r.GetULong();
-        _pendingClientId = r.GetUShort();
-        _pendingIsReturning = r.GetBool();
-        _pendingIsMigratingArrival = r.GetBool();
-
-        if (version == Version2 && tailStart + FixedTailSize < raw.Length)
-        {
-            byte nameLen = raw[tailStart + FixedTailSize];
-            if (nameLen > 0 && tailStart + FixedTailSize + 1 + nameLen <= raw.Length)
-            {
-                _pendingName = System.Text.Encoding.UTF8.GetString(raw, tailStart + FixedTailSize + 1, nameLen);
-            }
-        }
+        _pendingSteamId = tail.SteamId;
+        _pendingClientId = tail.ClientId;
+        _pendingIsReturning = tail.IsReturning;
+        _pendingIsMigratingArrival = tail.IsMigratingArrival;
+        _pendingName = tail.Name;
     }
 
     private static void Postfix()
@@ -154,7 +108,7 @@ internal static class BasePlayer_ServerCreatePlayer_ApplyIdentityPatch
 
         if (OrchestratorClient.Instance != null)
         {
-            OrchestratorClient.Instance.SendEvent("PLAYER_DATA_REQUEST", // 저장 데이터 요청
+            OrchestratorClient.Instance.SendEvent(MessageTypes.PlayerDataRequest, // 저장 데이터 요청
                 new { playerKey = CasuMod.MigrationModule.PlayerKeyOf(plr) });
         }
     }

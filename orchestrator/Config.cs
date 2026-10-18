@@ -30,7 +30,7 @@ public sealed class OrchestratorConfig
 
     public void Save(string path)
     {
-        File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        AtomicJsonFile.Write(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     public double CommandRetryIntervalSeconds { get; set; } = 3;
@@ -63,8 +63,8 @@ public sealed class OrchestratorConfig
         if (!File.Exists(path))
         {
             var defaults = new OrchestratorConfig();
-            File.WriteAllText(path, JsonSerializer.Serialize(defaults, new JsonSerializerOptions { WriteIndented = true }));
-            Console.WriteLine($"기본 구성 생성: {path}");
+            AtomicJsonFile.Write(path, JsonSerializer.Serialize(defaults, new JsonSerializerOptions { WriteIndented = true }));
+            Log.Info($"기본 구성 생성: {path}");
             return defaults;
         }
         return JsonSerializer.Deserialize<OrchestratorConfig>(File.ReadAllText(path)) ?? new OrchestratorConfig();

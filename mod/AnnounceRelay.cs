@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,7 +30,7 @@ public static class AnnounceRelay
     internal static void SendDeath(ScavPlayer plr, string text)
     {
         if (plr == null || string.IsNullOrEmpty(text)) return;
-        OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
+        OrchestratorClient.Instance?.SendEvent(MessageTypes.Announce, new
         {
             kind = KindDeath,
             playerKey = MigrationModule.PlayerKeyOf(plr),
@@ -43,7 +44,7 @@ public static class AnnounceRelay
     {
         if (plr == null || string.IsNullOrEmpty(text)) return;
         SendChatAnnouncementTo(text, new List<knetid>(ServerMain.AllClientIds)); // 발신 레이어 즉시 표시
-        OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new // 타 레이어 릴레이
+        OrchestratorClient.Instance?.SendEvent(MessageTypes.Announce, new // 타 레이어 릴레이
         {
             kind,
             playerKey = MigrationModule.PlayerKeyOf(plr),
@@ -118,15 +119,4 @@ public static class AnnounceRelay
         }
         return null;
     }
-}
-
-public sealed class AnnouncePayload
-{
-    public string Kind { get; set; } = "";
-    public string PlayerKey { get; set; } = "";
-    public string Name { get; set; } = "";
-    public int FromDepth { get; set; }
-    public int ToDepth { get; set; }
-    public string OriginInstance { get; set; } = "";
-    public string Text { get; set; } = "";
 }

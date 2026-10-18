@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using CasuMod;
 using HarmonyLib;
 using Together;
@@ -29,7 +30,7 @@ internal static class ServerMain_OnPlayerDeath_DiscordReportPatch
 {
     private static void Postfix(ScavPlayer plr)
     {
-        DiscordEventReporter.Send("DIED", plr);
+        DiscordEventReporter.Send(MessageTypes.Died, plr);
     }
 }
 
@@ -38,6 +39,6 @@ internal static class NetPlayer_Server_RespawnCharacter_DiscordReportPatch
 {
     private static void Postfix(ScavPlayer __instance)
     {
-        DiscordEventReporter.Send("RESPAWNED", __instance);
+        DiscordEventReporter.Send(MessageTypes.Respawned, __instance);
     }
 }

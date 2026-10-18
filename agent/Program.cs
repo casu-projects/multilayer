@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Net;
@@ -46,7 +47,7 @@ internal static class Program
                 {
                     instances.Remove(proc.Key);
                     Logger.Info($"{proc.Key} 종료 (code {proc.ExitCode}).");
-                    channel.Report(ControlMessage.Create(0, "INSTANCE_EXITED",
+                    channel.Report(ControlMessage.Create(0, MessageTypes.InstanceExited,
                         new { instanceKey = proc.Key, code = proc.ExitCode ?? -1 }));
                 }
             }
@@ -65,7 +66,7 @@ internal static class Program
     {
         switch (msg.Type)
         {
-            case "SPAWN":
+            case MessageTypes.Spawn:
             {
                 var payload = msg.PayloadAs<SpawnPayload>();
                 if (payload == null)
@@ -95,7 +96,7 @@ internal static class Program
                 ack(ControlMessage.Ack(msg.Seq, true));
                 break;
             }
-            case "STOP":
+            case MessageTypes.Stop:
             {
                 var payload = msg.PayloadAs<StopPayload>();
                 if (payload == null || !instances.Remove(payload.InstanceKey, out InstanceProcess? proc))
@@ -106,12 +107,12 @@ internal static class Program
                 proc.Stop();
                 proc.Cleanup();
                 DeletePid(config, payload.InstanceKey);
-                channel.Report(ControlMessage.Create(0, "INSTANCE_EXITED",
+                channel.Report(ControlMessage.Create(0, MessageTypes.InstanceExited,
                     new { instanceKey = payload.InstanceKey, code = proc.ExitCode ?? 0 }));
                 ack(ControlMessage.Ack(msg.Seq, true));
                 break;
             }
-            case "SHUTDOWN":
+            case MessageTypes.Shutdown:
             {
                 Logger.Info("종료 신호 수신 — 인스턴스 정리 후 종료.");
                 ack(ControlMessage.Ack(msg.Seq, true));
@@ -216,9 +217,4 @@ internal static class Program
                 span[i] = state.invalid.Contains(state.s[i]) ? '_' : state.s[i];
         });
     }
-}
-
-public sealed class StopPayload
-{
-    public string InstanceKey { get; set; } = "";
 }

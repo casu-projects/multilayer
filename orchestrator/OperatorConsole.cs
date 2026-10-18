@@ -1,3 +1,5 @@
+using CasuMp.Protocol;
+using Spectre.Console;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Text.Json;
@@ -26,8 +28,6 @@ public sealed class OperatorConsole
     private readonly BanList _banList;
     private readonly string _configPath;
     private readonly CommandRegistry _registry = new();
-
-    internal Action? ShutdownRequested;
 
     internal Action<bool>? LockdownNotify;
 
@@ -59,6 +59,7 @@ public sealed class OperatorConsole
     private void RegisterCommands()
     {
         _registry.Register("help", "명령어 목록", CmdHelp);
+        _registry.Register("?", "명령어 목록", CmdHelp);
         _registry.Register("list", "유저 목록", CmdList);
         _registry.Register("kick", "유저 추방", "<player>", CmdKick);
         _registry.Register("ban", "유저 차단", "<player>", CmdBan);
@@ -75,54 +76,15 @@ public sealed class OperatorConsole
 
     public void Start()
     {
-        var thread = new Thread(() =>
+        var thread = new Thread(ReadStdinLoop)
         {
-            if (ConsoleIO.Interactive)
-            {
-                ReadStdinLoopInteractive();
-            }
-            else
-            {
-                ReadStdinLoopBlocking();
-            }
-        })
-        { IsBackground = true, Name = "Orchestrator.StdinReader" };
+            IsBackground = true,
+            Name = "Orchestrator.StdinReader",
+        };
         thread.Start();
     }
 
-    private void ReadStdinLoopInteractive()
-    {
-        ConsoleIO.ShowPrompt();
-
-        while (true)
-        {
-            ConsoleKeyInfo key;
-            try
-            {
-                key = Console.ReadKey(intercept: true);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"stdin 읽기 실패, 운영 콘솔 스레드 종료 — {ex.Message}");
-                return;
-            }
-
-            if (key.Key == ConsoleKey.C && (key.Modifiers & ConsoleModifiers.Control) != 0)
-            {
-                ConsoleIO.WriteLine("종료 신호 수신 — graceful 종료 시작.");
-                ShutdownRequested?.Invoke();
-                return;
-            }
-
-            string? line = ConsoleIO.HandleKey(key);
-            if (line != null && !string.IsNullOrWhiteSpace(line))
-            {
-                _pendingLines.Enqueue(line);
-            }
-        }
-    }
-
-    private void ReadStdinLoopBlocking()
+    private void ReadStdinLoop()
     {
         while (true)
         {
@@ -133,7 +95,7 @@ public sealed class OperatorConsole
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"stdin 읽기 실패, 운영 콘솔 스레드 종료 — {ex.Message}");
+                Log.Info($"stdin 읽기 실패, 운영 콘솔 스레드 종료 — {ex.Message}");
                 return;
             }
             if (line == null) return;
@@ -162,16 +124,14 @@ public sealed class OperatorConsole
 
     private void Execute(string line)
     {
-        string[] top = line.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
-        if (top.Length == 0) return;
-        string name = top[0].ToLowerInvariant();
-        string[] args = top.Length > 1
-            ? top[1].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
-            : Array.Empty<string>();
+        string[] tokens = CommandLineTokenizer.Split(line);
+        if (tokens.Length == 0) return;
+        string name = tokens[0].ToLowerInvariant();
+        string[] args = tokens.Length > 1 ? tokens[1..] : Array.Empty<string>();
 
         if (!_registry.TryGet(name, out ConsoleCommand? command))
         {
-            Console.WriteLine($"알 수 없는 명령: {name}");
+            Log.Info($"알 수 없는 명령: {name}");
             return;
         }
         try
@@ -180,17 +140,24 @@ public sealed class OperatorConsole
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"명령 오류 ({name}): {ex.Message}"); // 명령 오류는 격리
+            Log.Info($"명령 오류 ({name}): {ex.Message}"); // 명령 오류는 격리
         }
     }
 
     private void CmdHelp(string[] args)
     {
-        Console.WriteLine("명령어 목록:");
-        foreach (ConsoleCommand cmd in _registry.All.OrderBy(c => c.Name, StringComparer.Ordinal))
+        var commands = _registry.All.OrderBy(c => c.Name, StringComparer.Ordinal).ToList();
+        var table = new Table().Title("명령어").AddColumn("명령").AddColumn("사용법").AddColumn("설명");
+        var discordLines = new List<string>();
+        foreach (ConsoleCommand cmd in commands)
         {
-            Console.WriteLine($"{cmd.Name}{(cmd.Usage.Length > 0 ? " " + cmd.Usage : "")} - {cmd.Description}");
+            table.AddRow(
+                Markup.Escape(cmd.Name),
+                Markup.Escape(cmd.Usage.Length > 0 ? cmd.Usage : "-"),
+                Markup.Escape(cmd.Description));
+            discordLines.Add($"{cmd.Name}{(cmd.Usage.Length > 0 ? " " + cmd.Usage : "")} - {cmd.Description}");
         }
+        ConsoleRenderer.Write(table, discordLines);
     }
 
     private void CmdList(string[] args)
@@ -202,15 +169,21 @@ public sealed class OperatorConsole
             .ToList();
         if (online.Count == 0)
         {
-            Console.WriteLine("현재 총 0명 접속 중 :");
+            Log.Info("현재 접속 중인 플레이어가 없습니다.");
             return;
         }
-        Console.WriteLine($"현재 총 {online.Count}명 접속 중 :");
+        var table = new Table().Title($"접속 {online.Count}명")
+            .AddColumn("이름").AddColumn("레이어").AddColumn("키");
+        var discordLines = new List<string> { $"현재 접속 {online.Count}명" };
         foreach (PlayerState p in online)
         {
-            string name = p.Username ?? p.Key.Value;
-            Console.WriteLine($"{name} (L{p.Depth}, {p.Key.Value})");
+            table.AddRow(
+                Markup.Escape(p.Username ?? p.Key.Value),
+                $"L{p.Depth}",
+                Markup.Escape(p.Key.Value));
+            discordLines.Add($"{p.Username ?? p.Key.Value} (L{p.Depth}, {p.Key.Value})");
         }
+        ConsoleRenderer.Write(table, discordLines);
     }
 
     private void CmdKick(string[] args)
@@ -233,29 +206,39 @@ public sealed class OperatorConsole
         var conns = _hub.Connections.Where(c => !c.Closed).ToList();
         if (conns.Count == 0)
         {
-            Console.WriteLine("연결된 프로세스가 없습니다.");
+            Log.Info("연결된 프로세스가 없습니다.");
             return;
         }
+        var table = new Table().Title("연결").AddColumn("종류").AddColumn("정보").AddColumn("원격");
+        var discordLines = new List<string>();
         foreach (ControlHub.ClientConnection c in conns)
         {
             string remote = c.Tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep
                 ? $"{ep.Address}:{ep.Port}" : "-";
-            string label = c.Kind switch
+            string kind;
+            string info;
+            switch (c.Kind)
             {
-                ClientKind.Gateway => $"Gateway  v{c.GatewayVersion}",
-                ClientKind.Agent => $"Agent    {c.MachineId} (수용 {c.AgentCapacity}, {c.AgentAddress})",
-                ClientKind.Mod => $"Instance {c.InstanceKey} (포트 {c.InstancePort}, depth {c.InstanceDepth})",
-                _ => $"Unknown  conn #{c.Id}",
-            };
-            Console.WriteLine($"  [{label}] {remote}");
+                case ClientKind.Gateway:
+                    kind = "Gateway"; info = $"v{c.GatewayVersion}"; break;
+                case ClientKind.Agent:
+                    kind = "Agent"; info = $"{c.MachineId} (수용 {c.AgentCapacity}, {c.AgentAddress})"; break;
+                case ClientKind.Mod:
+                    kind = "Instance"; info = $"{c.InstanceKey} (포트 {c.InstancePort}, depth {c.InstanceDepth})"; break;
+                default:
+                    kind = "Unknown"; info = $"conn #{c.Id}"; break;
+            }
+            table.AddRow(Markup.Escape(kind), Markup.Escape(info), Markup.Escape(remote));
+            discordLines.Add($"[{kind}] {info} {remote}");
         }
+        ConsoleRenderer.Write(table, discordLines);
     }
 
     private void CmdMigrate(string[] args)
     {
         if (args.Length == 0)
         {
-            Console.WriteLine("사용법: migrate <player> [targetLayer]  (예: migrate player2222 3)");
+            Log.Info("사용법: migrate <player> [targetLayer]  (예: migrate player2222 3)");
             return;
         }
         if (!TryResolvePlayer(args[0], out PlayerKey migrateKey))
@@ -265,7 +248,7 @@ public sealed class OperatorConsole
         PlayerState? mstate = _sessions.Get(migrateKey);
         if (mstate == null)
         {
-            Console.WriteLine("플레이어를 찾을 수 없습니다.");
+            Log.Info("플레이어를 찾을 수 없습니다.");
             return;
         }
         int migrateTarget;
@@ -273,7 +256,7 @@ public sealed class OperatorConsole
         {
             if (!int.TryParse(string.Join(" ", args.Skip(1)), out migrateTarget))
             {
-                Console.WriteLine($"유효하지 않은 목적지 레이어: {args[1]}");
+                Log.Info($"유효하지 않은 목적지 레이어: {args[1]}");
                 return;
             }
         }
@@ -284,15 +267,15 @@ public sealed class OperatorConsole
         string? migrateResult = _migrations.ManualMigrate(migrateKey, migrateTarget);
         if (migrateResult != null)
         {
-            Console.WriteLine(migrateResult);
+            Log.Info(migrateResult);
         }
         else
         {
-            Console.WriteLine($"{mstate.Username ?? migrateKey.Value}: L{mstate.Depth} → L{migrateTarget} 마이그레이션 시작.");
+            Log.Info($"{mstate.Username ?? migrateKey.Value}: L{mstate.Depth} → L{migrateTarget} 마이그레이션 시작.");
         }
     }
 
-    private void CmdClear(string[] args) => ConsoleIO.ClearScreen();
+    private void CmdClear(string[] args) => AnsiConsole.Clear();
 
     private void CmdExec(string[] args) => HandleRun(string.Join(" ", args));
 
@@ -304,12 +287,12 @@ public sealed class OperatorConsole
     {
         if (string.IsNullOrWhiteSpace(command))
         {
-            Console.WriteLine("실행할 명령이 비어있습니다. 예: exec kill player2222");
+            Log.Info("실행할 명령이 비어있습니다. 예: exec kill player2222");
             return;
         }
         if (_consoleRelay == null)
         {
-            Console.WriteLine("콘솔 릴레이가 연결되지 않았습니다.");
+            Log.Info("콘솔 릴레이가 연결되지 않았습니다.");
             return;
         }
         _consoleRelay(command.Trim());
@@ -320,7 +303,7 @@ public sealed class OperatorConsole
         string[] parts = arg.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 2)
         {
-            Console.WriteLine($"사용법: {commandName} <이름> <값>  (예: {commandName} ShowPlayerDirections 1)");
+            Log.Info($"사용법: {commandName} <이름> <값>  (예: {commandName} ShowPlayerDirections 1)");
             return;
         }
         string key = parts[0];
@@ -329,7 +312,7 @@ public sealed class OperatorConsole
         bool exists = isRun ? _runRuleStore.ContainsRun(key) : _runRuleStore.ContainsRule(key);
         if (!exists)
         {
-            Console.WriteLine($"실패: {commandName}.json에 없는 키입니다 — {key}");
+            Log.Info($"실패: {commandName}.json에 없는 키입니다 — {key}");
             return;
         }
 
@@ -341,7 +324,7 @@ public sealed class OperatorConsole
         else _runRuleStore.SetRule(key, value);
 
         _pushRulesAction?.Invoke();
-        Console.WriteLine($"{commandName} {key} = {value} 반영 (파일 + 전 인스턴스 푸시)."); // run/rule 변경 반영
+        Log.Info($"{commandName} {key} = {value} 반영 (파일 + 전 인스턴스 푸시)."); // run/rule 변경 반영
     }
 
     private static string ConvertValue(string current, string raw)
@@ -361,7 +344,7 @@ public sealed class OperatorConsole
         var gateway = _hub.GatewayConnection;
         if (gateway == null)
         {
-            Console.WriteLine("게이트웨이 미연결 — lockdown 불가.");
+            Log.Info("게이트웨이 미연결 — lockdown 불가.");
             return;
         }
 
@@ -374,7 +357,7 @@ public sealed class OperatorConsole
 
             LockdownState.Active = true;
             LockdownState.Bypass = bypass; // 점검 모드: 전 세션 추방, bypass 허용
-            _hub.SendNoAck(gateway, "MAINTENANCE", new
+            _hub.SendNoAck(gateway, MessageTypes.Maintenance, new
             {
                 On = true,
                 Message = "Server is in maintenance mode",
@@ -382,23 +365,23 @@ public sealed class OperatorConsole
                 Bypass = bypass,
             });
             PushAuthInfo(gateway, " [MNT]");
-            Console.WriteLine($"락다운 켬 — 전 세션 추방, bypass {bypass.Length}명, 타이틀 접미 적용.");
+            Log.Info($"락다운 켬 — 전 세션 추방, bypass {bypass.Length}명, 타이틀 접미 적용.");
             LockdownNotify?.Invoke(true);
         }
         else
         {
             LockdownState.Active = false;
             LockdownState.Bypass = Array.Empty<ulong>();
-            _hub.SendNoAck(gateway, "MAINTENANCE", new { On = false, KickAll = false });
+            _hub.SendNoAck(gateway, MessageTypes.Maintenance, new { On = false, KickAll = false });
             PushAuthInfo(gateway, "");
-            Console.WriteLine("락다운 끔 — 접속 허용 + 타이틀 복원.");
+            Log.Info("락다운 끔 — 접속 허용 + 타이틀 복원.");
             LockdownNotify?.Invoke(false);
         }
     }
 
     private void PushAuthInfo(ControlHub.ClientConnection gateway, string suffix)
     {
-        _hub.SendNoAck(gateway, "AUTH_INFO", new // 서버명/비번/밴 재푸시
+        _hub.SendNoAck(gateway, MessageTypes.AuthInfo, new // 서버명/비번/밴 재푸시
         {
             serverName = _config.ServerName + suffix,
             serverPassword = _config.ServerPassword,
@@ -412,7 +395,7 @@ public sealed class OperatorConsole
         bool next = !_instances.PrewarmIdleShutdownEnabled;
         _instances.PrewarmIdleShutdownEnabled = next;
         PersistConfigBool("PrewarmIdleShutdown", next);
-        Console.WriteLine(next
+        Log.Info(next
             ? "prewarm idle-shutdown 켬 — 레이어1은 1시간 무접속 시 종료됩니다 (orchestrator.json 반영)."
             : "prewarm idle-shutdown 끔 — 레이어1은 무접속에도 유지됩니다(항상 프리웜) (orchestrator.json 반영).");
     }
@@ -425,12 +408,12 @@ public sealed class OperatorConsole
             using var doc = JsonDocument.Parse(File.ReadAllText(_configPath));
             var node = System.Text.Json.Nodes.JsonNode.Parse(doc.RootElement.GetRawText());
             node![key] = value;
-            File.WriteAllText(_configPath,
+            AtomicJsonFile.Write(_configPath,
                 node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{key} json 반영 실패: {ex.Message}");
+            Log.Info($"{key} json 반영 실패: {ex.Message}");
         }
     }
 
@@ -451,7 +434,7 @@ public sealed class OperatorConsole
             key = found.Key;
             return true;
         }
-        Console.WriteLine($"플레이어를 찾지 못했습니다: {input}");
+        Log.Info($"플레이어를 찾지 못했습니다: {input}");
         return false;
     }
 }

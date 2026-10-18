@@ -12,4 +12,14 @@
 
   <!-- 노드 에이전트 (PLAN.md D3) — 프로세스 수명주기 전용. 오케스트레이터와 TCP JSON 라인으로 통신 -->
 
+  <ItemGroup>
+    <ProjectReference Include="..\shared\CasuMp.Protocol\CasuMp.Protocol.csproj" />
+    <ProjectReference Include="..\shared\CasuMp.Runtime\CasuMp.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="CasuMp.Protocol" />
+    <Using Include="CasuMp.Runtime" />
+  </ItemGroup>
+
 </Project>

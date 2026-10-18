@@ -1,17 +1,8 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CasuMp.Protocol;
 
-namespace CasuMpOrchestrator;
-
-public readonly record struct PlayerKey(string Value)
-{
-    public override string ToString() => Value;
-    public static PlayerKey FromSteamId(ulong steamId) => new($"STEAM_{steamId}");
-    public static PlayerKey FromUsername(string username) =>
-        new($"NAME_{Convert.ToHexString(Encoding.UTF8.GetBytes(username))}");
-    public static PlayerKey FromString(string value) => new(value);
-}
+namespace CasuMp.Runtime;
 
 public sealed class ControlMessage
 {
@@ -47,8 +38,8 @@ public sealed class ControlMessage
     };
 
     public static ControlMessage Ack(long seq, bool ok, string? reason = null) =>
-        Create(seq, "ACK", new { ok, reason });
+        Create(seq, MessageTypes.Ack, new { ok, reason });
 
     public T? PayloadAs<T>() where T : class =>
-        Payload is JsonElement el ? el.Deserialize<T>(ParseOptions) : null;
+        Payload is JsonElement element ? element.Deserialize<T>(ParseOptions) : null;
 }

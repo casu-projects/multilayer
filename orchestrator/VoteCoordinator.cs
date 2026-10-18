@@ -81,7 +81,7 @@ public sealed class VoteCoordinator
             result = new VoteFinalizeResult(_active.VoteId, _active.Kind, totalYes, totalNo, totalIgnore,
                 _active.Payload);
 
-            Console.WriteLine($"[Vote] 투표 {_active.VoteId}({_active.Kind}) 집계: "
+            Log.Info($"[Vote] 투표 {_active.VoteId}({_active.Kind}) 집계: "
                 + $"찬성 {totalYes}, 반대 {totalNo}, 기권 {totalIgnore} "
                 + $"({_active.Tallies.Count}/{_active.ExpectedInstanceKeys.Count}개 인스턴스"
                 + (deadlinePassed && !allReported ? ", 유예 초과 강제 확정" : "") + ").");

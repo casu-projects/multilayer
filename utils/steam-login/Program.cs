@@ -1,4 +1,4 @@
-using System.Text.Json;
+using CasuMp.SteamSession;
 using SteamKit2;
 using SteamKit2.Authentication;
 
@@ -90,12 +90,11 @@ class Program
         Console.WriteLine("Authenticated. Logging in...");
 
         _loggedOnResult = false;
-        steamUser!.LogOn(new SteamUser.LogOnDetails
+        steamUser!.LogOn(SteamSessionAuth.BuildLogOnDetails(new SavedSteamSession
         {
-            Username = pollResponse.AccountName,
-            AccessToken = pollResponse.RefreshToken,
-            ShouldRememberPassword = true,
-        });
+            AccountName = pollResponse.AccountName,
+            RefreshToken = pollResponse.RefreshToken,
+        }));
 
         while (!_loggedOnResult && !_disconnected)
         {
@@ -115,15 +114,13 @@ class Program
         steamUser.LogOff();
         steamClient.Disconnect();
 
-        var session = new
+        var session = new SavedSteamSession
         {
             AccountName = pollResponse.AccountName,
             RefreshToken = pollResponse.RefreshToken,
-            WebApi = ""
+            WebApi = "",
         };
-
-        string json = JsonSerializer.Serialize(session, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(outputPath, json);
+        SteamSessionStore.Save(outputPath, session);
 
         Console.WriteLine($"Session saved: {outputPath}");
         return 0;

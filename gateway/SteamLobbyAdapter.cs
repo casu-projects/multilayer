@@ -124,7 +124,7 @@ public sealed class SteamLobbyAdapter
         _lobby.Stop();
     }
 
-    public void UpdateLobbyMetadata(GatewayCore.LobbyMetadataPayload payload) => _lobby.UpdateDynamicMetadata(payload);
+    public void UpdateLobbyMetadata(LobbyMetadataPayload payload) => _lobby.UpdateDynamicMetadata(payload);
 
     internal void RequestClose(HSteamNetConnection conn, ulong steamId, string reason)
     {

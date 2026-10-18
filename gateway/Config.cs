@@ -42,21 +42,3 @@ public sealed class GatewayConfig
         return JsonSerializer.Deserialize<GatewayConfig>(File.ReadAllText(path)) ?? new GatewayConfig();
     }
 }
-
-public sealed class RouteEntry
-{
-    [JsonPropertyName("playerKey")]
-    public string PlayerKey { get; set; } = "";
-
-    [JsonPropertyName("instanceId")]
-    public string InstanceId { get; set; } = "";
-
-    [JsonPropertyName("clientId")]
-    public ushort ClientId { get; set; }
-
-    [JsonPropertyName("backendAddr")]
-    public string BackendAddr { get; set; } = "";
-
-    [JsonPropertyName("isReturning")]
-    public bool IsReturning { get; set; }
-}

@@ -47,22 +47,36 @@ public static class RuleApplier
         return applied;
     }
 
+    public static int ApplyRunSettings(PreRunScript pre)
+    {
+        if (pre?.runSettings == null)
+            return 0;
+
+        int applied = ApplyRunSettingsTo(pre.runSettings);
+        WorldGeneration.runSettings = pre.runSettings;
+        return applied;
+    }
+
     public static int ApplyRunSettingsNow()
     {
         if (WorldGeneration.runSettings == null)
             return 0;
 
+        return ApplyRunSettingsTo(WorldGeneration.runSettings);
+    }
+
+    private static int ApplyRunSettingsTo(Dictionary<string, object> target)
+    {
         var overrides = RunRuleState.RunSettingsSnapshot();
         int applied = 0;
         foreach (KeyValuePair<string, string> entry in overrides)
         {
-            if (!WorldGeneration.runSettings.TryGetValue(entry.Key, out object existing))
+            if (!target.TryGetValue(entry.Key, out object existing))
                 continue;
 
             try
             {
-                WorldGeneration.runSettings[entry.Key] =
-                    Convert.ChangeType(entry.Value, existing.GetType(), CultureInfo.InvariantCulture);
+                target[entry.Key] = Convert.ChangeType(entry.Value, existing.GetType(), CultureInfo.InvariantCulture);
                 applied++;
             }
             catch (Exception ex)

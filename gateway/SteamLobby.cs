@@ -1,7 +1,8 @@
 using System.IO.Compression;
-using System.Text.Json;
+using CasuMp.SteamSession;
 using LiteNetLib.Utils;
 using SteamKit2;
+using Polly.Contrib.WaitAndRetry;
 using SteamKit2.Internal;
 
 namespace CasuMpGateway;
@@ -23,6 +24,9 @@ public sealed class SteamLobby
 
     private static readonly TimeSpan RetryMin = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan RetryMax = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan[] RetryDelays = Backoff.DecorrelatedJitterBackoffV2(RetryMin, 10)
+        .Select(delay => delay > RetryMax ? RetryMax : delay)
+        .ToArray();
     private static readonly TimeSpan AuthWaitWarnInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SafetyRecycleInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan CreateFailRetry = TimeSpan.FromSeconds(10);
@@ -90,7 +94,7 @@ public sealed class SteamLobby
         _motd = motd ?? "";
     }
 
-    public void UpdateDynamicMetadata(GatewayCore.LobbyMetadataPayload payload)
+    public void UpdateDynamicMetadata(LobbyMetadataPayload payload)
     {
         _livingCount = payload.LivingCount;
         _happinessSum = payload.HappinessSum;
@@ -121,9 +125,7 @@ public sealed class SteamLobby
         SavedSteamSession session;
         try
         {
-            string json = File.ReadAllText(_sessionPath);
-            session = JsonSerializer.Deserialize<SavedSteamSession>(json)
-                ?? throw new InvalidOperationException("세션 파일 파싱 결과가 비어있습니다.");
+            session = SteamSessionStore.Load(_sessionPath);
         }
         catch (Exception ex)
         {
@@ -258,9 +260,8 @@ public sealed class SteamLobby
 
     private void ScheduleRetry()
     {
-        var delay = TimeSpan.FromSeconds(
-            Math.Min(RetryMin.TotalSeconds * Math.Pow(2, _retryBackoff), RetryMax.TotalSeconds));
-        _retryBackoff = Math.Min(_retryBackoff + 1, 10);
+        TimeSpan delay = RetryDelays[Math.Min(_retryBackoff, RetryDelays.Length - 1)];
+        _retryBackoff = Math.Min(_retryBackoff + 1, RetryDelays.Length - 1);
         _lobbyRetryAfterUtc = DateTime.UtcNow + delay;
     }
 
@@ -418,10 +419,4 @@ public sealed class SteamLobby
         outer.PutBytesWithLength(compressed);
         return Convert.ToBase64String(outer.CopyData());
     }
-}
-
-internal sealed class SavedSteamSession
-{
-    public string AccountName { get; set; } = "";
-    public string RefreshToken { get; set; } = "";
 }

@@ -119,7 +119,7 @@ internal sealed class DiscordBot
             }
             catch (Exception ex)
             {
-                Log($"콘솔 로그 전송 실패: {ex.Message}");
+                WriteLog($"콘솔 로그 전송 실패: {ex.Message}");
             }
         }
     }
@@ -251,8 +251,7 @@ internal sealed class DiscordBot
         }
         catch (Exception ex)
         {
-            if (TimestampedConsoleWriter.Instance != null)
-                TimestampedConsoleWriter.Instance.PrintRelayed("orch:bot", $"채널 주제 갱신 실패: {ex.Message}");
+            WriteLog($"채널 주제 갱신 실패: {ex.Message}");
         }
     }
 
@@ -295,12 +294,9 @@ internal sealed class DiscordBot
         return null;
     }
 
-    private static void Log(string message)
+    private static void WriteLog(string message)
     {
-        if (TimestampedConsoleWriter.Instance != null)
-            TimestampedConsoleWriter.Instance.PrintRelayed("orch:bot", message);
-        else
-            ConsoleIO.WriteLine($"[DiscordBot] {message}");
+        CasuMpOrchestrator.Log.Info($"[orch:bot] {message}");
     }
 
     private Task LogAsync(LogMessage msg)
@@ -308,26 +304,26 @@ internal sealed class DiscordBot
         if (msg.Severity <= LogSeverity.Verbose) return Task.CompletedTask;
         if (msg.Message?.Contains("Unknown Channel") == true) return Task.CompletedTask;
         if (msg.Exception is TaskCanceledException) return Task.CompletedTask;
-        Log(msg.ToString());
+        WriteLog(msg.ToString());
         return Task.CompletedTask;
     }
 
     private async Task OnReadyAsync()
     {
-        Log($"Ready — 길드 {_client.Guilds.Count}개, 채팅채널 {_channelId}, 콘솔채널 {_consoleChannelId}");
+        WriteLog($"Ready — 길드 {_client.Guilds.Count}개, 채팅채널 {_channelId}, 콘솔채널 {_consoleChannelId}");
 
         if (_channelId != 0)
         {
             var ch = await _client.GetChannelAsync(_channelId);
             if (ch == null)
-                Log($"경고: 채팅 채널 {_channelId}을(를) 찾을 수 없습니다.");
+                WriteLog($"경고: 채팅 채널 {_channelId}을(를) 찾을 수 없습니다.");
         }
 
         if (_consoleChannelId != 0)
         {
             var ch3 = await _client.GetChannelAsync(_consoleChannelId);
             if (ch3 == null)
-                Log($"경고: 콘솔 채널 {_consoleChannelId}을(를) 찾을 수 없습니다.");
+                WriteLog($"경고: 콘솔 채널 {_consoleChannelId}을(를) 찾을 수 없습니다.");
         }
 
         try
@@ -347,11 +343,11 @@ internal sealed class DiscordBot
                 }
             }
             if (deleted > 0)
-                Log($"슬래시 명령어 {deleted}개 정리 완료 (글로벌 + 길드).");
+                WriteLog($"슬래시 명령어 {deleted}개 정리 완료 (글로벌 + 길드).");
         }
         catch (Exception ex)
         {
-            Log($"슬래시 명령어 정리 실패: {ex.Message}");
+            WriteLog($"슬래시 명령어 정리 실패: {ex.Message}");
         }
 
         try
@@ -360,7 +356,7 @@ internal sealed class DiscordBot
         }
         catch (Exception ex)
         {
-            Log($"Ready 콜백 실패: {ex.Message}");
+            WriteLog($"Ready 콜백 실패: {ex.Message}");
         }
     }
 

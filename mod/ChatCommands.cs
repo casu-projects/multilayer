@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -56,7 +57,7 @@ public static class ChatCommands
             }
 
             string command = message.Substring(CommandPrefix.Length); // "!" 제거
-            string[] argv = command.Trim().Split(' ');
+            string[] argv = CommandLineTokenizer.Split(command);
             if (argv.Length > 0)
             {
                 string cmdName = argv[0].ToLowerInvariant();
@@ -131,7 +132,7 @@ public static class ChatCommands
     {
         internal static void Cmd(ScavPlayer caller, string[] argv)
         {
-            OrchestratorClient.Instance?.SendEvent("LIST_REQUEST",
+            OrchestratorClient.Instance?.SendEvent(MessageTypes.ListRequest,
                 new { playerKey = MigrationModule.PlayerKeyOf(caller) });
         }
     }
@@ -140,7 +141,7 @@ public static class ChatCommands
     {
         internal static void Cmd(ScavPlayer caller, string[] argv)
         {
-            OrchestratorClient.Instance?.SendEvent("CALLADMIN",
+            OrchestratorClient.Instance?.SendEvent(MessageTypes.CallAdmin,
                 new { playerKey = MigrationModule.PlayerKeyOf(caller), username = caller.playerName });
             ChatPrivateReply.SendToPlayer(caller, "Your admin call has been sent.");
         }
@@ -184,7 +185,7 @@ public static class ChatCommands
             int depth = OrchestratorClient.Instance.InstanceDepth;
             if (!PerformInPlaceRespawn(caller, grantSupplies: false)) // 먼저 살린 뒤 마이그레이션
             {
-                OrchestratorClient.Instance.SendEvent("RESPAWN",
+                OrchestratorClient.Instance.SendEvent(MessageTypes.Respawn,
                     new { playerKey = pid, fromDepth = depth });
                 ChatPrivateReply.SendToPlayer(caller, "Respawning — moving to layer 1.");
                 return;
@@ -195,7 +196,7 @@ public static class ChatCommands
             CasualtiesTogetherUtils.Util.DelayCallLambda(0.6f, (Action)(() => // 클라 revive 적용 후
             {
                 if (caller == null || caller.body == null) return;
-                OrchestratorClient.Instance?.SendEvent("RESPAWN",
+                OrchestratorClient.Instance?.SendEvent(MessageTypes.Respawn,
                     new { playerKey = pid, fromDepth = depth });
             }));
         }
@@ -203,7 +204,7 @@ public static class ChatCommands
         private static void RespawnLocally(ScavPlayer caller)
         {
             string pid = MigrationModule.PlayerKeyOf(caller);
-            OrchestratorClient.Instance.SendEvent("RESPAWN", new { playerKey = pid, fromDepth = 1 });
+            OrchestratorClient.Instance.SendEvent(MessageTypes.Respawn, new { playerKey = pid, fromDepth = 1 });
             if (PerformInPlaceRespawn(caller, grantSupplies: true))
             {
                 ChatPrivateReply.SendToPlayer(caller, "You have respawned.");

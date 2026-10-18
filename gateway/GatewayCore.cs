@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System.Collections.Concurrent;
 using System.Text.Json;
 
@@ -13,7 +14,6 @@ public sealed class GatewayCore
     private readonly object _lock = new();
 
     private readonly ConcurrentQueue<ControlMessage> _inbound = new();
-    private readonly ConcurrentQueue<ControlMessage> _outbound = new();
     private long _seqCounter;
 
     private bool _maintenance;
@@ -66,12 +66,12 @@ public sealed class GatewayCore
 
     public void EnqueueCommand(ControlMessage msg) => _inbound.Enqueue(msg);
 
-    public ControlMessage? TryDequeueOutbound() => _outbound.TryDequeue(out var msg) ? msg : null;
+    public Action<ControlMessage>? OutboundSink { get; set; }
 
     public long NextSeq() => ++_seqCounter;
 
     public void Report(string type, object? payload) =>
-        _outbound.Enqueue(ControlMessage.Create(NextSeq(), type, payload));
+        OutboundSink?.Invoke(ControlMessage.Create(NextSeq(), type, payload));
 
     public void ReportActiveSessions()
     {
@@ -79,7 +79,7 @@ public sealed class GatewayCore
         {
             foreach (ClientSession session in _sessions.Values)
             {
-                Report("SESSION_CONNECTED", new
+                Report(MessageTypes.SessionConnected, new
                 {
                     playerKey = session.Player.Value,
                     steamId = session.SteamId,
@@ -127,7 +127,7 @@ public sealed class GatewayCore
             _sessions[session.Player] = session;
         }
 
-        Report("SESSION_CONNECTED", new
+        Report(MessageTypes.SessionConnected, new
         {
             playerKey = session.Player.Value,
             steamId = session.SteamId,
@@ -174,7 +174,7 @@ public sealed class GatewayCore
     }
     public void OnSessionBackendConnected(ClientSession session)
     {
-        Report("BACKEND_CONNECTED", new
+        Report(MessageTypes.BackendConnected, new
         {
             playerKey = session.Player.Value,
             instanceId = session.InstanceId,
@@ -195,31 +195,31 @@ public sealed class GatewayCore
         {
             switch (msg.Type)
             {
-                case "TABLE_SNAPSHOT":
+                case MessageTypes.TableSnapshot:
                     ApplyTableSnapshot(msg);
                     break;
-                case "ROUTE_UPDATE":
+                case MessageTypes.RouteUpdate:
                     ApplyRouteUpdate(msg);
                     break;
-                case "SWAP":
+                case MessageTypes.Swap:
                     ApplySwap(msg);
                     break;
-                case "KICK":
+                case MessageTypes.Kick:
                     ApplyKick(msg);
                     break;
-                case "BAN":
+                case MessageTypes.Ban:
                     ApplyBan(msg);
                     break;
-                case "AUTH_INFO":
+                case MessageTypes.AuthInfo:
                     ApplyAuthInfo(msg);
                     break;
-                case "MAINTENANCE":
+                case MessageTypes.Maintenance:
                     ApplyMaintenance(msg);
                     break;
-                case "SHUTDOWN":
+                case MessageTypes.Shutdown:
                     ApplyShutdown();
                     break;
-                case "LOBBY_METADATA":
+                case MessageTypes.LobbyMetadata:
                     ApplyLobbyMetadata(msg);
                     break;
                 default:
@@ -235,7 +235,7 @@ public sealed class GatewayCore
             Logger.Info($"명령 처리 실패 ({msg.Type}): {ex}");
         }
 
-        _outbound.Enqueue(ControlMessage.Ack(msg.Seq, ok, reason));
+        OutboundSink?.Invoke(ControlMessage.Ack(msg.Seq, ok, reason));
     }
 
     private void ApplyTableSnapshot(ControlMessage msg)
@@ -407,7 +407,7 @@ public sealed class GatewayCore
         }
         if (removed)
         {
-            Report("SESSION_DISCONNECTED", new
+            Report(MessageTypes.SessionDisconnected, new
             {
                 playerKey = session.Player.Value,
                 reason,
@@ -417,52 +417,4 @@ public sealed class GatewayCore
 
     internal static bool IsUsableBackendAddr(string? addr) =>
         !string.IsNullOrEmpty(addr) && addr.Contains(':');
-
-    public sealed class TableSnapshot
-    {
-        public RouteEntry[] Entries { get; set; } = [];
-    }
-
-    public sealed class SwapPayload
-    {
-        public string PlayerKey { get; set; } = "";
-        public string InstanceId { get; set; } = "";
-        public string BackendAddr { get; set; } = "";
-    }
-
-    public sealed class KickPayload
-    {
-        public string PlayerKey { get; set; } = "";
-        public string? Reason { get; set; }
-    }
-
-    public sealed class BanPayload
-    {
-        public string PlayerKey { get; set; } = "";
-        public bool Banned { get; set; }
-    }
-
-    public sealed class AuthInfoPayload
-    {
-        public string? ServerPassword { get; set; }
-        public string? ServerName { get; set; }
-        public string[] BannedKeys { get; set; } = [];
-        public int MaxPlayers { get; set; }
-    }
-
-    public sealed class MaintenancePayload
-    {
-        public bool On { get; set; }
-        public string? Message { get; set; }
-        public ulong[]? Bypass { get; set; }
-        public bool KickAll { get; set; }
-    }
-
-    public sealed class LobbyMetadataPayload
-    {
-        public int LivingCount { get; set; }
-        public int HappinessSum { get; set; }
-        public ulong[]? SteamIds { get; set; }
-        public string? RulesBase64 { get; set; }
-    }
 }

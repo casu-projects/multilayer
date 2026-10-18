@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,7 +11,7 @@ public static class VoteRelay
     internal static void EmitVoteStart(string voteId, string kind, string title, string promptBody,
         float timeoutSeconds, Dictionary<string, string> payload)
     {
-        OrchestratorClient.Instance?.SendEvent("VOTE_START", new
+        OrchestratorClient.Instance?.SendEvent(MessageTypes.VoteStart, new
         {
             voteId,
             kind,
@@ -32,7 +33,7 @@ public static class VoteRelay
             VoteSystem.Server_AnnounceVote(payload.Title, payload.PromptBody, payload.TimeoutSeconds,
                 (yes, no, ignore) =>
                 {
-                    OrchestratorClient.Instance?.SendEvent("VOTE_TALLY", new
+                    OrchestratorClient.Instance?.SendEvent(MessageTypes.VoteTally, new
                     {
                         voteId,
                         yes = yes?.Count ?? 0,
@@ -98,30 +99,4 @@ public static class VoteRelay
                 break;
         }
     }
-}
-
-public sealed class VoteRunPayload
-{
-    public string VoteId { get; set; } = "";
-    public string Kind { get; set; } = "";
-    public string Title { get; set; } = "";
-    public string PromptBody { get; set; } = "";
-    public float TimeoutSeconds { get; set; }
-    public Dictionary<string, string> Payload { get; set; } = new();
-}
-
-public sealed class VoteResultPayload
-{
-    public string VoteId { get; set; } = "";
-    public string Kind { get; set; } = "";
-    public int Yes { get; set; }
-    public int No { get; set; }
-    public int Ignore { get; set; }
-    public Dictionary<string, string> Payload { get; set; } = new();
-}
-
-public sealed class VoteRejectedPayload
-{
-    public string CallerClientId { get; set; } = "";
-    public string Reason { get; set; } = "";
 }

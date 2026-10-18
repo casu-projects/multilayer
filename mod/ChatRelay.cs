@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using Together;
 
 namespace CasuMod;
@@ -22,7 +23,7 @@ public static class ChatRelay
         Color24 c = plr.playerColor;
         string color = $"#{c.r:X2}{c.g:X2}{c.b:X2}";
 
-        OrchestratorClient.Instance.SendEvent("CHAT",
+        OrchestratorClient.Instance.SendEvent(MessageTypes.Chat,
             new { speaker = plr.playerName, message = message, color = color });
     }
 

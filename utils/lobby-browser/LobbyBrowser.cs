@@ -1,3 +1,4 @@
+using CasuMp.SteamSession;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Text.Json;
@@ -47,7 +48,7 @@ internal sealed class LobbyBrowser
 
     public async Task RunAsync(string sessionPath, string? versionFilter, CancellationToken ct)
     {
-        _session = LoadSession(sessionPath);
+        _session = SteamSessionStore.Load(sessionPath);
         _versionFilter = string.IsNullOrWhiteSpace(versionFilter) ? null : versionFilter.Trim();
 
         _steamClient = new SteamClient();
@@ -79,21 +80,9 @@ internal sealed class LobbyBrowser
         await Task.Delay(500, ct);
     }
 
-    private SavedSteamSession LoadSession(string path)
-    {
-        string json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<SavedSteamSession>(json)
-            ?? throw new InvalidOperationException("세션 파일 파싱 실패");
-    }
-
     private void OnConnected(SteamClient.ConnectedCallback callback)
     {
-        _steamUser!.LogOn(new SteamUser.LogOnDetails
-        {
-            Username = _session!.AccountName,
-            AccessToken = _session.RefreshToken,
-            ShouldRememberPassword = true,
-        });
+        _steamUser!.LogOn(SteamSessionAuth.BuildLogOnDetails(_session!));
     }
 
     private void OnLoggedOn(SteamUser.LoggedOnCallback callback)
@@ -364,13 +353,6 @@ internal sealed class LobbyBrowser
             catch { }
         }
     }
-}
-
-internal sealed class SavedSteamSession
-{
-    public string AccountName { get; set; } = "";
-    public string RefreshToken { get; set; } = "";
-    public string WebApi { get; set; } = "";
 }
 
 internal sealed record ExtraData(ulong[] SteamIds, string[] Mods);

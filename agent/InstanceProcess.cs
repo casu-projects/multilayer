@@ -177,12 +177,3 @@ public sealed class InstanceProcess
         });
     }
 }
-
-public sealed class SpawnPayload
-{
-    public string InstanceKey { get; set; } = "";
-    public int Depth { get; set; }
-    public int Port { get; set; }
-    public string? ServerName { get; set; }
-    public string? ServerPassword { get; set; }
-}

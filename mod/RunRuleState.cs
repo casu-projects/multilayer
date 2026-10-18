@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System.Collections.Generic;
 
 namespace CasuMod;
@@ -29,10 +30,4 @@ public static class RunRuleState
     {
         lock (_lock) { return new Dictionary<string, string>(_rules); }
     }
-}
-
-public sealed class RunRulesPayload
-{
-    public Dictionary<string, string> RunSettings { get; set; }
-    public Dictionary<string, string> Rules { get; set; }
 }

@@ -78,7 +78,7 @@ public sealed class RunRuleStore
     {
         try
         {
-            File.WriteAllText(path, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
+            AtomicJsonFile.Write(path, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch { }
     }

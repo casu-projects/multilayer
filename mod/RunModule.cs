@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 using System;
 using System.Collections.Generic;
 using HarmonyLib;
@@ -166,7 +167,7 @@ public static class RunModule
             if (OrchestratorClient.Instance == null || !OrchestratorClient.Instance.Connected) return;
 
             _readyReported = true;
-            OrchestratorClient.Instance.SendEvent("INSTANCE_READY",
+            OrchestratorClient.Instance.SendEvent(MessageTypes.InstanceReady,
                 new { instanceKey = OrchestratorClient.Instance.InstanceKey });
             Plugin.Log.LogInfo($"[Run] INSTANCE_READY 보고 ({OrchestratorClient.Instance.InstanceKey}).");
         }

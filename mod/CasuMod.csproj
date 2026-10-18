@@ -67,4 +67,13 @@
     </Reference>
   </ItemGroup>
 
+  <!-- 공용 프로토콜 소스 (별도 어셈블리 없이 CasuMod.dll 에 포함) -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../shared/CasuMp.Protocol/*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="CasuMp.Protocol" />
+  </ItemGroup>
+
 </Project>

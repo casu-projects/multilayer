@@ -1,3 +1,4 @@
+using CasuMp.Protocol;
 namespace CasuMpOrchestrator;
 
 public enum InstanceStatus
@@ -36,7 +37,7 @@ public sealed class InstanceManager
 
     private readonly Dictionary<string, InstanceInfo> _instances = new();
     private readonly HashSet<int> _usedPorts = new();
-    private readonly Dictionary<string, (int Used, int Capacity, string Address)> _agents = new();
+    private readonly AgentRegistry _agents = new();
 
     public InstanceManager(OrchestratorConfig config, ControlHub hub)
     {
@@ -58,23 +59,23 @@ public sealed class InstanceManager
 
     public void RegisterAgent(string machineId, int capacity, string address)
     {
-        _agents[machineId] = (0, capacity, address);
+        _agents.Register(machineId, capacity, address);
     }
 
     public void UnregisterAgent(string machineId)
     {
-        _agents.Remove(machineId);
+        _agents.Unregister(machineId);
         foreach (InstanceInfo info in _instances.Values.Where(i => i.MachineId == machineId))
         {
             info.Status = InstanceStatus.Crashed;
-            Console.WriteLine($"에이전트 {machineId} 이탈 — 인스턴스 {info.Key} 크래시 처리");
+            Log.Info($"에이전트 {machineId} 이탈 — 인스턴스 {info.Key} 크래시 처리");
         }
     }
 
     public string? BackendAddrFor(InstanceInfo info)
     {
-        if (info.MachineId != null && _agents.TryGetValue(info.MachineId, out var agent))
-            return $"{agent.Address}:{info.Port}";
+        if (info.MachineId != null && _agents.TryGetAddress(info.MachineId, out string address))
+            return $"{address}:{info.Port}";
         if (info.ModConnection != null
             && info.ModConnection.Tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep)
         {
@@ -96,16 +97,16 @@ public sealed class InstanceManager
 
     private InstanceInfo? Spawn(int depth)
     {
-        if (_agents.Count == 0)
+        if (_agents.IsEmpty)
         {
-            Console.WriteLine($"에이전트가 없어 depth-{depth} 스폰 불가.");
+            Log.Info($"에이전트가 없어 depth-{depth} 스폰 불가.");
             return null;
         }
 
         string? machineId = SelectMachine();
         if (machineId == null)
         {
-            Console.WriteLine($"모든 에이전트 수용량 초과 — depth-{depth} 스폰 불가.");
+            Log.Info($"모든 에이전트 수용량 초과 — depth-{depth} 스폰 불가.");
             return null;
         }
 
@@ -115,11 +116,10 @@ public sealed class InstanceManager
         _instances[key] = info;
         _runNeeded.Add(key); // 모든 인스턴스는 첫 플레이어 연결 시 START_RUN 필요 (G-1)
 
-        var agent = _agents[machineId];
-        _agents[machineId] = (agent.Used + 1, agent.Capacity, agent.Address);
+        _agents.IncrementUsage(machineId);
 
         ControlHub.ClientConnection? conn = _hub.AgentConnection(machineId);
-        bool sent = _hub.Send(conn, "SPAWN", new
+        bool sent = _hub.Send(conn, MessageTypes.Spawn, new
         {
             instanceKey = key,
             depth,
@@ -130,7 +130,7 @@ public sealed class InstanceManager
         {
             if (!ok)
             {
-                Console.WriteLine($"depth-{depth} SPAWN 실패: {reason}");
+                Log.Info($"depth-{depth} SPAWN 실패: {reason}");
                 info.Status = InstanceStatus.Crashed;
             }
         });
@@ -151,11 +151,7 @@ public sealed class InstanceManager
 
     private string? SelectMachine()
     {
-        return _agents
-            .Where(kv => kv.Value.Used < kv.Value.Capacity)
-            .OrderBy(kv => (double)kv.Value.Used / kv.Value.Capacity)
-            .Select(kv => kv.Key)
-            .FirstOrDefault();
+        return _agents.Select();
     }
 
     public void StopInstance(string key)
@@ -163,7 +159,7 @@ public sealed class InstanceManager
         InstanceInfo? info = Find(key);
         if (info == null) return;
         info.Status = InstanceStatus.Stopping;
-        _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), "STOP", new { instanceKey = key });
+        _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageTypes.Stop, new { instanceKey = key });
     }
 
     public void ResetInstance(string key)
@@ -172,16 +168,16 @@ public sealed class InstanceManager
         if (info == null) return;
         if (info.ModConnection == null)
         {
-            Console.WriteLine($"{key} RESET 불가 — 모드 미연결. 크래시 처리.");
+            Log.Info($"{key} RESET 불가 — 모드 미연결. 크래시 처리.");
             info.Status = InstanceStatus.Crashed;
             return;
         }
         info.Status = InstanceStatus.IdleReset;
-        _hub.Send(info.ModConnection, "RESET", new { instanceKey = key }, (ok, reason) =>
+        _hub.Send(info.ModConnection, MessageTypes.Reset, new { instanceKey = key }, (ok, reason) =>
         {
             if (!ok)
             {
-                Console.WriteLine($"{key} RESET 실패: {reason} — 크래시 처리.");
+                Log.Info($"{key} RESET 실패: {reason} — 크래시 처리.");
                 info.Status = InstanceStatus.Crashed;
             }
         });
@@ -264,7 +260,7 @@ public sealed class InstanceManager
     public void TrySendStartRun(string key)
     {
         if (!_runNeeded.Remove(key)) return;
-        _hub.Send(_hub.ModConnection(key), "START_RUN", new { instanceKey = key });
+        _hub.Send(_hub.ModConnection(key), MessageTypes.StartRun, new { instanceKey = key });
     }
 
     public void OnModHello(ControlHub.ClientConnection conn, ModHelloPayload payload)
@@ -303,7 +299,7 @@ public sealed class InstanceManager
     {
         InstanceInfo? info = Find(key);
         if (info == null) return;
-        Console.WriteLine($"{key} FAULT: {reason}");
+        Log.Info($"{key} FAULT: {reason}");
         info.Status = InstanceStatus.Crashed;
         info.ModConnection = null;
     }
@@ -315,7 +311,7 @@ public sealed class InstanceManager
         info.ModConnection = null;
         if (info.Status is InstanceStatus.Booting or InstanceStatus.Ready or InstanceStatus.Idle)
         {
-            Console.WriteLine($"{info.Key} 모드 연결 종료 — 크래시 처리.");
+            Log.Info($"{info.Key} 모드 연결 종료 — 크래시 처리.");
             info.Status = InstanceStatus.Crashed;
         }
     }
@@ -333,9 +329,9 @@ public sealed class InstanceManager
         InstanceInfo? info = Find(key);
         if (info == null) return;
         _usedPorts.Remove(info.Port);
-        if (info.MachineId != null && _agents.TryGetValue(info.MachineId, out var agent))
+        if (info.MachineId != null)
         {
-            _agents[info.MachineId] = (Math.Max(0, agent.Used - 1), agent.Capacity, agent.Address);
+            _agents.DecrementUsage(info.MachineId);
         }
         info.Status = InstanceStatus.Stopped; // 종료
         info.ModConnection = null;
@@ -369,7 +365,7 @@ public sealed class InstanceManager
             {
                 if (PrewarmIdleShutdownEnabled && now - info.LastNonIdleAt >= PrewarmIdleShutdownDelay)
                 {
-                    Console.WriteLine($"{info.Key} 유휴 초과(1시간) — 정지.");
+                    Log.Info($"{info.Key} 유휴 초과(1시간) — 정지.");
                     StopInstance(info.Key);
                     continue;
                 }
@@ -385,17 +381,10 @@ public sealed class InstanceManager
                 continue;
             }
 
-            Console.WriteLine($"{info.Key} 유휴 초과 — 정지.");
+            Log.Info($"{info.Key} 유휴 초과 — 정지.");
             StopInstance(info.Key);
         }
     }
 
     public static string DepthKey(int depth) => $"depth-{depth}";
-}
-
-public sealed class ModHelloPayload
-{
-    public string InstanceKey { get; set; } = "";
-    public int Port { get; set; }
-    public int Depth { get; set; }
 }

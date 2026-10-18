@@ -134,6 +134,10 @@ public sealed class OrchestratorClient : MonoBehaviour
                 MigrationModule.HandleFreeze(msg);
                 Ack(msg, true);
                 break;
+            case "PRECLEAR":
+                MigrationModule.HandlePreClear(msg);
+                Ack(msg, true);
+                break;
             case "UNFREEZE":
                 MigrationModule.HandleUnfreeze(msg);
                 Ack(msg, true);

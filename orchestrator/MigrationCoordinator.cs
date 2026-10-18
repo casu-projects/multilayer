@@ -34,6 +34,10 @@ public sealed class MigrationCoordinator
         // SWAP 인플라이트: 발신~ack 수신 사이 Tick이 SWAP을 재발신해
         // 게이트웨이가 백엔드를 이중 연결("이름 중복" 추방)하는 것을 차단한다
         public bool SwapSent { get; set; }
+        // SWAP 직전 pre-clear handshake: 출발지가 대상 클라이언트의 스테일 LES 엔티티를
+        // 비우도록 PRECLEAR 를 보낸다 (목적지 READY 후). PRECLEAR_DONE 수신 후에만 SWAP.
+        public bool PreClearSent { get; set; }
+        public bool PreClearDone { get; set; }
         // WAL 복구된 트랜잭션 - 스왑 후 상태면 RESUME 재발신이 필요할 수 있다
         public bool Recovered { get; set; }
         // 복구 후 RESUME 재발신 완료 여부
@@ -409,6 +413,16 @@ public sealed class MigrationCoordinator
         TryProceedSwap(tx);
     }
 
+    // 출발지가 대상 클라이언트의 스테일 엔티티 정리를 마침 - SWAP 진행
+    public void OnPreClearDone(PlayerKey player, int? epoch)
+    {
+        if (!_transactions.TryGetValue(player, out Transaction? tx) || tx.State != TxState.WaitingReady) return;
+        if (!IsCurrent(tx, epoch)) return;
+
+        tx.PreClearDone = true;
+        TryProceedSwap(tx);
+    }
+
     // 목적지 READY 확인 후 SWAP 발행 ( READY 게이트). 인플라이트(SwapSent)면
     // 재발신하지 않는다. 미READY면 Tick이 재시도
     private void TryProceedSwap(Transaction tx)
@@ -431,6 +445,43 @@ public sealed class MigrationCoordinator
 
         string? addr = _instances.BackendAddrFor(target);
         if (addr == null) return;
+
+        // SWAP 직전 pre-clear handshake: 출발지(아직 대상 클라이언트와 연결 유지 중)에
+        // PRECLEAR 를 보내 클라이언트의 스테일 LES 엔티티를 비우게 하고, PRECLEAR_DONE
+        // 을 받은 뒤에만 SWAP 한다. 목적지 첫 baseline 이 빈 EntitiesDict 에 적용되어
+        // ExecuteRpcs IndexOutOfRange 크래시가 사라진다. (출발지가 없는 경우 생략하고 진행)
+        if (!tx.PreClearDone)
+        {
+            if (!tx.PreClearSent)
+            {
+                InstanceInfo? from = _instances.Find(tx.FromInstance);
+                if (from?.ModConnection != null && !from.ModConnection.Closed)
+                {
+                    tx.PreClearSent = true;
+                    // PRECLEAR_DONE 미수신 시 무한 대기 방지 - 마감 후에는 best-effort 로 진행한다
+                    // (pre-clear 는 크래시 방지용 개선이므로, 여기서 트랜잭션을 죽이지 않는다)
+                    tx.StepDeadline = DateTime.UtcNow + PreClearWaitTimeout();
+                    Console.WriteLine($"{tx.Player} → PRE-CLEAR 발신 (출발지 {tx.FromInstance})");
+                    _hub.Send(from.ModConnection, "PRECLEAR",
+                        new { playerKey = tx.Player.Value, epoch = tx.Epoch },
+                        (ok, reason) =>
+                        {
+                            if (!ok)
+                            {
+                                // 출발지 mod 응답 없음(구버전/미연결) - pre-clear 없이 진행 (크래시 위험 감수)
+                                Console.WriteLine($"{tx.Player} PRE-CLEAR 전송 실패({reason}) - 생략하고 진행.");
+                                tx.PreClearDone = true;
+                                TryProceedSwap(tx);
+                            }
+                        });
+                }
+                else
+                {
+                    tx.PreClearDone = true; // 출발지 연결 없음 - 그냥 진행
+                }
+            }
+            if (!tx.PreClearDone) return; // PRECLEAR_DONE 대기 (이벤트/Tick 재시도)
+        }
 
         tx.SwapSent = true;
         _hub.Send(_hub.GatewayConnection, "SWAP",
@@ -526,10 +577,7 @@ public sealed class MigrationCoordinator
         tx.State = TxState.Worldgen;
         tx.StepDeadline = DateTime.UtcNow + StepTimeout();
         WriteWal(tx);
-
-        // 조기 로딩 트리거(10016)는 구 인스턴스가 LAYER_END 시점에 이미 수행했다
-        // 여기서 재전송하면 클라이언트가 재생성을 취소/재시작해 파라미터를 재수신하지
-        // 못하고 영구 대기(stuck)할 수 있으므로 전송하지 않는다. WORLDGEN_DONE만 대기
+        // 이후 WORLDGEN_DONE 대기
     }
 
     public void OnWorldgenDone(PlayerKey player, int? epoch)
@@ -666,6 +714,12 @@ public sealed class MigrationCoordinator
                 }
                 else
                 {
+                    // PRE-CLEAR 응답 지연: 트랜잭션을 죽이지 않고 pre-clear 없이 진행한다
+                    if (tx.PreClearSent && !tx.PreClearDone && now >= tx.StepDeadline)
+                    {
+                        tx.PreClearDone = true;
+                        tx.StepDeadline = now + StepTimeout();
+                    }
                     TryProceedSwap(tx);
                 }
             }
@@ -764,4 +818,7 @@ public sealed class MigrationCoordinator
         _transactions.TryGetValue(other, out Transaction? t) && t.TargetInstance == tx.TargetInstance;
 
     private TimeSpan StepTimeout() => TimeSpan.FromSeconds(_config.MigrationStepTimeoutSeconds);
+
+    // PRECLEAR_DONE 대기 상한 - 초과 시 pre-clear 없이 SWAP 진행 (best-effort)
+    private static TimeSpan PreClearWaitTimeout() => TimeSpan.FromSeconds(4);
 }

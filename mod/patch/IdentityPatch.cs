@@ -27,6 +27,10 @@ internal static class OnConnectionRequest_TailV2Patch
     private static bool? _pendingIsMigratingArrival;
     private static string? _pendingName;
 
+    // 마이그레이션 도착 플레이어 - ServerCreatePlayer 훅에서 채우고, OnConnectionRequest
+    // Postfix(ClientIdToPeerDict 등록 이후)에서 10016 전송에 소비한다.
+    internal static ScavPlayer? PendingArrivalPlayer;
+
     private static MethodBase TargetMethod() =>
         AccessTools.Method(typeof(TransportLiteNetLib), "LiteNetLib.INetEventListener.OnConnectionRequest");
 
@@ -37,6 +41,7 @@ internal static class OnConnectionRequest_TailV2Patch
         _pendingIsReturning = null;
         _pendingIsMigratingArrival = null;
         _pendingName = null;
+        PendingArrivalPlayer = null;
 
         byte[] raw = request.Data.RawData;
         int offset = request.Data.UserDataOffset;
@@ -97,6 +102,19 @@ internal static class OnConnectionRequest_TailV2Patch
         }
     }
 
+    // 매핑(ClientIdToPeerDict[ownerId]=peer) 등록 이후 실행 - 이 시점에야 10016이
+    // Server_SendTo 에서 정상 peer 로 해소되어 드랍되지 않는다. ReliableOrdered 라
+    // 첫 LES baseline 보다 먼저 직렬화되어 클라이언트가 재생성을 시작한다.
+    // (출발지가 FREEZE에서 보내면 SWAP 경쟁으로 유실되어 클라이언트가 옛 월드에 남으므로
+    //  목적지 인스턴스가 도착 시 단일 발신한다.)
+    private static void Postfix()
+    {
+        ScavPlayer? plr = PendingArrivalPlayer;
+        PendingArrivalPlayer = null;
+        if (plr == null) return;
+        CasuMod.MigrationModule.SendRegenerateWorld(plr);
+    }
+
     internal static ulong? TakeSteamId() { var v = _pendingSteamId; _pendingSteamId = null; return v; }
     internal static ushort? TakeClientId() { var v = _pendingClientId; _pendingClientId = null; return v; }
     internal static bool? TakeIsMigrating() { var v = _pendingIsMigratingArrival; _pendingIsMigratingArrival = null; return v; }
@@ -139,6 +157,10 @@ internal static class BasePlayer_ServerCreatePlayer_ApplyIdentityPatch
         if (isMigrating)
         {
             MigrationArrivalTracker.ClientIds.Add(plr.playerId);
+            // 마이그레이션 도착: 목적지가 10016을 단일 발신한다. 이 Postfix 는
+            // ServerCreatePlayer 리턴 직후(=ClientIdToPeerDict 등록 전)라 여기서 바로 보내면
+            // 드랍되므로, OnConnectionRequest Postfix 로 미룬다.
+            OnConnectionRequest_TailV2Patch.PendingArrivalPlayer = plr;
         }
 
         if (steamId.HasValue && steamId.Value != 0)
@@ -158,14 +180,15 @@ internal static class BasePlayer_ServerCreatePlayer_ApplyIdentityPatch
 
         // 도착 epoch: 직전 방문의 잔존 PendingData/PendingPositions 소비 차단
         // 바디 스폰(Body.Start)보다 반드시 먼저 실행된다 (ServerCreatePlayer 동기 처리)
-        SaveModule.OnPlayerArrival(plr.GetPersistentId());
+        SaveModule.OnPlayerArrival(CasuMod.MigrationModule.PlayerKeyOf(plr));
 
         // 접속 시 플레이어 데이터 요청 - 직접연결(SteamId=0) 포함 전 플레이어
-        // playerKey는 GetPersistentId (SteamId 있으면 STEAM_, 없으면 NAME_hex)
+        // playerKey는 게이트웨이/오케스트레이터와 동일한 STEAM_<SteamId> 로 정규화한다
+        // (전용 서버는 Steam 트랜스포트가 아니라 GetPersistentId 가 NAME_hex 를 준다)
         if (OrchestratorClient.Instance != null)
         {
             OrchestratorClient.Instance.SendEvent("PLAYER_DATA_REQUEST",
-                new { playerKey = plr.GetPersistentId() });
+                new { playerKey = CasuMod.MigrationModule.PlayerKeyOf(plr) });
         }
     }
 }

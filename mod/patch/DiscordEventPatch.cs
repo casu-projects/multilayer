@@ -20,7 +20,7 @@ public static class DiscordEventReporter
         if (plr == null || plr.IsLocal) return;
         OrchestratorClient.Instance?.SendEvent(type, new
         {
-            playerKey = plr.GetPersistentId(),
+            playerKey = MigrationModule.PlayerKeyOf(plr),
             username = plr.playerName,
             layer = CurrentLayer(),
         });

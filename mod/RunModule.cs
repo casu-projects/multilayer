@@ -133,7 +133,7 @@ public static class RunModule
         {
             // 마이그레이션 동결 중(FREEZE) 플레이어 제외 - 캡처 데이터를 파괴된 인벤토리
             // 상태로 덮어쓰지 않는다 (WAL/캡처가 재시작 복구 담당 - OnDestroy 패치 -5와 동일)
-            if (MigrationModule.IsFrozen(p.GetPersistentId())) continue;
+            if (MigrationModule.IsFrozen(MigrationModule.PlayerKeyOf(p))) continue;
             SaveModule.SubmitPlayer(p);
         }
         // fire-and-forget 제출(PLAYER_DATA_SUBMIT)이 소켓으로 전달될 시간을 확보

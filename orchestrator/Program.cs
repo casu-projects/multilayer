@@ -528,6 +528,10 @@ internal static class Program
                 if (TryPlayerKey(msg, out var fd))
                     migrations.OnFreezeDone(fd, GetEpoch(msg));
                 break;
+            case "PRECLEAR_DONE":
+                if (TryPlayerKey(msg, out var pc))
+                    migrations.OnPreClearDone(pc, GetEpoch(msg));
+                break;
             case "RESUME_DONE":
                 if (TryPlayerKey(msg, out var rd))
                     migrations.OnResumeDone(rd, GetEpoch(msg));

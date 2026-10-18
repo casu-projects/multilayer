@@ -139,7 +139,7 @@ public static class SaveModule
         {
             JObject data = SerializePlayer(plr);
             OrchestratorClient.Instance?.SendEvent("PLAYER_DATA_SUBMIT",
-                new { playerKey = plr.GetPersistentId(), payload = data });
+                new { playerKey = MigrationModule.PlayerKeyOf(plr), payload = data });
         }
         catch (System.Exception ex)
         {
@@ -594,18 +594,19 @@ public static class SaveModule
     private static void QueuePosition(Body body, ScavPlayer plr, JToken token)
     {
         if (token is not JObject pos) return;
-        PendingPositions[plr.GetPersistentId()] = (
+        string pid = MigrationModule.PlayerKeyOf(plr);
+        PendingPositions[pid] = (
             pos.Value<float?>("x") ?? 0f,
             pos.Value<float?>("y") ?? 0f,
             pos.Value<int?>("layer") ?? 0);
-        PositionSeq[plr.GetPersistentId()] = Interlocked.Increment(ref _seq);
+        PositionSeq[pid] = Interlocked.Increment(ref _seq);
     }
 
     // 퇴장 시 저장된 드랍 아이템 큐잉 (RestorePlayer에서 호출 - 스폰 위치 확정 시 소비)
     private static void QueueDroppedItems(ScavPlayer plr, JToken token)
     {
         if (token is not JArray drops) return;
-        string pid = plr.GetPersistentId();
+        string pid = MigrationModule.PlayerKeyOf(plr);
         PendingDrops[pid] = new JArray(drops);
         DropSeq[pid] = Interlocked.Increment(ref _seq);
     }
@@ -635,7 +636,7 @@ public static class SaveModule
     internal static bool TryApplyPendingPosition(ScavPlayer plr, NetBody pb)
     {
         if (plr == null || pb == null || WorldGeneration.world == null) return false;
-        if (!TryTakePendingPosition(plr.GetPersistentId(), out var p)) return false;
+        if (!TryTakePendingPosition(MigrationModule.PlayerKeyOf(plr), out var p)) return false;
 
         if (p.Layer != WorldGeneration.world.biomeDepth)
         {
@@ -688,7 +689,7 @@ public static class SaveModule
         private static void Postfix(NetBody b)
         {
             if (b == null || b.plr == null) return;
-            if (!TryTakePendingDrops(b.plr.GetPersistentId(), out JArray drops)) return;
+            if (!TryTakePendingDrops(MigrationModule.PlayerKeyOf(b.plr), out JArray drops)) return;
 
             Vector2 spawnPos = b.body != null ? (Vector2)b.body.transform.position : Vector2.zero;
             foreach (JObject entry in drops.OfType<JObject>())
@@ -827,7 +828,7 @@ public static class SaveModule
         private static void Postfix(Body __instance)
         {
             if (!ScavPlayer.BodyToPlayerDict.TryGetValue(__instance, out ScavPlayer plr)) return;
-            string pid = plr.GetPersistentId();
+            string pid = MigrationModule.PlayerKeyOf(plr);
 
             if (!TryTakePending(pid, out JObject data))
             {
@@ -898,7 +899,7 @@ public static class SaveModule
         private static void Prefix(ScavPlayer __instance)
         {
             if (__instance == null) return;
-            if (MigrationModule.IsFrozen(__instance.GetPersistentId())) return;
+            if (MigrationModule.IsFrozen(MigrationModule.PlayerKeyOf(__instance))) return;
             if (__instance.body != null)
             {
                 SubmitPlayer(__instance);

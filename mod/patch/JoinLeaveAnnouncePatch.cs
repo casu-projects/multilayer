@@ -44,7 +44,7 @@ internal static class ScavPlayer_OnDestroy_AnnounceLeavePatch
         if (__instance == null || !Net.IsServer || !Net.IsRunning || __instance.IsLocal) return;
 
         // 마이그레이션(FREEZE) 중 퇴장은 제외 (레이어 이동 시 표시 안 함)
-        if (MigrationModule.IsFrozen(__instance.GetPersistentId())) return;
+        if (MigrationModule.IsFrozen(MigrationModule.PlayerKeyOf(__instance))) return;
 
         AnnounceRelay.SendLeave(__instance, JoinLeaveAnnounceMessage.Build(__instance, "plr_left"));
     }

@@ -19,9 +19,11 @@ namespace CasuMod;
 public sealed class MigrationModule : MonoBehaviour
 {
     private readonly HashSet<string> _reported = new();
-    private static readonly HashSet<string> _loadingTriggered = new();   // 10016(조기 로딩) 발신 기록 - 중단 복구용
     // 동결 플레이어 -> 현재 epoch (구 epoch 메시지는 무시 - 멱등)
     private static readonly ConcurrentDictionary<string, int> FrozenPlayers = new();
+    // FREEZE 시점에 캡처한 playerId - PRECLEAR 시점의 재조회 실패(플레이어가 이미 사라짐 등)를
+    // 방지한다. SWAP 전까지 동일 인스턴스에서 playerId 는 불변이므로 안전하게 재사용한다.
+    private static readonly ConcurrentDictionary<string, int> FrozenPlayerIds = new();
 
     // 월드 생성 완료 통지는 실제 로컬 몸 준비보다 약 2.7~2.9초 빠르다. 4초까지 대기
     // (NO LOCAL NETBODY 스팸 방지)
@@ -44,7 +46,7 @@ public sealed class MigrationModule : MonoBehaviour
 
         foreach (ScavPlayer p in ScavPlayer.ClientIdToPlayerDict.Values)
         {
-            string pid = p.GetPersistentId();
+            string pid = PlayerKeyOf(p);
             bool atEnd = p.ServerPlayerState != null
                 && p.ServerPlayerState.finished_worldgen
                 && p.body != null && p.body.alive && p.body.conscious
@@ -93,7 +95,24 @@ public sealed class MigrationModule : MonoBehaviour
             return;
         }
 
+        // 리스폰 트랜잭션인데 아직 사망 상태면 인플레이스로 살려둔다 - 사망/관전 UI 인 채로
+        // 목적지 월드를 재로드하면 클라 EventSystem NRE(UIUtil.GetEventSystemRaycastResults)가
+        // 발생한다(실측). 명령 경로를 우회한 리스폰에 대한 안전망.
+        if (respawn && !plr.body.alive)
+        {
+            try
+            {
+                plr.body.ResetMind();
+                plr.Server_RespawnCharacter(Body_PlaceBody_MultiplayerPatch.SpawnLocation, level_transition: false);
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogWarning($"[Migration] {playerKey} 리스폰 전 revive 실패: {ex.Message}");
+            }
+        }
+
         FrozenPlayers[playerKey] = epoch;
+        FrozenPlayerIds[playerKey] = plr.playerId;
         if (!respawn)
         {
             SaveModule.SubmitPlayer(plr);   // 직렬화 + 제출 (인메모리 핸드오프) - 인벤토리 캡처
@@ -125,15 +144,69 @@ public sealed class MigrationModule : MonoBehaviour
         // 제거되었다 (베이스가 실제 연결 해제/엔티티 제거 시 처리).
         // 발신 중단은 IsFrozen 상태 기반 게이트가 담당한다
 
-        // 1초 후: 10016(로딩 화면) + FREEZE_DONE - SWAP이 구 인스턴스 연결을 끊기 전에
-        // 버스트/파괴가 정리될 시간 확보 (순서: 파괴->1초->10016->완료)
+        // 1초 후: FREEZE_DONE - SWAP 전 버스트/파괴가 정리될 시간을 준다.
+        // 로딩 트리거(10016)는 목적지 인스턴스가 도착 시 단일 발신한다 (SendRegenerateWorld 는
+        // BasePlayer_ServerCreatePlayer 도착 훅 -> OnConnectionRequest Postfix 에서 호출된다).
+        // 출발지 연결은 곧 SWAP 에서 끊기므로 여기서 보내면 패킷이 유실되어 클라이언트가
+        // 옛 월드에 남고, 목적지 조기 baseline 으로 크래시한다.
         Util.DelayCallLambda(1f, (Action)(() =>
         {
-            if (plr == null) return;
-            SendRegenerateWorld(plr);
-            _loadingTriggered.Add(playerKey);
             OrchestratorClient.Instance?.SendEvent("FREEZE_DONE", new { playerKey, epoch });
         }));
+    }
+
+    // SWAP 직전 pre-clear (오케스트레이터가 목적지 READY 확인 후 발신). 출발지에는 아직
+    // 클라이언트의 스테일 EntitiesDict 가 그대로 남아 있으므로(SWAP 전 연결 유지), 이 시점에
+    // 대상 클라이언트 전용 "전체 엔티티 파괴" RPC 를 enqueue 한다. 이후 ~1.5초 재전송으로
+    // 도달을 보장한 뒤 PRECLEAR_DONE 을 알리고 곧바로 SWAP 이 일어난다. PlayerResyncTimeout(4s)
+    // 이전에 스왑되므로 출발지가 재-baseline 으로 되살릴 틈이 없다. 이렇게 비워진 사전에
+    // 목적지 첫 baseline 이 적용되어 ExecuteRpcs IndexOutOfRange 크래시가 사라진다.
+    internal static void HandlePreClear(ControlMessage msg)
+    {
+        PlayerKeyPayload payload = msg.PayloadAs<PlayerKeyPayload>();
+        string playerKey = payload?.PlayerKey ?? "";
+        int epoch = payload?.Epoch ?? -1;
+
+        // FREEZE 시점에 캡처한 playerId 를 우선 사용한다. PRECLEAR 시점에는 FREEZE 이후
+        // 상태 변화로 재조회가 실패할 수 있어(조용히 사전을 못 비우는 원인) 캡처값을 신뢰한다.
+        int playerId;
+        if (FrozenPlayerIds.TryGetValue(playerKey, out int captured))
+        {
+            playerId = captured;
+        }
+        else
+        {
+            ScavPlayer found = FindByPersistentId(playerKey);
+            if (found == null)
+            {
+                OrchestratorClient.Instance?.SendEvent("PRECLEAR_DONE", new { playerKey, epoch });
+                return;
+            }
+            playerId = found.playerId;
+        }
+
+        FirePreClear(playerId);
+        // pre-clear destroy RPC 는 비신뢰(unreliable) 틱 패킷으로 전송되므로, 1차가 SWAP 전에
+        // 모두 도달하지 못할 수 있다(실측: 1차만 보내면 목적지 baseline 이 부분 적용되어
+        // 'Bad data' + 플레이어 바디 미연결로 스폰 정지). 0.7초 뒤 2차 버스트로 도달을 보장한다.
+        Util.DelayCallLambda(0.7f, (Action)(() => FirePreClear(playerId)));
+
+        Util.DelayCallLambda(1.5f, (Action)(() =>
+        {
+            OrchestratorClient.Instance?.SendEvent("PRECLEAR_DONE", new { playerKey, epoch });
+        }));
+    }
+
+    private static void FirePreClear(int playerId)
+    {
+        try
+        {
+            MigrationPreClearPatch.Run((ushort)playerId);
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.Log.LogWarning($"[Migration] pre-clear 실패: {ex.Message}");
+        }
     }
 
     internal static void HandleUnfreeze(ControlMessage msg)
@@ -145,37 +218,24 @@ public sealed class MigrationModule : MonoBehaviour
             return;
         }
         FrozenPlayers.TryRemove(playerKey, out _);
+        FrozenPlayerIds.TryRemove(playerKey, out _);
 
-        // 중단 복구: 10016(조기 로딩)을 보냈던 플레이어면 구 월드로 복귀시킨다
-        // 클라이언트는 여전히 로딩 화면(파라미터 대기)이므로 10016 재전송 + 구 월드
-        // 파라미터 announce로 재생성시킨다.
-        if (_loadingTriggered.Remove(playerKey))
+        // pre-swap 중단: 클라이언트는 출발지 월드에 그대로 있고(목적지 도착 전이므로 10016은
+        // 아직 발신되지 않았다) 재생성 트리거를 보내지 않는다. FREEZE에서 파괴된 인벤토리만
+        // 캡처 데이터로 복원한다 (복원은 목적지가 아니라 여기서).
+        ScavPlayer plr = FindByPersistentId(playerKey);
+        if (plr != null)
         {
-            ScavPlayer plr = FindByPersistentId(playerKey);
-            if (plr != null)
+            JToken payload = msg.Inner("payload");
+            if (payload != null && payload.Type == JTokenType.Object && plr.body != null)
             {
-                SendRegenerateWorld(plr);
                 try
                 {
-                    ServerMain.Server_AnnounceSeed(new List<knetid> { plr.playerId });
+                    SaveModule.RestorePlayer(plr.body, plr, (JObject)payload);
                 }
                 catch (System.Exception ex)
                 {
-                    Plugin.Log.LogWarning($"[Migration] UNFREEZE 복구 announce 실패: {ex.Message}");
-                }
-
-                // pre-swap 중단: 인벤토리는 FREEZE에서 이미 파괴됨 - 캡처 데이터로 땅 드랍 없이 복원한다
-                JToken payload = msg.Inner("payload");
-                if (payload != null && payload.Type == JTokenType.Object && plr.body != null)
-                {
-                    try
-                    {
-                        SaveModule.RestorePlayer(plr.body, plr, (JObject)payload);
-                    }
-                    catch (System.Exception ex)
-                    {
-                        Plugin.Log.LogWarning($"[Migration] {playerKey} UNFREEZE 데이터 재적용 실패: {ex.Message}");
-                    }
+                    Plugin.Log.LogWarning($"[Migration] {playerKey} UNFREEZE 데이터 재적용 실패: {ex.Message}");
                 }
             }
         }
@@ -246,7 +306,7 @@ public sealed class MigrationModule : MonoBehaviour
             if (epoch >= 0 && delayedCurrent != epoch) return;
 
             FrozenPlayers.TryRemove(playerKey, out _);
-            _loadingTriggered.Remove(playerKey);
+            FrozenPlayerIds.TryRemove(playerKey, out _);
 
             // 도착 직후 동기화를 막던 상태도 함께 해제
             ScavPlayer released = FindByPersistentId(playerKey);
@@ -257,9 +317,11 @@ public sealed class MigrationModule : MonoBehaviour
         }));
     }
 
-    // 클라이언트에 CLIENT_Announce_RegenerateWorld 전송 - 즉시 로딩 화면 진입
+    // 클라이언트에 CLIENT_Announce_RegenerateWorld(10016) 전송 - 즉시 로딩 화면 진입
     // 이후 목적지 인스턴스의 GenerateWorld_SeedAnnounce(10010)으로 대기가 해소된다
-    private static void SendRegenerateWorld(ScavPlayer plr)
+    // 마이그레이션 도착 시 목적지 인스턴스가 단일 발신원이다. 발신은 OnConnectionRequest
+    // Postfix(ClientIdToPeerDict 등록 이후)에서 이뤄진다 - IdentityPatch 참고.
+    internal static void SendRegenerateWorld(ScavPlayer plr)
     {
         if (plr == null) return;
         IEnumerable<knetid> targets = new List<knetid> { plr.playerId };
@@ -278,7 +340,7 @@ public sealed class MigrationModule : MonoBehaviour
         {
             if (!ScavPlayer.TryGetPlayerFromClientId(clientId, out ScavPlayer plr)) return;
 
-            string pid = plr.GetPersistentId();
+            string pid = PlayerKeyOf(plr);
             if (IsFrozen(pid))
             {
                 OrchestratorClient.Instance?.SendEvent("WORLDGEN_DONE", new { playerKey = pid, epoch = FrozenEpoch(pid) });
@@ -295,7 +357,7 @@ public sealed class MigrationModule : MonoBehaviour
         private static void Prefix(ScavPlayer __instance)
         {
             if (__instance == null || __instance.IsLocal) return;
-            string pid = __instance.GetPersistentId();
+            string pid = PlayerKeyOf(__instance);
             if (IsFrozen(pid))
             {
                 OrchestratorClient.Instance?.SendEvent("PLAYER_LEFT",
@@ -310,12 +372,26 @@ public sealed class MigrationModule : MonoBehaviour
             if (__instance == null || __instance.IsLocal) return;
             ReturningTracker.ClientIds.Remove(__instance.playerId);
             MigrationArrivalTracker.ClientIds.Remove(__instance.playerId);
+            MigrationTickAlignPatch.Reset(__instance.playerId);
+            FrozenPlayerIds.TryRemove(PlayerKeyOf(__instance), out _);
         }
     }
 
     private static ScavPlayer FindByPersistentId(string persistentId)
     {
         return ScavPlayer.ClientIdToPlayerDict.Values
-            .FirstOrDefault(p => p.GetPersistentId() == persistentId);
+            .FirstOrDefault(p => PlayerKeyOf(p) == persistentId || p.GetPersistentId() == persistentId);
+    }
+
+    // 오케스트레이터/게이트웨이는 STEAM_<SteamId> 키를 사용한다. 반면 전용 서버는
+    // Steam 트랜스포트가 아니므로(게이트웨이가 LiteNetLib 로 접속) Net.IsRunningSteam=false
+    // 이고 GetPersistentId() 는 NAME_<hex> 를 돌려준다. 이 불일치로 FREEZE/PRECLEAR/
+    // PLAYER_DATA/LAYER_END 가 모두 빗나갔다. 게이트웨이 tail 로 주입된 plr.SteamId 가
+    // 있으면 STEAM_ 키로 정규화해 오케스트레이터 키와 일치시킨다.
+    internal static string PlayerKeyOf(ScavPlayer plr)
+    {
+        if (plr == null) return "";
+        if (plr.SteamId != 0) return "STEAM_" + plr.SteamId;
+        return plr.GetPersistentId();
     }
 }

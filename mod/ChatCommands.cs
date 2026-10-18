@@ -147,7 +147,7 @@ public static class ChatCommands
         internal static void Cmd(ScavPlayer caller, string[] argv)
         {
             OrchestratorClient.Instance?.SendEvent("LIST_REQUEST",
-                new { playerKey = caller.GetPersistentId() });
+                new { playerKey = MigrationModule.PlayerKeyOf(caller) });
         }
     }
 
@@ -157,7 +157,7 @@ public static class ChatCommands
         internal static void Cmd(ScavPlayer caller, string[] argv)
         {
             OrchestratorClient.Instance?.SendEvent("CALLADMIN",
-                new { playerKey = caller.GetPersistentId(), username = caller.playerName });
+                new { playerKey = MigrationModule.PlayerKeyOf(caller), username = caller.playerName });
             ChatPrivateReply.SendToPlayer(caller, "Your admin call has been sent.");
         }
     }
@@ -175,7 +175,7 @@ public static class ChatCommands
                 return;
             }
 
-            string pid = caller.GetPersistentId();
+            string pid = MigrationModule.PlayerKeyOf(caller);
             if (MigrationModule.IsFrozen(pid))
             {
                 ChatPrivateReply.SendToPlayer(caller, "You cannot respawn during migration.");
@@ -194,18 +194,53 @@ public static class ChatCommands
             }
             else
             {
-                OrchestratorClient.Instance.SendEvent("RESPAWN",
-                    new { playerKey = pid, fromDepth = OrchestratorClient.Instance.InstanceDepth });
-                ChatPrivateReply.SendToPlayer(caller, "Respawning — moving to layer 1.");
+                RespawnThenMigrate(caller, pid);
             }
+        }
+
+        // 레이어 N: 사망 상태로 바로 마이그레이션하면 클라이언트가 사망/관전 UI 인 채로
+        // 월드를 재로드해 EventSystem NRE(UIUtil.GetEventSystemRaycastResults)가 발생한다(실측).
+        // 먼저 인플레이스 리스폰으로 살아난 뒤 마이그레이션해 정상 UI 경로를 타게 한다.
+        private static void RespawnThenMigrate(ScavPlayer caller, string pid)
+        {
+            int depth = OrchestratorClient.Instance.InstanceDepth;
+            if (!PerformInPlaceRespawn(caller, grantSupplies: false))
+            {
+                // 인플레이스 리스폰 실패 - 기존 동작(사망 상태 마이그레이션)으로 폴백
+                OrchestratorClient.Instance.SendEvent("RESPAWN",
+                    new { playerKey = pid, fromDepth = depth });
+                ChatPrivateReply.SendToPlayer(caller, "Respawning — moving to layer 1.");
+                return;
+            }
+
+            ChatPrivateReply.SendToPlayer(caller, "Respawning — moving to layer 1.");
+
+            // 클라가 revive 상태를 적용할 시간을 준 뒤 마이그레이션을 시작한다
+            CasualtiesTogetherUtils.Util.DelayCallLambda(0.6f, (Action)(() =>
+            {
+                if (caller == null || caller.body == null) return;
+                OrchestratorClient.Instance?.SendEvent("RESPAWN",
+                    new { playerKey = pid, fromDepth = depth });
+            }));
         }
 
         // Case B - 무로딩 인플레이스 리스폰. 세이브 폐기/세션 프레시화는 RESPAWN
         // 이벤트로 오케스트레이터에 비동기 전달 (로컬 리셋과 독립 - 순서 무관)
         private static void RespawnLocally(ScavPlayer caller)
         {
-            string pid = caller.GetPersistentId();
+            string pid = MigrationModule.PlayerKeyOf(caller);
             OrchestratorClient.Instance.SendEvent("RESPAWN", new { playerKey = pid, fromDepth = 1 });
+            if (PerformInPlaceRespawn(caller, grantSupplies: true))
+            {
+                ChatPrivateReply.SendToPlayer(caller, "You have respawned.");
+            }
+        }
+
+        // 인벤토리/착용 파괴 + 게임 내장 무로딩 리스폰(바디 재사용). 성공 시 true.
+        // grantSupplies=false: 곧바로 마이그레이션하는 경로(보급품은 목적지가 지급).
+        private static bool PerformInPlaceRespawn(ScavPlayer caller, bool grantSupplies)
+        {
+            if (caller == null || caller.body == null) return false;
 
             // 인벤토리/착용 파괴 (드랍 아님 - FREEZE와 동일 정책, 유령 아이템 원천 차단)
             // 주의 1: slots[i]=null 금지 - slots는 InventorySlot[] (컴포넌트 배열)이라 참조를
@@ -249,27 +284,31 @@ public static class ChatCommands
                 // level_transition:false - 드랍 경로 없음 (위에서 이미 파괴 - 중첩 안전)
                 caller.body.ResetMind(); // RespawnKeepSkills 규칙 무관 - 무조건 초기화
                 caller.Server_RespawnCharacter(Body_PlaceBody_MultiplayerPatch.SpawnLocation, level_transition: false);
-                ChatPrivateReply.SendToPlayer(caller, "You have respawned.");
 
-                // Object.Destroy는 프레임 말에 실제 반영 - 파괴가 끝나 슬롯이 비워진 뒤에
-                // 보급품을 지급한다 (같은 프레임 지급 시 옛 아이템 때문에 바닥에 드랍됨)
-                CasualtiesTogetherUtils.Util.DelayCallLambda(0.6f, (Action)(() =>
+                if (grantSupplies)
                 {
-                    if (caller == null || caller.body == null) return;
-                    try
+                    // Object.Destroy는 프레임 말에 실제 반영 - 파괴가 끝나 슬롯이 비워진 뒤에
+                    // 보급품을 지급한다 (같은 프레임 지급 시 옛 아이템 때문에 바닥에 드랍됨)
+                    CasualtiesTogetherUtils.Util.DelayCallLambda(0.6f, (Action)(() =>
                     {
-                        SaveModule.GrantStartingSupplies(caller.body, caller); // startingsupplies 런 규칙
-                    }
-                    catch (System.Exception ex2)
-                    {
-                        Plugin.Log.LogWarning($"[Respawn] {caller.playerName} 보급품 지급 실패: {ex2.Message}");
-                    }
-                }));
+                        if (caller == null || caller.body == null) return;
+                        try
+                        {
+                            SaveModule.GrantStartingSupplies(caller.body, caller); // startingsupplies 런 규칙
+                        }
+                        catch (System.Exception ex2)
+                        {
+                            Plugin.Log.LogWarning($"[Respawn] {caller.playerName} 보급품 지급 실패: {ex2.Message}");
+                        }
+                    }));
+                }
+                return true;
             }
             catch (System.Exception ex)
             {
                 Plugin.Log.LogWarning($"[Respawn] {caller.playerName} 리스폰 실패: {ex.Message}");
                 ChatPrivateReply.SendToPlayer(caller, "Respawn failed. Please contact an admin.");
+                return false;
             }
         }
     }
@@ -301,5 +340,5 @@ public static class ChatCommands
     }
 
     internal static ScavPlayer FindByPersistentId(string persistentId) =>
-        ScavPlayer.ClientIdToPlayerDict.Values.FirstOrDefault(p => p.GetPersistentId() == persistentId);
+        ScavPlayer.ClientIdToPlayerDict.Values.FirstOrDefault(p => MigrationModule.PlayerKeyOf(p) == persistentId || p.GetPersistentId() == persistentId);
 }

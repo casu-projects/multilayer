@@ -45,7 +45,7 @@ public static class AnnounceRelay
         OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
         {
             kind = KindDeath,
-            playerKey = plr.GetPersistentId(),
+            playerKey = MigrationModule.PlayerKeyOf(plr),
             name = plr.playerName,
             originInstance = OrchestratorClient.Instance.InstanceKey,
             text,
@@ -60,7 +60,7 @@ public static class AnnounceRelay
         OrchestratorClient.Instance?.SendEvent("ANNOUNCE", new
         {
             kind,
-            playerKey = plr.GetPersistentId(),
+            playerKey = MigrationModule.PlayerKeyOf(plr),
             name = plr.playerName,
             originInstance = OrchestratorClient.Instance.InstanceKey,
             text,
@@ -135,7 +135,7 @@ public static class AnnounceRelay
         if (string.IsNullOrEmpty(playerKey)) return null;
         foreach (ScavPlayer p in ScavPlayer.ClientIdToPlayerDict.Values)
         {
-            if (p.GetPersistentId() == playerKey)
+            if (MigrationModule.PlayerKeyOf(p) == playerKey || p.GetPersistentId() == playerKey)
                 return p.playerId;
         }
         return null;

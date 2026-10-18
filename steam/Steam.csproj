@@ -21,7 +21,7 @@
       <Private>true</Private>
     </Reference>
     <Reference Include="Steamworks">
-      <HintPath>../third_party/steamworks/Steamworks.NET.dll</HintPath>
+      <HintPath>../../assets/dependency/casualties-together/Steamworks.NET.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

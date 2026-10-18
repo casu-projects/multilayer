@@ -26,7 +26,7 @@ mv "$TMP/CasuMpSteam"  "$DIST/casu-steam"
 [ -f "$TMP/steam_appid.txt" ] && mv "$TMP/steam_appid.txt" "$DIST/"
 [ -f "$ROOT/../assets/dependency/casualties-together/libsteam_api.so" ] && cp "$ROOT/../assets/dependency/casualties-together/libsteam_api.so" "$DIST/"
 
-SWNET="$ROOT/third_party/steamworks/Steamworks.NET.dll"
+SWNET="$ROOT/../assets/dependency/casualties-together/Steamworks.NET.dll"
 if [ ! -f "$SWNET" ]; then
   echo "오류: $SWNET 없음 — Linux Pack=4 Steamworks.NET.dll이 필요합니다." >&2
   exit 1

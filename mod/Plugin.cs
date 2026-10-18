@@ -21,6 +21,8 @@ public class Plugin : BaseUnityPlugin
 
         gameObject.AddComponent<OrchestratorClient>();
         gameObject.AddComponent<MigrationModule>();
+        gameObject.AddComponent<MapModule>();
+        gameObject.AddComponent<ObjectIndexModule>();
         ChatRelay.Init();
 
         Log.LogInfo($"CasuMod v0.1.0 loaded — {HarmonyInstance.GetPatchedMethods().Count()} method(s) patched.");

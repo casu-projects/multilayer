@@ -8,6 +8,7 @@ namespace CasuMpServer;
 internal static class Log
 {
     private static Action<string>? _relay;
+    internal static Action<string>? Capture;
 
     public static void Init(Action<string>? relay)
     {
@@ -23,8 +24,11 @@ internal static class Log
     public static void ConsoleOnly(string message) =>
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss} server] {message}");
 
-    public static void Relay(string message) =>
+    public static void Relay(string message)
+    {
         _relay?.Invoke($"[{DateTime.Now:HH:mm:ss} server] {message}");
+        Capture?.Invoke(message);
+    }
 
     public static void Info(string message) => Serilog.Log.Information("{Line}", message);
 
@@ -50,6 +54,7 @@ internal static class Log
             string line = $"[{logEvent.Timestamp:HH:mm:ss} server] {message}";
             Console.WriteLine(line);
             _relay?.Invoke(line);
+            Capture?.Invoke(message);
         }
     }
 }

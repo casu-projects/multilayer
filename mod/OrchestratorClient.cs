@@ -146,6 +146,15 @@ public sealed class OrchestratorClient : MonoBehaviour
             case MessageTypes.PlayerDataResponse:
                 SaveModule.HandlePlayerDataResponse(msg);
                 break;
+            case MessageTypes.PlayerDetailRequest:
+                PlayerDetailModule.HandleRequest(msg.PayloadAs<PlayerDetailRequest>());
+                break;
+            case MessageTypes.ObjectQuery:
+                ObjectIndexModule.Instance?.HandleQuery(msg.PayloadAs<MapObjectQueryRequest>());
+                break;
+            case MessageTypes.ObjectDetailRequest:
+                ObjectIndexModule.Instance?.HandleDetail(msg.PayloadAs<MapObjectDetailRequest>());
+                break;
             case MessageTypes.ModHelloAck:
                 break;
             case MessageTypes.RunRulesState:

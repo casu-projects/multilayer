@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CasuMP World Map</title>
+<link rel="icon" type="image/png" sizes="64x64" href="favicon.png?v=geofruit">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="app">
+  <section class="map-panel">
+    <div id="mapViewport" class="map-viewport">
+      <div id="mapScaler" class="map-scaler">
+        <img id="mapImage" class="map-image" alt="">
+        <canvas id="mapCanvas" class="map-canvas"></canvas>
+      </div>
+      <canvas id="objectCanvas" class="object-canvas"></canvas>
+      <div id="spawnMarker" class="spawn-marker hidden">
+        <span class="spawn-symbol">
+          <span class="spawn-pole"></span>
+          <span class="spawn-cloth"></span>
+        </span>
+        <span class="spawn-label">SPAWN</span>
+      </div>
+      <div id="markers" class="markers"></div>
+    </div>
+    <div id="empty" class="empty">월드 데이터를 기다리는 중...</div>
+  </section>
+
+  <nav id="layers" class="layer-rail" aria-label="레이어 선택"></nav>
+
+  <div class="zoom-controls" aria-label="지도 줌">
+    <button id="zoomIn" type="button" title="확대">+</button>
+    <button id="zoomOut" type="button" title="축소">−</button>
+    <button id="zoomReset" type="button" title="화면 맞춤">⤢</button>
+    <button id="steamToggle" type="button" class="active" aria-pressed="true" title="Steam 프로필 이미지 표시" aria-label="Steam 프로필 이미지 표시">S</button>
+    <button id="objectFilterButton" type="button" title="오브젝트 필터" aria-label="오브젝트 필터" aria-pressed="false">F</button>
+    <button id="chatToggle" type="button" class="active" title="채팅창 표시/숨김" aria-label="채팅창 표시/숨김" aria-pressed="true" aria-controls="chatPanel">C</button>
+    <button id="usersToggle" type="button" class="active" title="유저 목록 표시/숨김" aria-label="유저 목록 표시/숨김" aria-pressed="true" aria-controls="userPanel">U</button>
+  </div>
+
+  <div id="objectFilterPanel" class="object-filter-panel hidden">
+    <div class="object-filter-head">오브젝트 필터</div>
+    <div class="object-filter-section-head">
+      <span>이름</span>
+      <span class="object-filter-actions">
+        <button id="objectFilterAllOn" type="button">전체 켜기</button>
+        <button id="objectFilterAllOff" type="button">전체 끄기</button>
+      </span>
+    </div>
+    <div id="objectFilterList" class="object-filter-list"></div>
+  </div>
+
+  <section id="userPanel" class="user-panel" aria-label="유저 목록">
+    <div class="user-panel-head"><span>유저</span><span id="userCount">0명</span></div>
+    <div id="userList" class="user-list"></div>
+  </section>
+
+  <section id="chatPanel" class="chat-panel" aria-label="웹 채팅">
+    <div id="chatHistory" class="chat-history" aria-live="polite"></div>
+    <div id="chatAutocomplete" class="chat-autocomplete hidden"></div>
+    <form id="chatForm" class="chat-form">
+      <input id="chatInput" type="text" maxlength="150" autocomplete="off" placeholder="메시지 입력...">
+      <button type="submit" id="chatSend">전송</button>
+    </form>
+  </section>
+
+  <aside id="detailDrawer" class="detail-drawer" aria-label="플레이어 상세">
+    <div class="detail-head">
+      <div class="detail-person">
+        <div id="detailHead" class="detail-head-img"></div>
+        <div class="detail-person-text">
+          <div id="detailName" class="detail-name">플레이어</div>
+          <div id="detailSub" class="detail-sub"></div>
+        </div>
+      </div>
+      <button id="detailClose" class="detail-close" type="button" aria-label="닫기">×</button>
+    </div>
+    <div id="detailBody" class="detail-body">
+      <div id="playerDetail">
+        <section class="detail-section">
+          <h3>건강</h3>
+          <div id="detailHealth" class="health-grid"></div>
+        </section>
+        <section class="detail-section">
+          <h3>스킬</h3>
+          <div id="detailSkills" class="skill-list"></div>
+        </section>
+        <section class="detail-section">
+          <h3>림브</h3>
+          <div id="detailLimbs" class="limb-list"></div>
+        </section>
+        <section class="detail-section">
+          <h3>인벤토리</h3>
+          <div id="detailInventory" class="inventory-list"></div>
+        </section>
+      </div>
+      <div id="objectDetail" class="object-detail hidden">
+        <section class="detail-section">
+          <h3>오브젝트</h3>
+          <div id="objectInfo" class="object-info"></div>
+        </section>
+        <section id="traderSection" class="detail-section hidden">
+          <h3>트레이더</h3>
+          <div id="traderInfo" class="object-info"></div>
+        </section>
+        <section id="traderStockSection" class="detail-section hidden">
+          <h3>판매 아이템</h3>
+          <div id="traderStock" class="inventory-list"></div>
+        </section>
+      </div>
+    </div>
+  </aside>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

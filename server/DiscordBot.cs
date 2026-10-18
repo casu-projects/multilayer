@@ -238,6 +238,15 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(text: $"[{layer}] **{playerName}**: {message}");
     }
 
+    internal async Task SendWebChatAsync(string message)
+    {
+        if (!IsConnected) return;
+        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
+        if (channel == null) return;
+
+        await channel.SendMessageAsync(text: $"[WEB] {message}");
+    }
+
     internal async Task UpdatePlayerCountTopicAsync(string text)
     {
         if (!IsConnected || _channelId == 0) return;

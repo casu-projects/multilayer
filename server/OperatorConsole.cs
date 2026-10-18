@@ -14,7 +14,7 @@ public static class LockdownState
 
 public sealed class OperatorConsole
 {
-    private readonly ConcurrentQueue<string> _pendingLines = new();
+    private readonly ConcurrentQueue<(string Line, Action<string>? Output)> _pendingLines = new();
     private readonly ControlHub _hub;
     private readonly ClientGateway _gateway;
     private readonly PlayerSessionStore _sessions;
@@ -103,25 +103,52 @@ public sealed class OperatorConsole
             if (line == null) return;
             if (!string.IsNullOrWhiteSpace(line))
             {
-                _pendingLines.Enqueue(line.Trim());
+                _pendingLines.Enqueue((line.Trim(), null));
             }
         }
     }
 
     public void Tick()
     {
-        while (_pendingLines.TryDequeue(out string? line))
+        while (_pendingLines.TryDequeue(out (string Line, Action<string>? Output) item))
         {
-            Execute(line);
+            var captured = new List<string>();
+            Action<string>? previousCapture = Log.Capture;
+            if (item.Output != null)
+                Log.Capture = message =>
+                {
+                    if (!string.IsNullOrWhiteSpace(message)) captured.Add(message);
+                };
+            try
+            {
+                Execute(item.Line);
+            }
+            finally
+            {
+                Log.Capture = previousCapture;
+            }
+            item.Output?.Invoke(string.Join(Environment.NewLine, captured));
         }
     }
 
-    internal void SubmitLine(string line)
+    internal void SubmitLine(string line) => SubmitLine(line, null);
+
+    internal void SubmitLine(string line, Action<string>? output)
     {
         if (!string.IsNullOrWhiteSpace(line))
         {
-            _pendingLines.Enqueue(line.Trim());
+            _pendingLines.Enqueue((line.Trim(), output));
         }
+    }
+
+    internal IReadOnlyList<ConsoleCommand> GetCommands() =>
+        _registry.All.OrderBy(command => command.Name, StringComparer.Ordinal).ToList();
+
+    internal Task<string> ExecuteForWebAsync(string line)
+    {
+        var source = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        SubmitLine(line, output => source.TrySetResult(output));
+        return source.Task;
     }
 
     private void Execute(string line)
@@ -190,17 +217,29 @@ public sealed class OperatorConsole
 
     private void CmdKick(string[] args)
     {
-        if (TryResolvePlayer(string.Join(" ", args), out PlayerKey kick)) _kickAction(kick.Value, "Kicked by operator.");
+        if (TryResolvePlayer(string.Join(" ", args), out PlayerKey kick))
+        {
+            _kickAction(kick.Value, "Kicked by operator.");
+            Log.Info($"추방 요청: {kick.Value}");
+        }
     }
 
     private void CmdBan(string[] args)
     {
-        if (TryResolvePlayer(string.Join(" ", args), out PlayerKey ban)) _banAction(ban.Value, null);
+        if (TryResolvePlayer(string.Join(" ", args), out PlayerKey ban))
+        {
+            _banAction(ban.Value, null);
+            Log.Info($"차단 요청: {ban.Value}");
+        }
     }
 
     private void CmdUnban(string[] args)
     {
-        if (TryResolvePlayer(string.Join(" ", args), out PlayerKey unban)) _banAction(unban.Value, "unban");
+        if (TryResolvePlayer(string.Join(" ", args), out PlayerKey unban))
+        {
+            _banAction(unban.Value, "unban");
+            Log.Info($"차단 해제 요청: {unban.Value}");
+        }
     }
 
     private void CmdConnections(string[] args)
@@ -281,7 +320,13 @@ public sealed class OperatorConsole
 
     private void CmdClear(string[] args) => AnsiConsole.Clear();
 
-    private void CmdExec(string[] args) => HandleRun(string.Join(" ", args));
+    private void CmdExec(string[] args)
+    {
+        string command = string.Join(" ", args);
+        HandleRun(command);
+        if (!string.IsNullOrWhiteSpace(command))
+            Log.Info($"콘솔 명령 전달: {command.Trim()}");
+    }
 
     private void CmdRule(string[] args) => HandleSet("rule", string.Join(" ", args), isRun: false);
 

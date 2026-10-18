@@ -14,10 +14,19 @@ internal sealed class ModMessageHandler
     private readonly VoteService voteService;
     private readonly DiscordBot discordBot;
     private readonly LobbyMetadataService lobby;
+    private readonly WorldSnapshotStore mapStore;
+    private readonly PlayerDetailRegistry playerDetails;
+    private readonly ChatHistoryStore chatHistory;
+    private readonly ObjectBackgroundStore objectBackgrounds;
+    private readonly RequestRegistry<MapObjectQueryResponse> objectQueries;
+    private readonly RequestRegistry<MapObjectDetailResponse> objectDetails;
 
     public ModMessageHandler(ControlHub hub, PlayerSessionStore sessions, InstanceManager instances,
         MigrationCoordinator migrations, PlayerDataStore dataStore, RunRuleStore runRules,
-        VoteService voteService, DiscordBot discordBot, LobbyMetadataService lobby)
+        VoteService voteService, DiscordBot discordBot, LobbyMetadataService lobby,
+        WorldSnapshotStore mapStore, PlayerDetailRegistry playerDetails, ChatHistoryStore chatHistory,
+        ObjectBackgroundStore objectBackgrounds, RequestRegistry<MapObjectQueryResponse> objectQueries,
+        RequestRegistry<MapObjectDetailResponse> objectDetails)
     {
         this.hub = hub;
         this.sessions = sessions;
@@ -28,12 +37,43 @@ internal sealed class ModMessageHandler
         this.voteService = voteService;
         this.discordBot = discordBot;
         this.lobby = lobby;
+        this.mapStore = mapStore;
+        this.playerDetails = playerDetails;
+        this.chatHistory = chatHistory;
+        this.objectBackgrounds = objectBackgrounds;
+        this.objectQueries = objectQueries;
+        this.objectDetails = objectDetails;
     }
 
     public void Dispatch(ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
+            case MessageTypes.PlayerPositions:
+                if (msg.PayloadAs<PlayerPositionsPayload>() is { } positions)
+                {
+                    if (string.IsNullOrEmpty(positions.InstanceKey))
+                        positions.InstanceKey = conn.InstanceKey ?? "";
+                    mapStore.UpdatePlayers(positions);
+                }
+                break;
+            case MessageTypes.PlayerDetailResponse:
+                if (msg.PayloadAs<PlayerDetailResponse>() is { } detail)
+                    playerDetails.Resolve(detail);
+                break;
+            case MessageTypes.ObjectQueryResponse:
+                if (msg.PayloadAs<MapObjectQueryResponse>() is { } objectQuery)
+                    objectQueries.Resolve(objectQuery.RequestId, objectQuery);
+                break;
+            case MessageTypes.ObjectDetailResponse:
+                if (msg.PayloadAs<MapObjectDetailResponse>() is { } objectDetail)
+                    objectDetails.Resolve(objectDetail.RequestId, objectDetail);
+                break;
+            case MessageTypes.ObjectBackgrounds:
+                if (msg.PayloadAs<MapBackgroundPayload>() is { } backgroundPayload
+                    && !string.IsNullOrEmpty(backgroundPayload.InstanceKey))
+                    objectBackgrounds.Set(backgroundPayload.InstanceKey, backgroundPayload.Objects);
+                break;
             case MessageTypes.InstanceReady:
                 if (msg.PayloadAs<InstanceReadyPayload>() is { } ready
                     && instances.OnInstanceReady(ready.InstanceKey))
@@ -90,6 +130,8 @@ internal sealed class ModMessageHandler
                 if (msg.PayloadAs<ChatPayload>() is { } chat && !string.IsNullOrEmpty(chat.Speaker))
                 {
                     string layerLabel = $"L{conn.InstanceDepth}";
+                    if (chat.Speaker != "*")
+                        chatHistory.Add("game", chat.Speaker, layerLabel, chat.Color ?? "", chat.Message);
                     int forwarded = 0;
                     foreach (ControlHub.ClientConnection other in hub.Connections
                         .Where(c => c.Kind == ClientKind.Mod && !c.Closed && c != conn))

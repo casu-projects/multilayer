@@ -26,6 +26,12 @@ internal static class Program
             ctx => { ctx.Cancel = true; shutdownCts.Cancel(); });
 
         var hub = new ControlHub(config, cts.Token);
+        var mapStore = new WorldSnapshotStore();
+        var playerDetails = new PlayerDetailRegistry();
+        var chatHistory = new ChatHistoryStore();
+        var objectBackgrounds = new ObjectBackgroundStore();
+        var objectQueries = new RequestRegistry<MapObjectQueryResponse>();
+        var objectDetails = new RequestRegistry<MapObjectDetailResponse>();
         var runRules = new RunRuleStore(config.RunTablePath, config.RuleTablePath);
         var instances = new InstanceManager(config, hub);
         var gateway = new ClientGateway(config);
@@ -83,6 +89,7 @@ internal static class Program
             config.DiscordConsoleChannelId, config.DiscordAdminUserId,
             (username, text) =>
             {
+                chatHistory.Add("discord", username, "", "", text);
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
                     hub.SendNoAck(conn, MessageTypes.Chat, new { speaker = username, message = text, color = "", layer = "", prefix = "D", prefixColor = "#5865F2" });
@@ -119,7 +126,7 @@ internal static class Program
             gateway.UpdateServerInfo(config.ServerName + " [MNT]", config.ServerPassword, config.MaxPlayers);
         }
 
-        var modHandler = new ModMessageHandler(hub, sessions, instances, migrations, dataStore, runRules, voteService, discordBot, lobby);
+        var modHandler = new ModMessageHandler(hub, sessions, instances, migrations, dataStore, runRules, voteService, discordBot, lobby, mapStore, playerDetails, chatHistory, objectBackgrounds, objectQueries, objectDetails);
 
         discordBot.OnReady = () =>
         {
@@ -173,7 +180,24 @@ internal static class Program
             lobby.RefreshTopic();
         };
 
+        var webChat = new WebChatService(chatHistory, hub, discordBot, console);
         _ = discordBot.StartAsync();
+
+        MapWebServer? mapWeb = null;
+        if (config.WebEnabled)
+        {
+            try
+            {
+                mapWeb = MapWebServer.Create(config, mapStore, steamApi, hub, playerDetails, chatHistory, webChat, objectBackgrounds, objectQueries, objectDetails);
+                mapWeb.StartAsync().GetAwaiter().GetResult();
+                Log.Info($"맵 웹 시작: {config.WebListen}");
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"맵 웹 시작 실패: {ex.Message}");
+                mapWeb = null;
+            }
+        }
 
         var direct = new DirectIpAdapter(config, gateway);
         direct.Start();
@@ -202,7 +226,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, voteService, discordBot, lobby, modHandler, conn, msg);
+                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, voteService, discordBot, lobby, modHandler, mapStore, objectBackgrounds, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -242,7 +266,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, voteService, discordBot, lobby, modHandler, conn, msg);
+                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, voteService, discordBot, lobby, modHandler, mapStore, objectBackgrounds, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -261,6 +285,11 @@ internal static class Program
         direct.Stop();
         steamBridge?.Stop();
         steamApi?.Dispose();
+        if (mapWeb != null)
+        {
+            try { mapWeb.StopAsync().GetAwaiter().GetResult(); } catch { }
+            try { mapWeb.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+        }
         hub.Stop();
         cts.Cancel();
     }
@@ -281,8 +310,8 @@ internal static class Program
     private static void Dispatch(ControlHub hub, PlayerSessionStore sessions,
         InstanceManager instances, MigrationCoordinator migrations, PlayerDataStore dataStore,
         BanList banList, RunRuleStore runRules, VoteService voteService, DiscordBot discordBot,
-        LobbyMetadataService lobby, ModMessageHandler modHandler,
-        ControlHub.ClientConnection conn, ControlMessage msg)
+        LobbyMetadataService lobby, ModMessageHandler modHandler, WorldSnapshotStore mapStore,
+        ObjectBackgroundStore objectBackgrounds, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
@@ -308,6 +337,7 @@ internal static class Program
                 conn.InstancePort = mod.Port;
                 conn.InstanceDepth = mod.Depth;
                 instances.OnModHello(conn, mod); // 인스턴스 연결 등록/READY 보고
+                mapStore.RegisterInstance(mod.InstanceKey, mod.Depth);
                 hub.SendNoAck(conn, MessageTypes.ModHelloAck, new { ok = true });
                 hub.SendNoAck(conn, MessageTypes.RunRulesState, // 규칙 초기 푸시
                     new { runSettings = runRules.RunSnapshot, rules = runRules.RuleSnapshot });
@@ -332,7 +362,7 @@ internal static class Program
         switch (conn.Kind)
         {
             case ClientKind.Agent:
-                DispatchAgent(instances, sessions, conn, msg);
+                DispatchAgent(instances, sessions, mapStore, objectBackgrounds, conn, msg);
                 break;
             case ClientKind.Mod:
                 modHandler.Dispatch(conn, msg);
@@ -341,6 +371,7 @@ internal static class Program
     }
 
     private static void DispatchAgent(InstanceManager instances, PlayerSessionStore sessions,
+        WorldSnapshotStore mapStore, ObjectBackgroundStore objectBackgrounds,
         ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
@@ -350,6 +381,8 @@ internal static class Program
                 {
                     instances.OnInstanceExited(exited.InstanceKey, exited.Code);
                     sessions.OnInstanceExited(exited.InstanceKey);
+                    mapStore.RemoveInstance(exited.InstanceKey);
+                    objectBackgrounds.Remove(exited.InstanceKey);
                 }
                 break;
             default:

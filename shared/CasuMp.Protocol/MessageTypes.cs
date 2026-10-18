@@ -56,4 +56,12 @@ public static class MessageTypes
     public const string VoteRejected = "VOTE_REJECTED";
 
     public const string RunRulesState = "RUN_RULES_STATE";
+    public const string PlayerPositions = "PLAYER_POSITIONS";
+    public const string PlayerDetailRequest = "PLAYER_DETAIL_REQUEST";
+    public const string PlayerDetailResponse = "PLAYER_DETAIL_RESPONSE";
+    public const string ObjectQuery = "OBJECT_QUERY";
+    public const string ObjectQueryResponse = "OBJECT_QUERY_RESPONSE";
+    public const string ObjectDetailRequest = "OBJECT_DETAIL_REQUEST";
+    public const string ObjectDetailResponse = "OBJECT_DETAIL_RESPONSE";
+    public const string ObjectBackgrounds = "OBJECT_BACKGROUNDS";
 }

@@ -34,9 +34,24 @@ fi
 cp "$SWNET" "$DIST/"
 rm -rf "$TMP"
 
+echo "── map wwwroot..."
+rm -rf "$DIST/map"
+mkdir -p "$DIST/map"
+cp -r "$ROOT/server/map/wwwroot" "$DIST/map/"
+
 echo "── mod 빌드..."
-(cd "$ROOT/mod" && dotnet build -c Release -p:DebugType=None 2>&1 | tail -1)
+MOD_LOG="$DIST/.mod-build.log"
+rm -f "$ROOT/mod/bin/Release/CasuMod.dll"
+(cd "$ROOT/mod" && dotnet build -c Release -p:DebugType=None >"$MOD_LOG" 2>&1)
+MOD_RC=$?
+if [ "$MOD_RC" -ne 0 ] || [ ! -f "$ROOT/mod/bin/Release/CasuMod.dll" ]; then
+  tail -40 "$MOD_LOG" >&2
+  echo "오류: mod 빌드 실패" >&2
+  exit 1
+fi
+tail -1 "$MOD_LOG"
 cp "$ROOT/mod/bin/Release/CasuMod.dll" "$DIST/"
+rm -f "$MOD_LOG"
 
 [ -f "$DIST/run.json" ]  || cp "$ROOT/../assets/multilayer-default-jsons/run.json"  "$DIST/"
 [ -f "$DIST/rule.json" ] || cp "$ROOT/../assets/multilayer-default-jsons/rule.json" "$DIST/"

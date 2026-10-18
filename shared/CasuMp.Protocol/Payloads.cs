@@ -81,6 +81,7 @@ public sealed class ChatPayload
     public string Layer { get; set; } = "";
     public string Prefix { get; set; } = "";
     public string PrefixColor { get; set; } = "";
+    public bool Web { get; set; }
 }
 
 public sealed class ListRequestPayload

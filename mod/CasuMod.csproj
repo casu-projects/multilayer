@@ -49,6 +49,10 @@
       <HintPath>$(GameDepsDir)Managed/UnityEngine.TilemapModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.GridModule">
+      <HintPath>$(GameDepsDir)Managed/UnityEngine.GridModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Newtonsoft.Json">
       <HintPath>$(GameDepsDir)Managed/Newtonsoft.Json.dll</HintPath>
       <Private>false</Private>

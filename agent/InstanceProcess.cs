@@ -62,6 +62,7 @@ public sealed class InstanceProcess
         psi.Environment["CASU_INSTANCE_KEY"] = payload.InstanceKey;
         psi.Environment["CASU_PORT"] = payload.Port.ToString();
         psi.Environment["CASU_ORCH_ADDR"] = config.OrchestratorAddr;
+        MapEnvironment.ApplyTo(psi, config);
 
         try
         {

@@ -46,6 +46,12 @@ public sealed class ServerConfig
 
     public string SteamApiUrl { get; set; } = "http://127.0.0.1:17910";
 
+    public bool WebEnabled { get; set; } = true;
+
+    public string WebListen { get; set; } = "http://0.0.0.0:17920";
+
+    public string WebUploadToken { get; set; } = "";
+
     public double BackendRetryIntervalSeconds { get; set; } = 0.5;
 
     public int BackendMaxRetries { get; set; } = 600;

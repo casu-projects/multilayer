@@ -36,6 +36,7 @@ public sealed class LobbyCatalog
     public const uint AppId = 4576510;
 
     private const string KeyPrefix = "COOP_MOD_";
+    private const string LegacyKeyPrefix = "CASUALTIESUNKNOWN_KROKOSHA_MULTIPLAYER_COOP_MOD_";
     private const string SuffixLobbyName = "LOBBYNAME";
     private const string SuffixDescription = "DESCRIPTION";
     private const string SuffixVersion = "VERSION";
@@ -52,6 +53,9 @@ public sealed class LobbyCatalog
     private const string SuffixExtraData = "EXTRADATA";
 
     private const int ExtraDataOffset = 112;
+    private const int LegacyExtraDataOffset = 100;
+    private const ulong MinSteamId = 76561197960265728UL;
+    private const ulong MaxSteamId = 76561202255233023UL;
 
     private readonly HttpClient _http = new();
     private readonly ConcurrentDictionary<ulong, PlayerSummary> _playerCache = new();
@@ -95,7 +99,7 @@ public sealed class LobbyCatalog
     }
 
     public async Task<LobbyListResponse> BuildAsync(SteamMatchmaking.GetLobbyListCallback callback,
-        string? versionFilter, string? webApiKey)
+        string? webApiKey)
     {
         if (callback.Result != EResult.OK)
         {
@@ -106,18 +110,6 @@ public sealed class LobbyCatalog
         if (callback.Lobbies.Count == 0)
         {
             return new LobbyListResponse(0, new List<LobbyInfo>());
-        }
-
-        if (!string.IsNullOrWhiteSpace(versionFilter))
-        {
-            lobbies = lobbies
-                .Where(l => (Meta(l.Metadata, SuffixVersion) ?? "")
-                    .Contains(versionFilter, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (lobbies.Count == 0)
-            {
-                return new LobbyListResponse(0, new List<LobbyInfo>());
-            }
         }
 
         var allSteamIds = new HashSet<ulong>();
@@ -196,8 +188,16 @@ public sealed class LobbyCatalog
         return new LobbyListResponse(totalPlayers, infos);
     }
 
-    private static string? Meta(IReadOnlyDictionary<string, string> metadata, string suffix) =>
-        metadata.TryGetValue(KeyPrefix + suffix, out string? value) && !string.IsNullOrEmpty(value) ? value : null;
+    private static string? Meta(IReadOnlyDictionary<string, string> metadata, string suffix)
+    {
+        if (metadata.TryGetValue(KeyPrefix + suffix, out string? value) && !string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+        return metadata.TryGetValue(LegacyKeyPrefix + suffix, out value) && !string.IsNullOrEmpty(value)
+            ? value
+            : null;
+    }
 
     private static ExtraData DecodeExtraData(string base64)
     {
@@ -239,52 +239,65 @@ public sealed class LobbyCatalog
                 decompressed = outStream.ToArray();
             }
 
-            int offset = ExtraDataOffset;
-            if (offset + 2 > decompressed.Length) return new ExtraData(Array.Empty<ulong>(), Array.Empty<string>());
-            int steamIdCount = BitConverter.ToUInt16(decompressed, offset);
-            offset += 2;
-
-            if (steamIdCount <= 0 || offset + steamIdCount * 8 > decompressed.Length)
-                return new ExtraData(Array.Empty<ulong>(), Array.Empty<string>());
-
-            var ids = new ulong[steamIdCount];
-            for (int i = 0; i < steamIdCount; i++)
-            {
-                ids[i] = BitConverter.ToUInt64(decompressed, offset);
-                offset += 8;
-            }
-
-            if (offset + 1 > decompressed.Length) return new ExtraData(ids, Array.Empty<string>());
-            offset += 1;
-
-            if (offset + 2 > decompressed.Length) return new ExtraData(ids, Array.Empty<string>());
-            int modCount = BitConverter.ToUInt16(decompressed, offset);
-            offset += 2;
-
-            var mods = new string[modCount];
-            for (int i = 0; i < modCount; i++)
-            {
-                if (offset >= decompressed.Length) break;
-                int strLen = 0;
-                int shift = 0;
-                while (offset < decompressed.Length)
-                {
-                    byte b = decompressed[offset++];
-                    strLen |= (b & 0x7F) << shift;
-                    if ((b & 0x80) == 0) break;
-                    shift += 7;
-                }
-                if (offset + strLen > decompressed.Length) break;
-                mods[i] = System.Text.Encoding.UTF8.GetString(decompressed, offset, strLen);
-                offset += strLen;
-            }
-
-            return new ExtraData(ids, mods);
+            return TryDecodeExtraData(decompressed, ExtraDataOffset)
+                ?? TryDecodeExtraData(decompressed, LegacyExtraDataOffset)
+                ?? new ExtraData(Array.Empty<ulong>(), Array.Empty<string>());
         }
         catch
         {
             return new ExtraData(Array.Empty<ulong>(), Array.Empty<string>());
         }
+    }
+
+    private static ExtraData? TryDecodeExtraData(byte[] data, int offset)
+    {
+        if (offset < 0 || offset + 2 > data.Length) return null;
+
+        int steamIdCount = BitConverter.ToUInt16(data, offset);
+        if (steamIdCount <= 0 || steamIdCount > 256) return null;
+
+        offset += 2;
+        if (offset + steamIdCount * 8 > data.Length) return null;
+
+        var ids = new ulong[steamIdCount];
+        for (int i = 0; i < steamIdCount; i++)
+        {
+            ulong id = BitConverter.ToUInt64(data, offset);
+            if (id < MinSteamId || id > MaxSteamId) return null;
+            ids[i] = id;
+            offset += 8;
+        }
+
+        if (offset + 1 > data.Length) return new ExtraData(ids, Array.Empty<string>());
+        offset++;
+
+        var mods = new List<string>();
+        if (offset + 2 > data.Length) return new ExtraData(ids, mods.ToArray());
+
+        int modCount = BitConverter.ToUInt16(data, offset);
+        offset += 2;
+        if (modCount > 256) return new ExtraData(ids, mods.ToArray());
+
+        for (int i = 0; i < modCount; i++)
+        {
+            if (offset + 2 > data.Length) break;
+
+            int rawLength = BitConverter.ToUInt16(data, offset);
+            offset += 2;
+            if (rawLength == 0)
+            {
+                mods.Add(string.Empty);
+                continue;
+            }
+
+            int byteLength = rawLength - 1;
+            if (offset + byteLength > data.Length) break;
+
+            mods.Add(System.Text.Encoding.UTF8.GetString(data, offset, byteLength));
+            offset += byteLength;
+        }
+
+        return new ExtraData(ids, mods.ToArray());
     }
 
     private async Task FetchPlayerSummaries(IEnumerable<ulong> steamIds, string webApiKey)

@@ -18,11 +18,11 @@ internal static class RestApi
                 : Results.Json(new { avatarFull = avatar });
         });
 
-        app.MapGet("/api/lobbies", async (SteamService service, string? filter, CancellationToken ct) =>
+        app.MapGet("/api/lobbies", async (SteamService service, CancellationToken ct) =>
         {
             try
             {
-                LobbyListResponse result = await service.GetLobbiesAsync(filter, ct);
+                LobbyListResponse result = await service.GetLobbiesAsync(ct);
                 return Results.Json(result);
             }
             catch (InvalidOperationException ex)

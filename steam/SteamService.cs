@@ -76,10 +76,10 @@ public sealed class SteamService
 
     public void Reload() => _actions.Enqueue(() => _lobby.Recycle());
 
-    public async Task<LobbyListResponse> GetLobbiesAsync(string? versionFilter, CancellationToken ct)
+    public async Task<LobbyListResponse> GetLobbiesAsync(CancellationToken ct)
     {
         SteamKit2.SteamMatchmaking.GetLobbyListCallback callback = await _lobby.GetLobbyListAsync(ct);
-        return await _catalog.BuildAsync(callback, versionFilter, _config.WebApiKey);
+        return await _catalog.BuildAsync(callback, _config.WebApiKey);
     }
 
     public Task<string?> GetAvatarAsync(ulong steamId, CancellationToken ct) =>

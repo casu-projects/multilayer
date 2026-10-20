@@ -86,7 +86,7 @@ internal static class Program
         Console.WriteLine("REST API (127.0.0.1):");
         Console.WriteLine("  GET  /api/status");
         Console.WriteLine("  GET  /api/health");
-        Console.WriteLine("  GET  /api/lobbies?filter=");
+        Console.WriteLine("  GET  /api/lobbies");
         Console.WriteLine("  GET  /api/steam/avatar/{steamId}");
         Console.WriteLine("  POST /api/login                { username, password, preferCode? }");
         Console.WriteLine("                                 preferCode=true면 모바일 승인 대신 코드 입력");

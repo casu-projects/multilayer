@@ -24,6 +24,7 @@ internal sealed class MapWebServer : IAsyncDisposable
     private readonly ObjectBackgroundStore _objectBackgrounds;
     private readonly RequestRegistry<MapObjectQueryResponse> _objectQueries;
     private readonly RequestRegistry<MapObjectDetailResponse> _objectDetails;
+    private readonly InstanceManager _instances;
     private readonly GameAssetCatalog _assets;
     private readonly MapRenderer _renderer;
     private readonly ConcurrentDictionary<ulong, (string? Url, DateTime At)> _avatarCache = new();
@@ -32,7 +33,7 @@ internal sealed class MapWebServer : IAsyncDisposable
         SteamApiClient? steamApi, ControlHub? hub, PlayerDetailRegistry playerDetails,
         ChatHistoryStore chatHistory, WebChatService webChat,
         ObjectBackgroundStore objectBackgrounds, RequestRegistry<MapObjectQueryResponse> objectQueries,
-        RequestRegistry<MapObjectDetailResponse> objectDetails, GameAssetCatalog assets)
+        RequestRegistry<MapObjectDetailResponse> objectDetails, InstanceManager instances, GameAssetCatalog assets)
     {
         _app = app;
         _store = store;
@@ -45,6 +46,7 @@ internal sealed class MapWebServer : IAsyncDisposable
         _objectBackgrounds = objectBackgrounds;
         _objectQueries = objectQueries;
         _objectDetails = objectDetails;
+        _instances = instances;
         _assets = assets;
         _renderer = new MapRenderer(assets);
     }
@@ -52,7 +54,7 @@ internal sealed class MapWebServer : IAsyncDisposable
     internal static MapWebServer Create(ServerConfig config, WorldSnapshotStore store, SteamApiClient? steamApi,
         ControlHub? hub, PlayerDetailRegistry playerDetails, ChatHistoryStore chatHistory, WebChatService webChat,
         ObjectBackgroundStore objectBackgrounds, RequestRegistry<MapObjectQueryResponse> objectQueries,
-        RequestRegistry<MapObjectDetailResponse> objectDetails)
+        RequestRegistry<MapObjectDetailResponse> objectDetails, InstanceManager instances)
     {
         string contentRoot = Directory.GetCurrentDirectory();
         string webRoot = Path.Combine(contentRoot, "map", "wwwroot");
@@ -82,7 +84,7 @@ internal sealed class MapWebServer : IAsyncDisposable
         app.UseStaticFiles();
 
         var server = new MapWebServer(app, store, config, steamApi, hub, playerDetails, chatHistory, webChat,
-            objectBackgrounds, objectQueries, objectDetails, assets);
+            objectBackgrounds, objectQueries, objectDetails, instances, assets);
         server.MapEndpoints();
         return server;
     }
@@ -172,6 +174,8 @@ internal sealed class MapWebServer : IAsyncDisposable
             async (HttpContext context, string instanceKey, string playerKey) =>
         {
             if (_hub == null) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            if (!_instances.IsQueryable(instanceKey))
+                return Results.Json(new { error = "instance not ready" }, statusCode: StatusCodes.Status409Conflict);
             ControlHub.ClientConnection? conn = _hub.ModConnection(instanceKey);
             if (conn == null) return Results.NotFound();
 
@@ -201,6 +205,8 @@ internal sealed class MapWebServer : IAsyncDisposable
             string? names) =>
         {
             if (_hub == null) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            if (!_instances.IsQueryable(instanceKey))
+                return Results.Json(new { error = "instance not ready" }, statusCode: StatusCodes.Status409Conflict);
             ControlHub.ClientConnection? connection = _hub.ModConnection(instanceKey);
             if (connection == null) return Results.NotFound();
 
@@ -238,6 +244,8 @@ internal sealed class MapWebServer : IAsyncDisposable
             async (HttpContext context, string instanceKey, string objectKey) =>
         {
             if (_hub == null) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            if (!_instances.IsQueryable(instanceKey))
+                return Results.Json(new { error = "instance not ready" }, statusCode: StatusCodes.Status409Conflict);
             ControlHub.ClientConnection? connection = _hub.ModConnection(instanceKey);
             if (connection == null) return Results.NotFound();
 

@@ -1,26 +1,38 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace CasuMpAgent;
 
 public sealed class InstanceProcess
 {
+    private const int SigCont = 18;
+    private const int SigStop = 19;
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int kill(int pid, int sig);
+
     private readonly AgentConfig _config;
     private readonly Process _process;
     private readonly StreamWriter _stdin;
+    private readonly bool _usesProcessGroup;
 
     public string Key { get; }
+    public int Depth { get; }
     public int Port { get; }
     public int Pid => _process.Id;
     public bool HasExited { get; private set; }
     public int? ExitCode { get; private set; }
+    public bool IsSuspended { get; private set; }
 
-    private InstanceProcess(AgentConfig config, string key, int port, Process process)
+    private InstanceProcess(AgentConfig config, string key, int depth, int port, Process process, bool usesProcessGroup)
     {
         _config = config;
         Key = key;
+        Depth = depth;
         Port = port;
         _process = process;
         _stdin = process.StandardInput;
+        _usesProcessGroup = usesProcessGroup;
     }
 
     public static InstanceProcess? Spawn(AgentConfig config, SpawnPayload payload)
@@ -38,17 +50,22 @@ public sealed class InstanceProcess
         string exeDir = Path.GetDirectoryName(Path.GetFullPath(config.GameExecutablePath))!;
         string gameExePath = Path.Combine(exeDir, "CasualtiesUnknown.x86_64");
 
-        string args = $"{gameExePath} --ksmulti-servername \"dedicated\" "
+        string args = $"{Quote(gameExePath)} --ksmulti-servername \"dedicated\" "
             + $"--ksmulti-setpass \"{payload.ServerPassword}\" "
             + $"--ksmulti-runcommand \"startserver {payload.Port}\" "
             + $"--ksmulti-runcommand \"maxplayers 200\" "
             + (config.HeadlessMode ? "-batchmode -nographics " : "")
             + $"-logFile \"{unityLogPath}\"";
 
+        string? setsid = FindSetsid();
+        bool usesProcessGroup = setsid != null;
+        string fileName = setsid ?? config.GameExecutablePath;
+        string arguments = usesProcessGroup ? $"{Quote(config.GameExecutablePath)} {args}" : args;
+
         var psi = new ProcessStartInfo
         {
-            FileName = config.GameExecutablePath,
-            Arguments = args,
+            FileName = fileName,
+            Arguments = arguments,
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -69,8 +86,9 @@ public sealed class InstanceProcess
             Process process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Process.Start 반환 null");
 
-            _ = DrainAsync(process, payload.InstanceKey);
-            return new InstanceProcess(config, payload.InstanceKey, payload.Port, process);
+            _ = DrainAsync(process.StandardOutput, payload.InstanceKey);
+            _ = DrainAsync(process.StandardError, payload.InstanceKey);
+            return new InstanceProcess(config, payload.InstanceKey, payload.Depth, payload.Port, process, usesProcessGroup);
         }
         catch (Exception ex)
         {
@@ -87,17 +105,39 @@ public sealed class InstanceProcess
             if (_process.HasExited)
             {
                 HasExited = true;
+                IsSuspended = false;
                 ExitCode = _process.ExitCode;
             }
         }
         catch (InvalidOperationException)
         {
             HasExited = true;
+            IsSuspended = false;
         }
+    }
+
+    public bool Suspend()
+    {
+        if (HasExited) return false;
+        if (IsSuspended) return true;
+        if (!SendSignal(SigStop)) return false;
+        IsSuspended = true;
+        return true;
+    }
+
+    public bool Resume()
+    {
+        if (HasExited) return false;
+        if (!IsSuspended) return true;
+        if (!SendSignal(SigCont)) return false;
+        IsSuspended = false;
+        return true;
     }
 
     public void Stop()
     {
+        if (IsSuspended) Resume();
+
         try
         {
             _stdin.WriteLine("quit");
@@ -156,11 +196,41 @@ public sealed class InstanceProcess
         }
     }
 
-    private static async Task DrainAsync(Process process, string key)
+    private bool SendSignal(int signal)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return false;
+        try
+        {
+            int target = _usesProcessGroup ? -Pid : Pid;
+            if (kill(target, signal) == 0) return true;
+            if (_usesProcessGroup && kill(Pid, signal) == 0) return true;
+            Logger.Info($"{Key} 시그널 {signal} 실패 (errno {Marshal.GetLastWin32Error()}).");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.Info($"{Key} 시그널 {signal} 예외: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static string? FindSetsid()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return null;
+        foreach (string path in new[] { "/usr/bin/setsid", "/bin/setsid" })
+        {
+            if (File.Exists(path)) return path;
+        }
+        return null;
+    }
+
+    private static string Quote(string value) => $"\"{value.Replace("\"", "\\\"")}\"";
+
+    private static async Task DrainAsync(StreamReader reader, string key)
     {
         try
         {
-            while (await process.StandardOutput.ReadLineAsync() is { } line)
+            while (await reader.ReadLineAsync() is { } line)
             {
                 Logger.Info(line, key);
             }

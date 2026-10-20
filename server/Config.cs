@@ -22,7 +22,9 @@ public sealed class ServerConfig
 
     public string Motd { get; set; } = "";
 
-    public bool PrewarmIdleShutdown { get; set; } = true;
+    public int LayerCount { get; set; } = 5;
+
+    public bool BlockAdmissionUntilPrewarm { get; set; } = true;
 
     public List<ulong> LockdownBypass { get; set; } = new();
 

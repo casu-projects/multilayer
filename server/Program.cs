@@ -35,7 +35,13 @@ internal static class Program
         var runRules = new RunRuleStore(config.RunTablePath, config.RuleTablePath);
         var instances = new InstanceManager(config, hub);
         var gateway = new ClientGateway(config);
+        if (config.BlockAdmissionUntilPrewarm)
+            gateway.SetPrewarmGate(true);
+        hub.OutboundFilter = (conn, type) =>
+            conn.Kind != ClientKind.Mod || conn.InstanceKey == null
+            || instances.CanSendModCommand(conn.InstanceKey, type);
         var sessions = new PlayerSessionStore(config, instances);
+        instances.InstanceResumed += key => sessions.PushRoutesForInstance(key);
         var dataStore = new PlayerDataStore(config);
         var migrations = new MigrationCoordinator(config, hub, gateway, instances, sessions, dataStore);
 
@@ -188,7 +194,7 @@ internal static class Program
         {
             try
             {
-                mapWeb = MapWebServer.Create(config, mapStore, steamApi, hub, playerDetails, chatHistory, webChat, objectBackgrounds, objectQueries, objectDetails);
+                mapWeb = MapWebServer.Create(config, mapStore, steamApi, hub, playerDetails, chatHistory, webChat, objectBackgrounds, objectQueries, objectDetails, instances);
                 mapWeb.StartAsync().GetAwaiter().GetResult();
                 Log.Info($"맵 웹 시작: {config.WebListen}");
             }
@@ -237,11 +243,14 @@ internal static class Program
             lobby.Push();
 
             voteService.Tick();
+            instances.TickAgentCleanup();
             instances.TickPrewarm();
+            if (config.BlockAdmissionUntilPrewarm)
+                gateway.SetPrewarmGate(!instances.AdmissionReady);
+            int online = TickRunLifecycle(sessions);
             instances.TickIdle(DateTime.UtcNow, key =>
                 sessions.All.Count(s => s.InstanceId == key && s.Session != PlayerSessionState.Offline)
-                + migrations.CountTargeting(key));
-            TickRunLifecycle(sessions);
+                + migrations.CountTargeting(key), online);
             console.Tick();
             Thread.Sleep(10);
         }
@@ -294,7 +303,7 @@ internal static class Program
         cts.Cancel();
     }
 
-    private static void TickRunLifecycle(PlayerSessionStore sessions)
+    private static int TickRunLifecycle(PlayerSessionStore sessions)
     {
         int online = sessions.All.Count(s => s.Session != PlayerSessionState.Offline);
         if (online > 0 && !_runActive)
@@ -305,6 +314,7 @@ internal static class Program
         {
             _runActive = false;
         }
+        return online;
     }
 
     private static void Dispatch(ControlHub hub, PlayerSessionStore sessions,
@@ -323,8 +333,7 @@ internal static class Program
                 conn.MachineId = agent.MachineId;
                 conn.AgentCapacity = agent.Capacity;
                 conn.AgentAddress = agent.Address;
-                instances.RegisterAgent(agent.MachineId, agent.Capacity, agent.Address);
-                instances.PrewarmLayers(); // 레이어1 프리웜
+                instances.OnAgentHello(conn, agent);
                 hub.SendNoAck(conn, MessageTypes.AgentHelloAck, new { ok = true });
                 return;
 

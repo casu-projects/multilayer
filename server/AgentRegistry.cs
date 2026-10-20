@@ -27,10 +27,11 @@ public sealed class AgentRegistry
         return false;
     }
 
-    public string? Select()
+    public string? Select(Func<string, bool>? predicate = null)
     {
         return _agents
             .Where(kv => kv.Value.Used < kv.Value.Capacity)
+            .Where(kv => predicate == null || predicate(kv.Key))
             .OrderBy(kv => (double)kv.Value.Used / kv.Value.Capacity)
             .Select(kv => kv.Key)
             .FirstOrDefault();

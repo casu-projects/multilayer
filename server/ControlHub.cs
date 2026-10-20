@@ -62,6 +62,8 @@ public sealed class ControlHub
         _listener = new TcpListener(IPAddress.Any, config.Port);
     }
 
+    public Func<ClientConnection, string, bool>? OutboundFilter { get; set; }
+
     public void Start()
     {
         _listener.Start();
@@ -176,6 +178,12 @@ public sealed class ControlHub
             return false;
         }
 
+        if (OutboundFilter != null && !OutboundFilter(conn, type))
+        {
+            onResult?.Invoke(false, "blocked by state");
+            return false;
+        }
+
         var msg = ControlMessage.Create(NextSeq(), type, payload);
         conn.Outbound.Writer.TryWrite(msg);
         conn.PendingAcks[msg.Seq] = new PendingCommand // ack/타임아웃 추적
@@ -191,6 +199,7 @@ public sealed class ControlHub
     public void SendNoAck(ClientConnection? conn, string type, object? payload)
     {
         if (conn == null || conn.Closed) return;
+        if (OutboundFilter != null && !OutboundFilter(conn, type)) return;
         conn.Outbound.Writer.TryWrite(ControlMessage.Create(NextSeq(), type, payload));
     }
 

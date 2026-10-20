@@ -8,6 +8,16 @@ public sealed class AgentHelloPayload
     public string MachineId { get; set; } = "";
     public int Capacity { get; set; }
     public string Address { get; set; } = "";
+    public List<AgentInstanceInfo> Instances { get; set; } = new();
+}
+
+public sealed class AgentInstanceInfo
+{
+    public string InstanceKey { get; set; } = "";
+    public int Depth { get; set; }
+    public int Port { get; set; }
+    public int Pid { get; set; }
+    public bool Suspended { get; set; }
 }
 
 public sealed class SpawnPayload
@@ -20,6 +30,11 @@ public sealed class SpawnPayload
 }
 
 public sealed class StopPayload
+{
+    public string InstanceKey { get; set; } = "";
+}
+
+public sealed class ProcessControlPayload
 {
     public string InstanceKey { get; set; } = "";
 }

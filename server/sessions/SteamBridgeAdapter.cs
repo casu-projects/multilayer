@@ -81,6 +81,18 @@ public sealed class SteamBridgeAdapter : INetEventListener
 
     public void OnConnectionRequest(ConnectionRequest request)
     {
+        if (_core.IsMaintenance)
+        {
+            Reject(request, _core.MaintenanceMessage.Length > 0 ? _core.MaintenanceMessage : "Server is under maintenance.");
+            return;
+        }
+
+        if (_core.IsAdmissionBlocked)
+        {
+            Reject(request, _core.PrewarmGateMessage);
+            return;
+        }
+
         byte[] raw = request.Data.RawData[request.Data.UserDataOffset..(request.Data.UserDataOffset + request.Data.UserDataSize)];
         var reader = new NetDataReader(raw);
         try

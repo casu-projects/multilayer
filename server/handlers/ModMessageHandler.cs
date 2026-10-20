@@ -78,6 +78,22 @@ internal sealed class ModMessageHandler
                 if (msg.PayloadAs<InstanceReadyPayload>() is { } ready
                     && instances.OnInstanceReady(ready.InstanceKey))
                 {
+                    if (instances.ShouldSuspendAfterReset(ready.InstanceKey))
+                    {
+                        instances.ClearSuspendAfterReset(ready.InstanceKey);
+                        bool needed = sessions.All.Any(p => p.InstanceId == ready.InstanceKey
+                                && p.Session == PlayerSessionState.Connecting)
+                            || migrations.CountTargeting(ready.InstanceKey) > 0
+                            || (instances.Find(ready.InstanceKey)?.Depth == 1
+                                && sessions.All.Any(p => p.Session != PlayerSessionState.Offline));
+                        if (!needed)
+                        {
+                            if (!instances.SuspendInstance(ready.InstanceKey))
+                                Log.Info($"{ready.InstanceKey} RESET 후 재동결 실패.");
+                            break;
+                        }
+                    }
+
                     sessions.PushRoutesForInstance(ready.InstanceKey);
                     migrations.OnInstanceReady(ready.InstanceKey); // READY -> 라우팅/SWAP
                 }

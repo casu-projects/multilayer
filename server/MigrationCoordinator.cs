@@ -5,7 +5,7 @@ namespace CasuMpServer;
 
 public sealed class MigrationCoordinator
 {
-    private const int MaxLayers = 5;
+    private int MaxLayers => _config.LayerCount;
 
     private enum TxState
     {
@@ -384,9 +384,14 @@ public sealed class MigrationCoordinator
             tx.TargetInstance = _instances.FindByDepth(tx.ToDepth)?.Key;
             return;
         }
+        if (target.Status is InstanceStatus.Suspended or InstanceStatus.Suspending)
+        {
+            _instances.ResumeInstance(target.Key);
+            return;
+        }
         if (target.Status is not (InstanceStatus.Ready or InstanceStatus.Idle))
         {
-            return; // 부팅/월드젠 중 - Tick 재시도
+            return; // 부팅/월드젠/재개 중 - Tick 재시도
         }
 
         string? addr = _instances.BackendAddrFor(target);

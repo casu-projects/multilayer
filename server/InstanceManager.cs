@@ -4,18 +4,21 @@ namespace CasuMpServer;
 public enum InstanceStatus
 {
     Stopped,
-    Starting,   // SPAWN 명령 발신됨 (프로세스 기동 대기)
-    Booting,    // 모드 연결됨 (월드 생성 중)
-    Ready,      // INSTANCE_READY - 월드+세이브 로드 완료
-    Idle,       // 플레이어 0, 유휴 타이머 진행
-    IdleReset,  // 유휴 유예 경과 - Prewarm 인스턴스 레이어 초기화(RESET) 발신됨
+    Starting,
+    Booting,
+    Ready,
+    Idle,
+    IdleReset,
+    Suspending,
+    Suspended,
+    Resuming,
     Stopping,
     Crashed,
 }
 
 public sealed class InstanceInfo
 {
-    public required string Key { get; init; }   // "depth-1"
+    public required string Key { get; init; }
     public required int Depth { get; init; }
     public int Port { get; set; }
     public string? MachineId { get; set; }
@@ -24,20 +27,30 @@ public sealed class InstanceInfo
     public int ConnectedCount { get; set; }
     public ControlHub.ClientConnection? ModConnection { get; set; }
     public bool HasPlayedSinceReset { get; set; }
+    public bool WorldReady { get; set; }
+    public bool SuspendAfterReset { get; set; }
 }
 
 public sealed class InstanceManager
 {
-    private const int PrewarmDepth = 1;
-
-    private static readonly TimeSpan PrewarmIdleShutdownDelay = TimeSpan.FromHours(1);
-
     private readonly ServerConfig _config;
     private readonly ControlHub _hub;
 
     private readonly Dictionary<string, InstanceInfo> _instances = new();
     private readonly HashSet<int> _usedPorts = new();
     private readonly AgentRegistry _agents = new();
+
+    private readonly Queue<int> _prewarmQueue = new();
+    private readonly HashSet<int> _prewarmQueued = new();
+    private int _prewarmInFlight = -1;
+    private DateTime _prewarmWaitStartedUtc = DateTime.MinValue;
+    private DateTime _prewarmRetryAt = DateTime.MinValue;
+    private bool _admissionReady;
+
+    private readonly HashSet<string> _seenMachines = new();
+    private readonly HashSet<string> _cleanedMachines = new();
+    private readonly HashSet<string> _cleanupPending = new();
+    private readonly Dictionary<string, DateTime> _cleanupRetryAt = new();
 
     public InstanceManager(ServerConfig config, ControlHub hub)
     {
@@ -47,27 +60,101 @@ public sealed class InstanceManager
 
     public IReadOnlyCollection<InstanceInfo> All => _instances.Values.ToList();
 
-    public bool PrewarmIdleShutdownEnabled
+    public event Action<string>? InstanceResumed;
+
+    public bool AdmissionReady => _admissionReady;
+
+    public bool PrewarmComplete
     {
-        get => _config.PrewarmIdleShutdown;
-        set => _config.PrewarmIdleShutdown = value;
+        get
+        {
+            if (_prewarmInFlight >= 0) return false;
+            for (int depth = 1; depth <= _config.LayerCount; depth++)
+            {
+                InstanceInfo? info = FindByDepth(depth);
+                if (info == null || info.Status != InstanceStatus.Suspended) return false;
+            }
+            return true;
+        }
     }
 
     public InstanceInfo? Find(string key) => _instances.TryGetValue(key, out var info) ? info : null;
 
     public InstanceInfo? FindByDepth(int depth) => _instances.Values.FirstOrDefault(i => i.Depth == depth);
 
-    public void RegisterAgent(string machineId, int capacity, string address)
+    public void OnAgentHello(ControlHub.ClientConnection conn, AgentHelloPayload payload)
     {
-        _agents.Register(machineId, capacity, address);
+        _seenMachines.Add(payload.MachineId);
+        _agents.Register(payload.MachineId, payload.Capacity, payload.Address);
+
+        if (payload.Instances.Count > 0)
+        {
+            Log.Info($"에이전트 {payload.MachineId} HELLO — 기존 인스턴스 {payload.Instances.Count}개 보고.");
+        }
+
+        if (!_cleanedMachines.Contains(payload.MachineId))
+        {
+            StartAgentCleanup(payload.MachineId);
+            return;
+        }
+
+        PrewarmLayers();
+    }
+
+    public void TickAgentCleanup()
+    {
+        DateTime now = DateTime.UtcNow;
+        foreach (string machineId in _seenMachines.ToList())
+        {
+            if (_cleanedMachines.Contains(machineId) || _cleanupPending.Contains(machineId)) continue;
+            if (_cleanupRetryAt.TryGetValue(machineId, out DateTime retryAt) && now < retryAt) continue;
+            StartAgentCleanup(machineId);
+        }
+    }
+
+    private void StartAgentCleanup(string machineId)
+    {
+        if (_cleanedMachines.Contains(machineId) || !_cleanupPending.Add(machineId)) return;
+
+        ControlHub.ClientConnection? conn = _hub.AgentConnection(machineId);
+        if (conn == null)
+        {
+            _cleanupPending.Remove(machineId);
+            _cleanupRetryAt[machineId] = DateTime.UtcNow.AddSeconds(2);
+            return;
+        }
+
+        Log.Info($"에이전트 {machineId} 프로세스 정리 요청.");
+        _hub.Send(conn, MessageTypes.CleanupAll, null, (ok, reason) =>
+        {
+            _cleanupPending.Remove(machineId);
+            if (!ok)
+            {
+                _cleanupRetryAt[machineId] = DateTime.UtcNow.AddSeconds(2);
+                Log.Info($"에이전트 {machineId} 프로세스 정리 실패: {reason}");
+                return;
+            }
+
+            _cleanupRetryAt.Remove(machineId);
+            _cleanedMachines.Add(machineId);
+            Log.Info($"에이전트 {machineId} 프로세스 정리 완료 — 프리웜 시작.");
+            PrewarmLayers();
+        });
     }
 
     public void UnregisterAgent(string machineId)
     {
         _agents.Unregister(machineId);
-        foreach (InstanceInfo info in _instances.Values.Where(i => i.MachineId == machineId))
+        _cleanedMachines.Remove(machineId);
+        _cleanupRetryAt.Remove(machineId);
+        foreach (InstanceInfo info in _instances.Values.Where(i => i.MachineId == machineId).ToList())
         {
+            _usedPorts.Remove(info.Port);
             info.Status = InstanceStatus.Crashed;
+            info.ModConnection = null;
+            info.WorldReady = false;
+            _runNeeded.Remove(info.Key);
+            RequeuePrewarm(info.Depth);
             Log.Info($"에이전트 {machineId} 이탈 — 인스턴스 {info.Key} 크래시 처리");
         }
     }
@@ -92,6 +179,12 @@ public sealed class InstanceManager
             info = Spawn(depth);
             if (info == null) return null;
         }
+
+        if (info.Status is InstanceStatus.Suspended or InstanceStatus.Suspending)
+        {
+            ResumeInstance(info.Key);
+        }
+
         return BackendAddrFor(info);
     }
 
@@ -106,15 +199,22 @@ public sealed class InstanceManager
         string? machineId = SelectMachine();
         if (machineId == null)
         {
-            Log.Info($"모든 에이전트 수용량 초과 — depth-{depth} 스폰 불가.");
+            Log.Info($"정리 완료된 에이전트가 없거나 수용량 초과 — depth-{depth} 스폰 불가.");
             return null;
         }
 
         int port = AllocatePort();
         string key = DepthKey(depth);
-        var info = new InstanceInfo { Key = key, Depth = depth, Port = port, MachineId = machineId, Status = InstanceStatus.Starting };
+        var info = new InstanceInfo
+        {
+            Key = key,
+            Depth = depth,
+            Port = port,
+            MachineId = machineId,
+            Status = InstanceStatus.Starting,
+        };
         _instances[key] = info;
-        _runNeeded.Add(key); // 모든 인스턴스는 첫 플레이어 연결 시 START_RUN 필요 (G-1)
+        _runNeeded.Add(key);
 
         _agents.IncrementUsage(machineId);
 
@@ -135,6 +235,12 @@ public sealed class InstanceManager
             }
         });
 
+        if (!sent)
+        {
+            _agents.DecrementUsage(machineId);
+            info.Status = InstanceStatus.Crashed;
+            return null;
+        }
         return info;
     }
 
@@ -151,7 +257,7 @@ public sealed class InstanceManager
 
     private string? SelectMachine()
     {
-        return _agents.Select();
+        return _agents.Select(machineId => _cleanedMachines.Contains(machineId));
     }
 
     public void StopInstance(string key)
@@ -162,17 +268,27 @@ public sealed class InstanceManager
         _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageTypes.Stop, new { instanceKey = key });
     }
 
-    public void ResetInstance(string key)
+    public bool ResetInstance(string key)
     {
         InstanceInfo? info = Find(key);
-        if (info == null) return;
+        if (info == null) return false;
+        if (info.Status is not (InstanceStatus.Ready or InstanceStatus.Idle))
+        {
+            Log.Info($"{key} RESET 불가 — 현재 상태 {info.Status}.");
+            return false;
+        }
         if (info.ModConnection == null)
         {
             Log.Info($"{key} RESET 불가 — 모드 미연결. 크래시 처리.");
             info.Status = InstanceStatus.Crashed;
-            return;
+            return false;
         }
+
         info.Status = InstanceStatus.IdleReset;
+        info.WorldReady = false;
+        info.HasPlayedSinceReset = false;
+        info.SuspendAfterReset = true;
+
         _hub.Send(info.ModConnection, MessageTypes.Reset, new { instanceKey = key }, (ok, reason) =>
         {
             if (!ok)
@@ -181,68 +297,191 @@ public sealed class InstanceManager
                 info.Status = InstanceStatus.Crashed;
             }
         });
+        return true;
+    }
+
+    public bool SuspendInstance(string key)
+    {
+        InstanceInfo? info = Find(key);
+        if (info == null) return false;
+        if (info.Status == InstanceStatus.Suspended) return true;
+        if (info.Status is not (InstanceStatus.Ready or InstanceStatus.Idle)) return false;
+
+        info.Status = InstanceStatus.Suspending;
+        bool sent = _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageTypes.ProcessSuspend,
+            new { instanceKey = key }, (ok, reason) =>
+            {
+                if (!ok)
+                {
+                    Log.Info($"{key} SUSPEND 실패: {reason}");
+                    if (info.Status == InstanceStatus.Suspending)
+                        info.Status = InstanceStatus.Ready;
+                    return;
+                }
+
+                if (info.Status != InstanceStatus.Suspending) return;
+                info.Status = InstanceStatus.Suspended;
+                info.LastNonIdleAt = DateTime.UtcNow;
+            });
+
+        if (!sent && info.Status == InstanceStatus.Suspending)
+            info.Status = InstanceStatus.Ready;
+        return sent;
+    }
+
+    public bool ResumeInstance(string key)
+    {
+        InstanceInfo? info = Find(key);
+        if (info == null) return false;
+        if (info.Status is InstanceStatus.Ready or InstanceStatus.Idle
+            or InstanceStatus.Starting or InstanceStatus.Booting or InstanceStatus.IdleReset)
+            return true;
+        if (info.Status == InstanceStatus.Resuming) return true;
+        if (info.Status is not (InstanceStatus.Suspended or InstanceStatus.Suspending)) return false;
+
+        info.Status = InstanceStatus.Resuming;
+        bool sent = _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageTypes.ProcessResume,
+            new { instanceKey = key }, (ok, reason) =>
+            {
+                if (!ok)
+                {
+                    Log.Info($"{key} RESUME 실패: {reason}");
+                    if (info.Status == InstanceStatus.Resuming)
+                        info.Status = InstanceStatus.Suspended;
+                    return;
+                }
+
+                if (info.Status != InstanceStatus.Resuming) return;
+                if (info.ModConnection != null && info.WorldReady)
+                {
+                    info.Status = InstanceStatus.Ready;
+                    info.LastNonIdleAt = DateTime.UtcNow;
+                    InstanceResumed?.Invoke(key);
+                }
+            });
+
+        if (!sent && info.Status == InstanceStatus.Resuming)
+            info.Status = InstanceStatus.Suspended;
+        return sent;
     }
 
     public void PrewarmLayers()
     {
-        int depth = PrewarmDepth;
-        InstanceInfo? existing = FindByDepth(depth);
-        if (existing != null && existing.Status is InstanceStatus.Ready or InstanceStatus.Idle)
+        if (_agents.IsEmpty) return;
+
+        for (int depth = 1; depth <= _config.LayerCount; depth++)
         {
-            return; // 이미 준비됨
-        }
-        if (existing != null && existing.Status is InstanceStatus.Starting or InstanceStatus.Booting or InstanceStatus.IdleReset)
-        {
-            if (_prewarmInFlight < 0) _prewarmInFlight = depth;
-            return;
-        }
-        if (!_prewarmQueue.Contains(depth) && depth != _prewarmInFlight)
-        {
+            if (_prewarmInFlight == depth) continue;
+            InstanceInfo? existing = FindByDepth(depth);
+            if (existing?.Status == InstanceStatus.Suspended) continue;
+            if (existing != null && existing.Status is InstanceStatus.Starting or InstanceStatus.Booting
+                or InstanceStatus.IdleReset or InstanceStatus.Suspending or InstanceStatus.Resuming)
+            {
+                if (_prewarmInFlight < 0) BeginPrewarmWait(depth);
+                continue;
+            }
+            if (_prewarmQueued.Contains(depth)) continue;
+
+            _prewarmQueued.Add(depth);
             _prewarmQueue.Enqueue(depth);
         }
     }
 
-    private readonly Queue<int> _prewarmQueue = new();
-    private int _prewarmInFlight = -1;
+    private void RequeuePrewarm(int depth)
+    {
+        if (_prewarmQueued.Add(depth))
+            _prewarmQueue.Enqueue(depth);
+    }
+
+    private void BeginPrewarmWait(int depth)
+    {
+        _prewarmInFlight = depth;
+        _prewarmWaitStartedUtc = DateTime.UtcNow;
+    }
 
     public void TickPrewarm()
     {
+        DateTime now = DateTime.UtcNow;
+
+        if (_cleanedMachines.Count > 0)
+        {
+            for (int depth = 1; depth <= _config.LayerCount; depth++)
+            {
+                InstanceInfo? info = FindByDepth(depth);
+                if (info == null || info.Status == InstanceStatus.Stopped)
+                    RequeuePrewarm(depth);
+            }
+        }
+
         if (_prewarmInFlight >= 0)
         {
             InstanceInfo? info = FindByDepth(_prewarmInFlight);
-        if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed) // 없거나 죽었으면 재스폰
+            if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
             {
-                _prewarmInFlight = -1; // 실패 - 다음 항목으로
+                int depth = _prewarmInFlight;
+                _prewarmInFlight = -1;
+                RequeuePrewarm(depth);
+            }
+            else if (info.Status == InstanceStatus.Suspended)
+            {
+                _prewarmInFlight = -1;
             }
             else if (info.Status is InstanceStatus.Ready or InstanceStatus.Idle)
             {
-                _prewarmInFlight = -1; // 완료 - 다음 항목으로
+                SuspendInstance(info.Key);
+                return;
             }
             else
             {
-                return; // 아직 부팅/월드젠 중 - 대기
+                if (now - _prewarmWaitStartedUtc > TimeSpan.FromSeconds(_config.MigrationReadyWaitTimeoutSeconds))
+                {
+                    Log.Info($"{info.Key} 프리웜 대기 타임아웃 ({info.Status}) — 프로세스 중지 후 재시도.");
+                    StopInstance(info.Key);
+                    _prewarmInFlight = -1;
+                }
+                return;
             }
         }
+
+        if (now < _prewarmRetryAt) return;
 
         while (_prewarmQueue.Count > 0)
         {
             int depth = _prewarmQueue.Dequeue();
+            _prewarmQueued.Remove(depth);
             InstanceInfo? existing = FindByDepth(depth);
-            if (existing != null && existing.Status is InstanceStatus.Ready or InstanceStatus.Idle)
+            if (existing?.Status == InstanceStatus.Suspended) continue;
+
+            if (existing != null && existing.Status is InstanceStatus.Starting or InstanceStatus.Booting
+                or InstanceStatus.IdleReset or InstanceStatus.Suspending or InstanceStatus.Resuming)
             {
-                continue; // 사이에 준비됨
-            }
-            if (existing != null && existing.Status is InstanceStatus.Starting or InstanceStatus.Booting or InstanceStatus.IdleReset)
-            {
-                _prewarmInFlight = depth; // 이미 진행 중 - 대기
+                BeginPrewarmWait(depth);
                 return;
             }
+
+            if (existing != null && existing.Status is InstanceStatus.Ready or InstanceStatus.Idle)
+            {
+                BeginPrewarmWait(depth);
+                SuspendInstance(existing.Key);
+                return;
+            }
+
             string? addr = EnsureInstance(depth);
             if (addr != null)
             {
-                _prewarmInFlight = depth;
-                return; // 스폰됨 - READY까지 대기
+                BeginPrewarmWait(depth);
+                return;
             }
+
+            RequeuePrewarm(depth);
+            _prewarmRetryAt = now.AddSeconds(2);
+            return;
+        }
+
+        if (!_admissionReady && PrewarmComplete)
+        {
+            _admissionReady = true;
+            Log.Info("프리웜 완료 — 모든 레이어 동결됨. 접속 게이트 개방.");
         }
     }
 
@@ -252,14 +491,17 @@ public sealed class InstanceManager
     {
         if (key == null) return;
         InstanceInfo? info = Find(key);
-        if (info != null && info.Status is InstanceStatus.Ready or InstanceStatus.Idle)
-            return;
+        if (info != null && info.WorldReady) return;
         _runNeeded.Add(key);
     }
 
     public void TrySendStartRun(string key)
     {
         if (!_runNeeded.Remove(key)) return;
+        InstanceInfo? info = Find(key);
+        if (info == null || info.WorldReady) return;
+        if (info.Status is not (InstanceStatus.Starting or InstanceStatus.Booting)) return;
+
         _hub.Send(_hub.ModConnection(key), MessageTypes.StartRun, new { instanceKey = key });
     }
 
@@ -269,18 +511,46 @@ public sealed class InstanceManager
         InstanceInfo? info = Find(key);
         if (info == null)
         {
-            info = new InstanceInfo { Key = key, Depth = payload.Depth, Port = payload.Port, Status = InstanceStatus.Booting };
+            info = new InstanceInfo
+            {
+                Key = key,
+                Depth = payload.Depth,
+                Port = payload.Port,
+                Status = InstanceStatus.Booting,
+            };
             _instances[key] = info;
             _usedPorts.Add(payload.Port);
         }
+
         info.Port = payload.Port;
         info.ModConnection = conn;
+
+        if (info.Status == InstanceStatus.Resuming)
+        {
+            if (info.WorldReady)
+            {
+                info.Status = InstanceStatus.Ready;
+                info.LastNonIdleAt = DateTime.UtcNow;
+                InstanceResumed?.Invoke(key);
+            }
+            return;
+        }
+
+        if (info.Status is InstanceStatus.Suspended or InstanceStatus.Suspending)
+        {
+            return;
+        }
+
         if (info.Status is InstanceStatus.Starting or InstanceStatus.Stopped or InstanceStatus.Crashed)
         {
             info.Status = InstanceStatus.Booting;
         }
-        _runNeeded.Add(key);
-        TrySendStartRun(key);
+
+        if (!info.WorldReady)
+        {
+            _runNeeded.Add(key);
+            TrySendStartRun(key);
+        }
     }
 
     public bool OnInstanceReady(string key)
@@ -290,9 +560,53 @@ public sealed class InstanceManager
         if (info.Status != InstanceStatus.Booting && info.Status != InstanceStatus.Starting
             && info.Status != InstanceStatus.IdleReset)
             return false;
-        info.Status = InstanceStatus.Ready; // READY 전이
+
+        info.WorldReady = true;
+        info.Status = InstanceStatus.Ready;
         info.LastNonIdleAt = DateTime.UtcNow;
         return true;
+    }
+
+    public bool ShouldSuspendAfterReset(string key) => Find(key)?.SuspendAfterReset == true;
+
+    public void ClearSuspendAfterReset(string key)
+    {
+        InstanceInfo? info = Find(key);
+        if (info != null) info.SuspendAfterReset = false;
+    }
+
+    public bool IsQueryable(string key) =>
+        Find(key)?.Status is InstanceStatus.Ready or InstanceStatus.Idle;
+
+    public bool CanSendModCommand(string? instanceKey, string messageType)
+    {
+        if (string.IsNullOrEmpty(instanceKey)) return false;
+        InstanceInfo? info = Find(instanceKey);
+        if (info == null) return false;
+
+        if (messageType == MessageTypes.ModHelloAck) return true;
+        if (messageType == MessageTypes.StartRun)
+            return (info.Status is InstanceStatus.Starting or InstanceStatus.Booting) && !info.WorldReady;
+        if (messageType == MessageTypes.Reset)
+            return info.Status is InstanceStatus.Ready or InstanceStatus.Idle or InstanceStatus.IdleReset;
+        if (messageType == MessageTypes.RunRulesState)
+            return info.Status is InstanceStatus.Booting or InstanceStatus.Ready
+                or InstanceStatus.Idle or InstanceStatus.IdleReset;
+
+        if (messageType is MessageTypes.PlayerDetailRequest or MessageTypes.ObjectQuery
+            or MessageTypes.ObjectDetailRequest or MessageTypes.Chat
+            or MessageTypes.Console or MessageTypes.Announce)
+            return info.Status is InstanceStatus.Ready or InstanceStatus.Idle;
+
+        if (info.Status is InstanceStatus.Suspended or InstanceStatus.Suspending
+            or InstanceStatus.Resuming or InstanceStatus.Stopping
+            or InstanceStatus.Crashed or InstanceStatus.Stopped)
+            return false;
+
+        if (info.Status is InstanceStatus.Starting or InstanceStatus.Booting or InstanceStatus.IdleReset)
+            return messageType is MessageTypes.StartRun or MessageTypes.RunRulesState or MessageTypes.ModHelloAck;
+
+        return info.Status is InstanceStatus.Ready or InstanceStatus.Idle;
     }
 
     public void OnInstanceFault(string key, string reason)
@@ -302,6 +616,9 @@ public sealed class InstanceManager
         Log.Info($"{key} FAULT: {reason}");
         info.Status = InstanceStatus.Crashed;
         info.ModConnection = null;
+        info.WorldReady = false;
+        info.SuspendAfterReset = false;
+        _runNeeded.Remove(key);
     }
 
     public void OnModConnectionClosed(ControlHub.ClientConnection conn)
@@ -309,10 +626,16 @@ public sealed class InstanceManager
         InstanceInfo? info = _instances.Values.FirstOrDefault(i => i.ModConnection == conn);
         if (info == null) return;
         info.ModConnection = null;
-        if (info.Status is InstanceStatus.Booting or InstanceStatus.Ready or InstanceStatus.Idle)
+        if (info.Status is InstanceStatus.Suspended or InstanceStatus.Suspending or InstanceStatus.Resuming)
+            return;
+        if (info.Status is InstanceStatus.Booting or InstanceStatus.Ready or InstanceStatus.Idle
+            or InstanceStatus.IdleReset)
         {
             Log.Info($"{info.Key} 모드 연결 종료 — 크래시 처리.");
             info.Status = InstanceStatus.Crashed;
+            info.WorldReady = false;
+            info.SuspendAfterReset = false;
+            _runNeeded.Remove(info.Key);
         }
     }
 
@@ -333,12 +656,22 @@ public sealed class InstanceManager
         {
             _agents.DecrementUsage(info.MachineId);
         }
-        info.Status = InstanceStatus.Stopped; // 종료
+        info.Status = InstanceStatus.Stopped;
         info.ModConnection = null;
+        info.WorldReady = false;
+        info.SuspendAfterReset = false;
+        _runNeeded.Remove(key);
     }
 
-    public void TickIdle(DateTime now, Func<string, int> connectedCountForInstance)
+    public void TickIdle(DateTime now, Func<string, int> connectedCountForInstance, int serverOnlineCount)
     {
+        if (serverOnlineCount > 0)
+        {
+            InstanceInfo? l1 = FindByDepth(1);
+            if (l1?.Status is InstanceStatus.Suspended or InstanceStatus.Suspending)
+                ResumeInstance(l1.Key);
+        }
+
         foreach (InstanceInfo info in _instances.Values.ToList())
         {
             if (info.Status is not (InstanceStatus.Ready or InstanceStatus.Idle))
@@ -360,29 +693,19 @@ public sealed class InstanceManager
                 continue;
             }
 
-            bool isPrewarm = info.Depth == PrewarmDepth;
-            if (isPrewarm)
+            if (info.Depth == 1 && serverOnlineCount > 0)
             {
-                if (PrewarmIdleShutdownEnabled && now - info.LastNonIdleAt >= PrewarmIdleShutdownDelay)
-                {
-                    Log.Info($"{info.Key} 유휴 초과(1시간) — 정지.");
-                    StopInstance(info.Key);
-                    continue;
-                }
-
-                if (!info.HasPlayedSinceReset)
-                {
-                    info.Status = InstanceStatus.Idle;
-                    continue;
-                }
-
-                info.HasPlayedSinceReset = false;
-                ResetInstance(info.Key);
+                info.Status = InstanceStatus.Idle;
                 continue;
             }
 
-            Log.Info($"{info.Key} 유휴 초과 — 정지.");
-            StopInstance(info.Key);
+            if (!info.HasPlayedSinceReset)
+            {
+                SuspendInstance(info.Key);
+                continue;
+            }
+
+            ResetInstance(info.Key);
         }
     }
 

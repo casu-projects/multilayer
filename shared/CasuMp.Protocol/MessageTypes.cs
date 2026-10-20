@@ -20,6 +20,9 @@ public static class MessageTypes
     public const string Stop = "STOP";
     public const string Reset = "RESET";
     public const string StartRun = "START_RUN";
+    public const string ProcessSuspend = "PROCESS_SUSPEND";
+    public const string ProcessResume = "PROCESS_RESUME";
+    public const string CleanupAll = "CLEANUP_ALL";
 
     public const string LayerEnd = "LAYER_END";
     public const string Respawn = "RESPAWN";

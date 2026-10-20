@@ -43,6 +43,12 @@ public sealed class DirectIpAdapter : INetEventListener
             return;
         }
 
+        if (_core.IsAdmissionBlocked)
+        {
+            Reject(request, _core.PrewarmGateMessage);
+            return;
+        }
+
         if (_core.SessionCount >= _core.MaxPlayers)
         {
             Reject(request, "Server is full.");

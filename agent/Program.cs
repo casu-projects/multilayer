@@ -29,7 +29,17 @@ internal static class Program
 
         CleanupOrphans(config);
 
-        var channel = new ControlChannel(config, localIp, inbound);
+        var channel = new ControlChannel(config, localIp, inbound, () =>
+            instances.Values
+                .Select(proc => new AgentInstanceInfo
+                {
+                    InstanceKey = proc.Key,
+                    Depth = proc.Depth,
+                    Port = proc.Port,
+                    Pid = proc.Pid,
+                    Suspended = proc.IsSuspended,
+                })
+                .ToList());
         _ = channel.RunAsync(cts.Token);
 
         while (!cts.IsCancellationRequested)
@@ -109,6 +119,42 @@ internal static class Program
                 DeletePid(config, payload.InstanceKey);
                 channel.Report(ControlMessage.Create(0, MessageTypes.InstanceExited,
                     new { instanceKey = payload.InstanceKey, code = proc.ExitCode ?? 0 }));
+                ack(ControlMessage.Ack(msg.Seq, true));
+                break;
+            }
+            case MessageTypes.ProcessSuspend:
+            {
+                var payload = msg.PayloadAs<ProcessControlPayload>();
+                if (payload == null || !instances.TryGetValue(payload.InstanceKey, out InstanceProcess? proc))
+                {
+                    ack(ControlMessage.Ack(msg.Seq, false, "인스턴스 없음"));
+                    return;
+                }
+                bool ok = proc.Suspend();
+                ack(ControlMessage.Ack(msg.Seq, ok, ok ? null : "suspend 실패"));
+                break;
+            }
+            case MessageTypes.ProcessResume:
+            {
+                var payload = msg.PayloadAs<ProcessControlPayload>();
+                if (payload == null || !instances.TryGetValue(payload.InstanceKey, out InstanceProcess? proc))
+                {
+                    ack(ControlMessage.Ack(msg.Seq, false, "인스턴스 없음"));
+                    return;
+                }
+                bool ok = proc.Resume();
+                ack(ControlMessage.Ack(msg.Seq, ok, ok ? null : "resume 실패"));
+                break;
+            }
+            case MessageTypes.CleanupAll:
+            {
+                foreach (InstanceProcess proc in instances.Values.ToList())
+                {
+                    proc.Stop();
+                    proc.Cleanup();
+                    DeletePid(config, proc.Key);
+                    instances.Remove(proc.Key);
+                }
                 ack(ControlMessage.Ack(msg.Seq, true));
                 break;
             }

@@ -10,7 +10,8 @@ public sealed class ControlChannel
     private readonly ControlClient _client;
 
     public ControlChannel(AgentConfig config, string localIp,
-        ConcurrentQueue<(ControlMessage, Action<ControlMessage>)> inbound)
+        ConcurrentQueue<(ControlMessage, Action<ControlMessage>)> inbound,
+        Func<IReadOnlyList<AgentInstanceInfo>> instanceSnapshot)
     {
         _inbound = inbound;
         _client = new ControlClient(config.OrchestratorAddr, config.ReconnectIntervalSeconds,
@@ -19,6 +20,7 @@ public sealed class ControlChannel
                 machineId = config.MachineId,
                 capacity = config.Capacity,
                 address = localIp,
+                instances = instanceSnapshot(),
             }),
             message => _inbound.Enqueue((message, Ack)),
             error => Logger.Local($"오케스트레이터 연결 오류: {error}"));

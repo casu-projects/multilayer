@@ -12,6 +12,9 @@ public sealed class ClientGateway
     private string _maintenanceMessage = "";
     private readonly HashSet<ulong> _maintenanceBypass = new();
 
+    private bool _prewarmGate;
+    private string _prewarmGateMessage = "Server is preparing layers. Please try again shortly.";
+
     private string _serverPassword = "";
     private int _maxPlayers = 32;
     private string _serverName = "CasuMP Server";
@@ -29,6 +32,20 @@ public sealed class ClientGateway
     public bool IsMaintenance => _maintenance;
 
     public string MaintenanceMessage => _maintenanceMessage;
+
+    public bool IsAdmissionBlocked => _prewarmGate;
+
+    public string PrewarmGateMessage => _prewarmGateMessage;
+
+    public void SetPrewarmGate(bool blocked, string? message = null)
+    {
+        if (_prewarmGate == blocked) return;
+        _prewarmGate = blocked;
+        if (!string.IsNullOrEmpty(message)) _prewarmGateMessage = message;
+        Log.Info(blocked
+            ? "프리웜 게이트 닫힘 — 신규 접속 차단."
+            : "프리웜 게이트 열림 — 신규 접속 허용.");
+    }
 
     public int MaxPlayers => _maxPlayers;
 
@@ -173,6 +190,11 @@ public sealed class ClientGateway
             {
                 reject = true;
                 reason = _maintenanceMessage.Length > 0 ? _maintenanceMessage : "Server is in maintenance mode.";
+            }
+            else if (_prewarmGate)
+            {
+                reject = true;
+                reason = _prewarmGateMessage;
             }
             else if (_banned.Contains(session.Player))
             {

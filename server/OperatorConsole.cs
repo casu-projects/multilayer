@@ -67,7 +67,6 @@ public sealed class OperatorConsole
         _registry.Register("ban", "유저 차단", "<player>", CmdBan);
         _registry.Register("unban", "차단 해제", "<player>", CmdUnban);
         _registry.Register("lockdown", "점검 모드 토글", CmdLockdown);
-        _registry.Register("prewarm", "레이어1 무접속 자동 종료 토글", CmdPrewarm);
         _registry.Register("connections", "연결 목록", CmdConnections);
         _registry.Register("clear", "화면 지우기", CmdClear);
         _registry.Register("migrate", "수동 마이그레이션", "<player> [targetLayer]", CmdMigrate);
@@ -414,33 +413,6 @@ public sealed class OperatorConsole
             _pushLobbyAction?.Invoke();
             Log.Info("락다운 끔 — 접속 허용 + 타이틀 복원.");
             LockdownNotify?.Invoke(false);
-        }
-    }
-
-    private void CmdPrewarm(string[] args)
-    {
-        bool next = !_instances.PrewarmIdleShutdownEnabled;
-        _instances.PrewarmIdleShutdownEnabled = next;
-        PersistConfigBool("PrewarmIdleShutdown", next);
-        Log.Info(next
-            ? "prewarm idle-shutdown 켬 — 레이어1은 1시간 무접속 시 종료됩니다 (server.json 반영)."
-            : "prewarm idle-shutdown 끔 — 레이어1은 무접속에도 유지됩니다(항상 프리웜) (server.json 반영).");
-    }
-
-    private void PersistConfigBool(string key, bool value)
-    {
-        try
-        {
-            if (_configPath.Length == 0 || !File.Exists(_configPath)) return;
-            using var doc = JsonDocument.Parse(File.ReadAllText(_configPath));
-            var node = System.Text.Json.Nodes.JsonNode.Parse(doc.RootElement.GetRawText());
-            node![key] = value;
-            AtomicJsonFile.Write(_configPath,
-                node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"{key} json 반영 실패: {ex.Message}");
         }
     }
 

@@ -10,7 +10,7 @@ public sealed class AgentConfig
 
     public string MachineId { get; set; } = "casu-agent-1";
 
-    public int Capacity { get; set; } = 4;
+    public int Capacity { get; set; } = 5;
 
     public string GameExecutablePath { get; set; } = "";
 

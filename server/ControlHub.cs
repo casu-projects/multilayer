@@ -2,7 +2,6 @@ using CasuMp.Protocol;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading.Channels;
 
 namespace CasuMpServer;
@@ -44,6 +43,9 @@ public sealed class ControlHub
         public Action<bool, string?>? OnResult { get; init; }
     }
 
+    private static readonly TimeSpan AckRetryInterval = TimeSpan.FromSeconds(3);
+    private const int AckMaxRetries = 3;
+
     private readonly ServerConfig _config;
     private readonly CancellationToken _ct;
     private readonly TcpListener _listener;
@@ -62,7 +64,7 @@ public sealed class ControlHub
         _listener = new TcpListener(IPAddress.Any, config.Port);
     }
 
-    public Func<ClientConnection, string, bool>? OutboundFilter { get; set; }
+    public Func<ClientConnection, MessageType, bool>? OutboundFilter { get; set; }
 
     public void Start()
     {
@@ -106,12 +108,10 @@ public sealed class ControlHub
     private async Task ServeConnectionAsync(ClientConnection conn)
     {
         using var stream = conn.Tcp.GetStream();
-        using var reader = new StreamReader(stream, new UTF8Encoding(false));
-        using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(_ct);
-        Task readTask = ReadLoopAsync(conn, reader, cts.Token);
-        Task writeTask = WriteLoopAsync(conn, writer, cts.Token);
+        Task readTask = ReadLoopAsync(conn, stream, cts.Token);
+        Task writeTask = WriteLoopAsync(conn, stream, cts.Token);
 
         await Task.WhenAny(readTask, writeTask);
         cts.Cancel();
@@ -121,38 +121,47 @@ public sealed class ControlHub
         _closedConnections.Enqueue(conn);
     }
 
-    private async Task ReadLoopAsync(ClientConnection conn, StreamReader reader, CancellationToken ct)
+    private async Task ReadLoopAsync(ClientConnection conn, Stream stream, CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            string? line = await reader.ReadLineAsync(ct);
-            if (line == null) break;
-            if (string.IsNullOrWhiteSpace(line)) continue;
+            while (!ct.IsCancellationRequested)
+            {
+                ControlFrame? frame = await ControlFrameCodec.ReadAsync(stream, ct);
+                if (frame == null) break;
 
-            ControlMessage? msg = ControlMessage.Parse(line);
-            if (msg == null)
-            {
-                continue;
-            }
+                ControlMessage? msg = ControlMessage.FromFrame(frame);
+                if (msg == null) continue;
 
-            if (msg.Type == MessageTypes.Ack)
-            {
-                _ackCompletions.Enqueue((conn, msg.Seq, IsOk(msg), GetReason(msg)));
+                if (msg.Type == MessageType.ACK)
+                {
+                    _ackCompletions.Enqueue((conn, msg.Seq, IsOk(msg), GetReason(msg)));
+                }
+                else
+                {
+                    _inbound.Enqueue((conn, msg));
+                }
             }
-            else
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (!ct.IsCancellationRequested)
             {
-                _inbound.Enqueue((conn, msg));
+                Log.Info($"제어 프레임 오류 (연결 {conn.Id}): {ex.Message}");
             }
         }
     }
 
-    private async Task WriteLoopAsync(ClientConnection conn, StreamWriter writer, CancellationToken ct)
+    private async Task WriteLoopAsync(ClientConnection conn, Stream stream, CancellationToken ct)
     {
         try
         {
             await foreach (ControlMessage msg in conn.Outbound.Reader.ReadAllAsync(ct))
             {
-                await writer.WriteLineAsync(msg.Serialize().AsMemory(), ct);
+                await ControlFrameCodec.WriteAsync(stream, msg.ToFrame(), ct);
             }
         }
         catch (OperationCanceledException)
@@ -170,7 +179,7 @@ public sealed class ControlHub
     public ClientConnection? AgentConnection(string machineId) => Connections.FirstOrDefault(c => c.Kind == ClientKind.Agent && c.MachineId == machineId && !c.Closed);
     public ClientConnection? ModConnection(string instanceKey) => Connections.FirstOrDefault(c => c.Kind == ClientKind.Mod && c.InstanceKey == instanceKey && !c.Closed);
 
-    public bool Send(ClientConnection? conn, string type, object? payload, Action<bool, string?>? onResult = null)
+    public bool Send(ClientConnection? conn, MessageType type, object? payload, Action<bool, string?>? onResult = null)
     {
         if (conn == null || conn.Closed)
         {
@@ -189,14 +198,14 @@ public sealed class ControlHub
         conn.PendingAcks[msg.Seq] = new PendingCommand // ack/타임아웃 추적
         {
             Msg = msg,
-            Deadline = DateTime.UtcNow + TimeSpan.FromSeconds(_config.CommandRetryIntervalSeconds),
+            Deadline = DateTime.UtcNow + AckRetryInterval,
             Retries = 0,
             OnResult = onResult,
         };
         return true;
     }
 
-    public void SendNoAck(ClientConnection? conn, string type, object? payload)
+    public void SendNoAck(ClientConnection? conn, MessageType type, object? payload)
     {
         if (conn == null || conn.Closed) return;
         if (OutboundFilter != null && !OutboundFilter(conn, type)) return;
@@ -228,10 +237,10 @@ public sealed class ControlHub
             {
                 if (now < pending.Deadline) continue;
 
-                if (pending.Retries < _config.CommandMaxRetries && !conn.Closed)
+                if (pending.Retries < AckMaxRetries && !conn.Closed)
                 {
                     pending.Retries++;
-                    pending.Deadline = now + TimeSpan.FromSeconds(_config.CommandRetryIntervalSeconds);
+                    pending.Deadline = now + AckRetryInterval;
                     conn.Outbound.Writer.TryWrite(pending.Msg); // 재전송
                 }
                 else

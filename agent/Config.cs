@@ -14,16 +14,6 @@ public sealed class AgentConfig
 
     public string GameExecutablePath { get; set; } = "";
 
-    public bool HeadlessMode { get; set; } = true;
-
-    public int StopGraceSeconds { get; set; } = 5;
-
-    public double ReconnectIntervalSeconds { get; set; } = 2;
-
-    public string WebAddr { get; set; } = "http://127.0.0.1:17920";
-
-    public string WebUploadToken { get; set; } = "";
-
     [JsonIgnore]
     public string InstancesDir => Path.Combine(Directory.GetCurrentDirectory(), "instances");
 

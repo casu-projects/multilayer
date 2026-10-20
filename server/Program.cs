@@ -6,7 +6,7 @@ namespace CasuMpServer;
 
 internal static class Program
 {
-    private static bool _runActive;   // 런 수명주기: DORMANT(false) ↔ ACTIVE(true)
+    private static bool _runActive; // 런 수명주기: DORMANT(false) ↔ ACTIVE(true)
 
     private static void Main(string[] args)
     {
@@ -28,15 +28,13 @@ internal static class Program
         var hub = new ControlHub(config, cts.Token);
         var mapStore = new WorldSnapshotStore();
         var playerDetails = new PlayerDetailRegistry();
-        var chatHistory = new ChatHistoryStore();
         var objectBackgrounds = new ObjectBackgroundStore();
         var objectQueries = new RequestRegistry<MapObjectQueryResponse>();
         var objectDetails = new RequestRegistry<MapObjectDetailResponse>();
         var runRules = new RunRuleStore(config.RunTablePath, config.RuleTablePath);
         var instances = new InstanceManager(config, hub);
         var gateway = new ClientGateway(config);
-        if (config.BlockAdmissionUntilPrewarm)
-            gateway.SetPrewarmGate(true);
+        gateway.SetPrewarmGate(true);
         hub.OutboundFilter = (conn, type) =>
             conn.Kind != ClientKind.Mod || conn.InstanceKey == null
             || instances.CanSendModCommand(conn.InstanceKey, type);
@@ -46,9 +44,6 @@ internal static class Program
         var migrations = new MigrationCoordinator(config, hub, gateway, instances, sessions, dataStore);
 
         var banList = new BanList(config.BanListPath);
-
-        var votes = new VoteCoordinator(graceSeconds: 5);
-        var voteService = new VoteService(hub, gateway, sessions, votes, banList);
 
         hub.OnConnectionClosed += conn =>
         {
@@ -84,7 +79,7 @@ internal static class Program
             {
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
-                    hub.SendNoAck(conn, MessageTypes.Console, new { command });
+                    hub.SendNoAck(conn, MessageType.CONSOLE, new { command });
                 }
             },
             pushLobbyAction: () => lobby.Push(force: true),
@@ -92,13 +87,12 @@ internal static class Program
         console.Start();
         SteamApiClient? steamApi = null;
         var discordBot = new DiscordBot(config.DiscordBotToken, config.DiscordChannelId,
-            config.DiscordConsoleChannelId, config.DiscordAdminUserId,
+            config.DiscordConsoleChannelId,
             (username, text) =>
             {
-                chatHistory.Add("discord", username, "", "", text);
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
-                    hub.SendNoAck(conn, MessageTypes.Chat, new { speaker = username, message = text, color = "", layer = "", prefix = "D", prefixColor = "#5865F2" });
+                    hub.SendNoAck(conn, MessageType.CHAT, new { speaker = username, message = text, color = "", layer = "", prefix = "D", prefixColor = "#5865F2" });
                 }
             },
             text =>
@@ -132,7 +126,7 @@ internal static class Program
             gateway.UpdateServerInfo(config.ServerName + " [MNT]", config.ServerPassword, config.MaxPlayers);
         }
 
-        var modHandler = new ModMessageHandler(hub, sessions, instances, migrations, dataStore, runRules, voteService, discordBot, lobby, mapStore, playerDetails, chatHistory, objectBackgrounds, objectQueries, objectDetails);
+        var modHandler = new ModMessageHandler(hub, sessions, instances, migrations, dataStore, runRules, discordBot, lobby, mapStore, playerDetails, objectBackgrounds, objectQueries, objectDetails);
 
         discordBot.OnReady = () =>
         {
@@ -155,7 +149,7 @@ internal static class Program
 
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
-                    hub.SendNoAck(conn, MessageTypes.Announce, new
+                    hub.SendNoAck(conn, MessageType.ANNOUNCE, new
                     {
                         kind = "respawn",
                         playerKey = player.Value,
@@ -172,7 +166,7 @@ internal static class Program
 
                 foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
                 {
-                    hub.SendNoAck(conn, MessageTypes.Announce, new
+                    hub.SendNoAck(conn, MessageType.ANNOUNCE, new
                     {
                         kind = "migration",
                         playerKey = player.Value,
@@ -186,7 +180,6 @@ internal static class Program
             lobby.RefreshTopic();
         };
 
-        var webChat = new WebChatService(chatHistory, hub, discordBot, console);
         _ = discordBot.StartAsync();
 
         MapWebServer? mapWeb = null;
@@ -194,7 +187,7 @@ internal static class Program
         {
             try
             {
-                mapWeb = MapWebServer.Create(config, mapStore, steamApi, hub, playerDetails, chatHistory, webChat, objectBackgrounds, objectQueries, objectDetails, instances);
+                mapWeb = MapWebServer.Create(config, mapStore, steamApi, hub, playerDetails, objectBackgrounds, objectQueries, objectDetails, instances);
                 mapWeb.StartAsync().GetAwaiter().GetResult();
                 Log.Info($"맵 웹 시작: {config.WebListen}");
             }
@@ -232,7 +225,7 @@ internal static class Program
             {
                 try
                 {
-                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, voteService, discordBot, lobby, modHandler, mapStore, objectBackgrounds, conn, msg);
+                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, discordBot, lobby, modHandler, mapStore, objectBackgrounds, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -242,11 +235,9 @@ internal static class Program
             migrations.Tick();
             lobby.Push();
 
-            voteService.Tick();
             instances.TickAgentCleanup();
             instances.TickPrewarm();
-            if (config.BlockAdmissionUntilPrewarm)
-                gateway.SetPrewarmGate(!instances.AdmissionReady);
+            gateway.SetPrewarmGate(!instances.AdmissionReady);
             int online = TickRunLifecycle(sessions);
             instances.TickIdle(DateTime.UtcNow, key =>
                 sessions.All.Count(s => s.InstanceId == key && s.Session != PlayerSessionState.Offline)
@@ -255,27 +246,50 @@ internal static class Program
             Thread.Sleep(10);
         }
 
-        Log.Info("종료 중 — 데이터 저장 후 스택 종료...");
+        Log.Info("종료 중 — 모드 데이터 저장 대기 후 스택 종료...");
 
         gateway.Shutdown();
-        foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
+
+        var mods = hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed).ToList();
+        foreach (var conn in mods)
         {
-            hub.SendNoAck(conn, MessageTypes.Shutdown, null);
-        }
-        foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Agent && !c.Closed))
-        {
-            hub.SendNoAck(conn, MessageTypes.Shutdown, null);
+            hub.SendNoAck(conn, MessageType.SHUTDOWN, null);
         }
 
-        DateTime shutdownDeadline = DateTime.UtcNow.AddSeconds(5);
-        while (DateTime.UtcNow < shutdownDeadline)
+        DateTime modDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < modDeadline && mods.Any(c => !c.Closed))
         {
             hub.Tick();
             hub.DrainInbound((conn, msg) =>
             {
                 try
                 {
-                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, voteService, discordBot, lobby, modHandler, mapStore, objectBackgrounds, conn, msg);
+                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, discordBot, lobby, modHandler, mapStore, objectBackgrounds, conn, msg);
+                }
+                catch (Exception ex)
+                {
+                    Log.Info($"메시지 처리 실패 ({msg.Type}): {ex.Message}");
+                }
+            });
+            Thread.Sleep(20);
+        }
+
+        Log.Info("모드 종료 대기 완료 — 에이전트 종료 지시.");
+        var agents = hub.Connections.Where(c => c.Kind == ClientKind.Agent && !c.Closed).ToList();
+        foreach (var conn in agents)
+        {
+            hub.SendNoAck(conn, MessageType.SHUTDOWN, null);
+        }
+
+        DateTime agentDeadline = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < agentDeadline)
+        {
+            hub.Tick();
+            hub.DrainInbound((conn, msg) =>
+            {
+                try
+                {
+                    Dispatch(hub, sessions, instances, migrations, dataStore, banList, runRules, discordBot, lobby, modHandler, mapStore, objectBackgrounds, conn, msg);
                 }
                 catch (Exception ex)
                 {
@@ -319,13 +333,13 @@ internal static class Program
 
     private static void Dispatch(ControlHub hub, PlayerSessionStore sessions,
         InstanceManager instances, MigrationCoordinator migrations, PlayerDataStore dataStore,
-        BanList banList, RunRuleStore runRules, VoteService voteService, DiscordBot discordBot,
+        BanList banList, RunRuleStore runRules, DiscordBot discordBot,
         LobbyMetadataService lobby, ModMessageHandler modHandler, WorldSnapshotStore mapStore,
         ObjectBackgroundStore objectBackgrounds, ControlHub.ClientConnection conn, ControlMessage msg)
     {
         switch (msg.Type)
         {
-            case MessageTypes.AgentHello:
+            case MessageType.AGENT_HELLO:
                 if (conn.Kind != ClientKind.Unknown) break;
                 var agent = msg.PayloadAs<AgentHelloPayload>();
                 if (agent == null) break;
@@ -334,10 +348,10 @@ internal static class Program
                 conn.AgentCapacity = agent.Capacity;
                 conn.AgentAddress = agent.Address;
                 instances.OnAgentHello(conn, agent);
-                hub.SendNoAck(conn, MessageTypes.AgentHelloAck, new { ok = true });
+                hub.SendNoAck(conn, MessageType.AGENT_HELLO_ACK, new { ok = true });
                 return;
 
-            case MessageTypes.ModHello:
+            case MessageType.MOD_HELLO:
                 if (conn.Kind != ClientKind.Unknown) break;
                 var mod = msg.PayloadAs<ModHelloPayload>();
                 if (mod == null) break;
@@ -346,9 +360,10 @@ internal static class Program
                 conn.InstancePort = mod.Port;
                 conn.InstanceDepth = mod.Depth;
                 instances.OnModHello(conn, mod); // 인스턴스 연결 등록/READY 보고
+                lobby.SetVersionTag(mod.VersionTag, mod.InstanceKey);
                 mapStore.RegisterInstance(mod.InstanceKey, mod.Depth);
-                hub.SendNoAck(conn, MessageTypes.ModHelloAck, new { ok = true });
-                hub.SendNoAck(conn, MessageTypes.RunRulesState, // 규칙 초기 푸시
+                hub.SendNoAck(conn, MessageType.MOD_HELLO_ACK, new { ok = true });
+                hub.SendNoAck(conn, MessageType.RUN_RULES_STATE, // 규칙 초기 푸시
                     new { runSettings = runRules.RunSnapshot, rules = runRules.RuleSnapshot });
                 return;
         }
@@ -358,7 +373,7 @@ internal static class Program
             return;
         }
 
-        if (msg.Type == MessageTypes.Log)
+        if (msg.Type == MessageType.LOG)
         {
             LogPayload? log = msg.PayloadAs<LogPayload>();
             if (log != null && !string.IsNullOrEmpty(log.Message))
@@ -385,7 +400,7 @@ internal static class Program
     {
         switch (msg.Type)
         {
-            case MessageTypes.InstanceExited:
+            case MessageType.INSTANCE_EXITED:
                 if (msg.PayloadAs<InstanceExitedPayload>() is { } exited)
                 {
                     instances.OnInstanceExited(exited.InstanceKey, exited.Code);
@@ -414,7 +429,7 @@ internal static class Program
         var rules = runRules.RuleSnapshot;
         foreach (var conn in hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
         {
-            hub.SendNoAck(conn, MessageTypes.RunRulesState, new { runSettings, rules });
+            hub.SendNoAck(conn, MessageType.RUN_RULES_STATE, new { runSettings, rules });
         }
     }
 

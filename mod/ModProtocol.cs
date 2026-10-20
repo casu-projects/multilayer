@@ -1,5 +1,6 @@
 using CasuMp.Protocol;
 using System;
+using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -7,22 +8,26 @@ namespace CasuMod;
 
 public sealed class ControlMessage
 {
-    private static readonly JsonSerializerSettings ParseSettings = new()
-    {
-        MissingMemberHandling = MissingMemberHandling.Ignore,
-    };
-
     public long Seq { get; set; }
-    public string Type { get; set; } = "";
+    public MessageType Type { get; set; } = MessageType.UNKNOWN;
     public JToken Payload { get; set; }
 
-    public string Serialize() => JsonConvert.SerializeObject(this);
+    public ControlFrame ToFrame()
+    {
+        byte[] payload = Payload == null || Payload.Type == JTokenType.Null
+            ? Array.Empty<byte>()
+            : Encoding.UTF8.GetBytes(Payload.ToString(Formatting.None));
+        return new ControlFrame(Seq, Type, payload);
+    }
 
-    public static ControlMessage Parse(string line)
+    public static ControlMessage FromFrame(ControlFrame frame)
     {
         try
         {
-            return JsonConvert.DeserializeObject<ControlMessage>(line, ParseSettings);
+            JToken payload = frame.Payload.Length == 0
+                ? JValue.CreateNull()
+                : JToken.Parse(Encoding.UTF8.GetString(frame.Payload));
+            return new ControlMessage { Seq = frame.Seq, Type = frame.Type, Payload = payload };
         }
         catch (JsonException)
         {
@@ -30,7 +35,7 @@ public sealed class ControlMessage
         }
     }
 
-    public static ControlMessage Create(long seq, string type, object payload) => new()
+    public static ControlMessage Create(long seq, MessageType type, object payload) => new()
     {
         Seq = seq,
         Type = type,
@@ -38,7 +43,7 @@ public sealed class ControlMessage
     };
 
     public static ControlMessage Ack(long seq, bool ok, string reason = null) =>
-        Create(seq, MessageTypes.Ack, new { ok, reason });
+        Create(seq, MessageType.ACK, new { ok, reason });
 
     public T PayloadAs<T>() where T : class =>
         Payload is JObject obj ? obj.ToObject<T>() : null;

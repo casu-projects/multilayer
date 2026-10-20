@@ -39,7 +39,7 @@ public static class Logger
     public static void Info(string message, string? suffix = null)
     {
         string source = suffix == null ? _source : $"{_source}/{suffix}";
-        ControlMessage entry = ControlMessage.Create(0, MessageTypes.Log, new { source, message });
+        ControlMessage entry = ControlMessage.Create(0, MessageType.LOG, new { source, message });
 
         Action<ControlMessage>? sink;
         lock (_lock)

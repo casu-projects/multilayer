@@ -140,16 +140,6 @@ public sealed class OperatorConsole
         }
     }
 
-    internal IReadOnlyList<ConsoleCommand> GetCommands() =>
-        _registry.All.OrderBy(command => command.Name, StringComparer.Ordinal).ToList();
-
-    internal Task<string> ExecuteForWebAsync(string line)
-    {
-        var source = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        SubmitLine(line, output => source.TrySetResult(output));
-        return source.Task;
-    }
-
     private void Execute(string line)
     {
         string[] tokens = CommandLineTokenizer.Split(line);

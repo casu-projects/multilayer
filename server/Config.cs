@@ -18,25 +18,13 @@ public sealed class ServerConfig
 
     public int MaxPlayers { get; set; } = 32;
 
-    public string SteamVersionTag { get; set; } = "7.0.1_MPv5.0.0";
-
-    public string Motd { get; set; } = "";
-
-    public int LayerCount { get; set; } = 5;
-
-    public bool BlockAdmissionUntilPrewarm { get; set; } = true;
+    public string Description { get; set; } = "";
 
     public List<ulong> LockdownBypass { get; set; } = new();
 
-    public double MigrationStepTimeoutSeconds { get; set; } = 30;
+    public int InstanceReadyTimeoutSeconds { get; set; } = 300;
 
-    public double MigrationReadyWaitTimeoutSeconds { get; set; } = 300;
-
-    public int IdleTeardownGraceSeconds { get; set; } = 30;
-
-    public double CommandRetryIntervalSeconds { get; set; } = 3;
-
-    public int CommandMaxRetries { get; set; } = 3;
+    public int IdleShutdownDelaySeconds { get; set; } = 30;
 
     public int DirectListenPort { get; set; } = 7790;
 
@@ -52,21 +40,11 @@ public sealed class ServerConfig
 
     public string WebListen { get; set; } = "http://0.0.0.0:17920";
 
-    public string WebUploadToken { get; set; } = "";
-
-    public double BackendRetryIntervalSeconds { get; set; } = 0.5;
-
-    public int BackendMaxRetries { get; set; } = 600;
-
-    public double RoutingWaitTimeoutSeconds { get; set; } = 300;
-
     public string DiscordBotToken { get; set; } = "";
 
     public ulong DiscordChannelId { get; set; } = 0;
 
     public ulong DiscordConsoleChannelId { get; set; } = 0;
-
-    public ulong DiscordAdminUserId { get; set; } = 0;
 
     [JsonIgnore]
     public string RunTablePath => Path.Combine(Directory.GetCurrentDirectory(), "run.json");
@@ -89,72 +67,11 @@ public sealed class ServerConfig
     {
         if (!File.Exists(path))
         {
-            ServerConfig config = ImportLegacy(path);
+            var config = new ServerConfig();
             AtomicJsonFile.Write(path, JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
             Log.Info($"기본 구성 생성: {path}");
             return config;
         }
         return JsonSerializer.Deserialize<ServerConfig>(File.ReadAllText(path)) ?? new ServerConfig();
-    }
-
-    private static ServerConfig ImportLegacy(string path)
-    {
-        string dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? Directory.GetCurrentDirectory();
-        string orchestratorPath = Path.Combine(dir, "orchestrator.json");
-        string gatewayPath = Path.Combine(dir, "gateway.json");
-
-        var config = new ServerConfig();
-        if (File.Exists(orchestratorPath))
-        {
-            try
-            {
-                var old = JsonSerializer.Deserialize<ServerConfig>(File.ReadAllText(orchestratorPath));
-                if (old != null)
-                {
-                    config = old;
-                    Log.Info($"기존 구성 가져옴: {orchestratorPath}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Info($"기존 구성 읽기 실패({orchestratorPath}): {ex.Message}");
-            }
-        }
-
-        if (File.Exists(gatewayPath))
-        {
-            try
-            {
-                var gateway = JsonSerializer.Deserialize<GatewayImport>(File.ReadAllText(gatewayPath));
-                if (gateway != null)
-                {
-                    config.DirectListenPort = gateway.DirectListenPort;
-                    config.SteamEnabled = gateway.SteamEnabled;
-                    if (!string.IsNullOrEmpty(gateway.SteamVersionTag)) config.SteamVersionTag = gateway.SteamVersionTag;
-                    if (gateway.Motd != null) config.Motd = gateway.Motd;
-                    config.BackendRetryIntervalSeconds = gateway.BackendRetryIntervalSeconds;
-                    config.BackendMaxRetries = gateway.BackendMaxRetries;
-                    config.RoutingWaitTimeoutSeconds = gateway.RoutingWaitTimeoutSeconds;
-                    Log.Info($"게이트웨이 구성 가져옴: {gatewayPath}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Info($"게이트웨이 구성 읽기 실패({gatewayPath}): {ex.Message}");
-            }
-        }
-
-        return config;
-    }
-
-    private sealed class GatewayImport
-    {
-        public int DirectListenPort { get; set; } = 7790;
-        public bool SteamEnabled { get; set; }
-        public string SteamVersionTag { get; set; } = "7.0.1_MPv5.0.0";
-        public string Motd { get; set; } = "";
-        public double BackendRetryIntervalSeconds { get; set; } = 0.5;
-        public int BackendMaxRetries { get; set; } = 600;
-        public double RoutingWaitTimeoutSeconds { get; set; } = 300;
     }
 }

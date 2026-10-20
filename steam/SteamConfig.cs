@@ -1,4 +1,4 @@
-using CasuMp.SteamSession;
+using CasuMpSteam.Session;
 using System.Text.Json;
 
 namespace CasuMpSteam;

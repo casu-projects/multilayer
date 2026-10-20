@@ -10,7 +10,7 @@ namespace CasuMpAgent;
 internal static class Program
 {
     private static Action? _shutdownRequested;
-    private static void Main(string[] args)
+    private static async Task Main(string[] args)
     {
         string configPath = args.Length > 0 ? args[0] : "agent.json";
         AgentConfig config = AgentConfig.Load(configPath);
@@ -46,7 +46,7 @@ internal static class Program
         {
             while (inbound.TryDequeue(out var item))
             {
-                try { HandleCommand(config, instances, channel, item.Msg, item.Ack); }
+                try { await HandleCommand(config, instances, channel, item.Msg, item.Ack); }
                 catch (Exception ex) { Logger.Info($"명령 처리 실패: {ex.Message}"); }
             }
 
@@ -57,7 +57,7 @@ internal static class Program
                 {
                     instances.Remove(proc.Key);
                     Logger.Info($"{proc.Key} 종료 (code {proc.ExitCode}).");
-                    channel.Report(ControlMessage.Create(0, MessageTypes.InstanceExited,
+                    channel.Report(ControlMessage.Create(0, MessageType.INSTANCE_EXITED,
                         new { instanceKey = proc.Key, code = proc.ExitCode ?? -1 }));
                 }
             }
@@ -65,18 +65,15 @@ internal static class Program
             Thread.Sleep(100);
         }
 
-        foreach (InstanceProcess proc in instances.Values)
-        {
-            proc.Stop();
-        }
+        await Task.WhenAll(instances.Values.Select(proc => proc.StopAsync()));
     }
 
-    private static void HandleCommand(AgentConfig config, Dictionary<string, InstanceProcess> instances,
+    private static async Task HandleCommand(AgentConfig config, Dictionary<string, InstanceProcess> instances,
         ControlChannel channel, ControlMessage msg, Action<ControlMessage> ack)
     {
         switch (msg.Type)
         {
-            case MessageTypes.Spawn:
+            case MessageType.SPAWN:
             {
                 var payload = msg.PayloadAs<SpawnPayload>();
                 if (payload == null)
@@ -106,7 +103,7 @@ internal static class Program
                 ack(ControlMessage.Ack(msg.Seq, true));
                 break;
             }
-            case MessageTypes.Stop:
+            case MessageType.STOP:
             {
                 var payload = msg.PayloadAs<StopPayload>();
                 if (payload == null || !instances.Remove(payload.InstanceKey, out InstanceProcess? proc))
@@ -114,15 +111,15 @@ internal static class Program
                     ack(ControlMessage.Ack(msg.Seq, false, "인스턴스 없음"));
                     return;
                 }
-                proc.Stop();
+                proc.Kill();
                 proc.Cleanup();
                 DeletePid(config, payload.InstanceKey);
-                channel.Report(ControlMessage.Create(0, MessageTypes.InstanceExited,
+                channel.Report(ControlMessage.Create(0, MessageType.INSTANCE_EXITED,
                     new { instanceKey = payload.InstanceKey, code = proc.ExitCode ?? 0 }));
                 ack(ControlMessage.Ack(msg.Seq, true));
                 break;
             }
-            case MessageTypes.ProcessSuspend:
+            case MessageType.PROCESS_SUSPEND:
             {
                 var payload = msg.PayloadAs<ProcessControlPayload>();
                 if (payload == null || !instances.TryGetValue(payload.InstanceKey, out InstanceProcess? proc))
@@ -134,7 +131,7 @@ internal static class Program
                 ack(ControlMessage.Ack(msg.Seq, ok, ok ? null : "suspend 실패"));
                 break;
             }
-            case MessageTypes.ProcessResume:
+            case MessageType.PROCESS_RESUME:
             {
                 var payload = msg.PayloadAs<ProcessControlPayload>();
                 if (payload == null || !instances.TryGetValue(payload.InstanceKey, out InstanceProcess? proc))
@@ -146,11 +143,12 @@ internal static class Program
                 ack(ControlMessage.Ack(msg.Seq, ok, ok ? null : "resume 실패"));
                 break;
             }
-            case MessageTypes.CleanupAll:
+            case MessageType.CLEANUP_ALL:
             {
-                foreach (InstanceProcess proc in instances.Values.ToList())
+                List<InstanceProcess> procs = instances.Values.ToList();
+                await Task.WhenAll(procs.Select(proc => proc.StopAsync()));
+                foreach (InstanceProcess proc in procs)
                 {
-                    proc.Stop();
                     proc.Cleanup();
                     DeletePid(config, proc.Key);
                     instances.Remove(proc.Key);
@@ -158,7 +156,7 @@ internal static class Program
                 ack(ControlMessage.Ack(msg.Seq, true));
                 break;
             }
-            case MessageTypes.Shutdown:
+            case MessageType.SHUTDOWN:
             {
                 Logger.Info("종료 신호 수신 — 인스턴스 정리 후 종료.");
                 ack(ControlMessage.Ack(msg.Seq, true));

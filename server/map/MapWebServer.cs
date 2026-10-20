@@ -5,8 +5,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace CasuMpServer;
@@ -19,8 +17,6 @@ internal sealed class MapWebServer : IAsyncDisposable
     private readonly SteamApiClient? _steamApi;
     private readonly ControlHub? _hub;
     private readonly PlayerDetailRegistry _playerDetails;
-    private readonly ChatHistoryStore _chatHistory;
-    private readonly WebChatService _webChat;
     private readonly ObjectBackgroundStore _objectBackgrounds;
     private readonly RequestRegistry<MapObjectQueryResponse> _objectQueries;
     private readonly RequestRegistry<MapObjectDetailResponse> _objectDetails;
@@ -31,7 +27,6 @@ internal sealed class MapWebServer : IAsyncDisposable
 
     internal MapWebServer(WebApplication app, WorldSnapshotStore store, ServerConfig config,
         SteamApiClient? steamApi, ControlHub? hub, PlayerDetailRegistry playerDetails,
-        ChatHistoryStore chatHistory, WebChatService webChat,
         ObjectBackgroundStore objectBackgrounds, RequestRegistry<MapObjectQueryResponse> objectQueries,
         RequestRegistry<MapObjectDetailResponse> objectDetails, InstanceManager instances, GameAssetCatalog assets)
     {
@@ -41,8 +36,6 @@ internal sealed class MapWebServer : IAsyncDisposable
         _steamApi = steamApi;
         _hub = hub;
         _playerDetails = playerDetails;
-        _chatHistory = chatHistory;
-        _webChat = webChat;
         _objectBackgrounds = objectBackgrounds;
         _objectQueries = objectQueries;
         _objectDetails = objectDetails;
@@ -52,7 +45,7 @@ internal sealed class MapWebServer : IAsyncDisposable
     }
 
     internal static MapWebServer Create(ServerConfig config, WorldSnapshotStore store, SteamApiClient? steamApi,
-        ControlHub? hub, PlayerDetailRegistry playerDetails, ChatHistoryStore chatHistory, WebChatService webChat,
+        ControlHub? hub, PlayerDetailRegistry playerDetails,
         ObjectBackgroundStore objectBackgrounds, RequestRegistry<MapObjectQueryResponse> objectQueries,
         RequestRegistry<MapObjectDetailResponse> objectDetails, InstanceManager instances)
     {
@@ -83,7 +76,7 @@ internal sealed class MapWebServer : IAsyncDisposable
         app.UseDefaultFiles();
         app.UseStaticFiles();
 
-        var server = new MapWebServer(app, store, config, steamApi, hub, playerDetails, chatHistory, webChat,
+        var server = new MapWebServer(app, store, config, steamApi, hub, playerDetails,
             objectBackgrounds, objectQueries, objectDetails, instances, assets);
         server.MapEndpoints();
         return server;
@@ -107,30 +100,6 @@ internal sealed class MapWebServer : IAsyncDisposable
         {
             serverName = string.IsNullOrWhiteSpace(_config.ServerName) ? "CasuMP Server" : _config.ServerName,
         }));
-
-        _app.MapGet("/api/chat", (long? since) => Results.Json(_chatHistory.GetSince(since ?? 0)));
-
-        _app.MapGet("/api/chat/commands", () => Results.Json(_webChat.GetCommands()));
-
-        _app.MapPost("/api/chat/command", async (HttpContext context, ChatCommandRequest request) =>
-        {
-            Task<ChatHistoryMessage?> task = _webChat.ExecuteCommandAsync(request.Command);
-            Task completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(3), context.RequestAborted));
-            if (completed != task)
-                return Results.Json(new { error = "command timeout" }, statusCode: StatusCodes.Status504GatewayTimeout);
-            ChatHistoryMessage? message = await task;
-            return message == null
-                ? Results.BadRequest(new { error = "empty command" })
-                : Results.Json(message);
-        });
-
-        _app.MapPost("/api/chat", (ChatSendRequest request) =>
-        {
-            ChatHistoryMessage? message = _webChat.Send(request.Message);
-            return message == null
-                ? Results.BadRequest(new { error = "empty message" })
-                : Results.Json(message);
-        });
 
         _app.MapGet("/api/instances", () => Results.Json(_store.GetInstances()));
 
@@ -181,7 +150,7 @@ internal sealed class MapWebServer : IAsyncDisposable
 
             string requestId = Guid.NewGuid().ToString("N");
             TaskCompletionSource<PlayerDetailResponse> pending = _playerDetails.Register(requestId);
-            _hub.SendNoAck(conn, MessageTypes.PlayerDetailRequest,
+            _hub.SendNoAck(conn, MessageType.PLAYER_DETAIL_REQUEST,
                 new PlayerDetailRequest { RequestId = requestId, InstanceKey = instanceKey, PlayerKey = playerKey });
 
             Task completed = await Task.WhenAny(pending.Task, Task.Delay(TimeSpan.FromSeconds(2), context.RequestAborted));
@@ -212,7 +181,7 @@ internal sealed class MapWebServer : IAsyncDisposable
 
             string requestId = Guid.NewGuid().ToString("N");
             TaskCompletionSource<MapObjectQueryResponse> pending = _objectQueries.Register(requestId);
-            _hub.SendNoAck(connection, MessageTypes.ObjectQuery, new MapObjectQueryRequest
+            _hub.SendNoAck(connection, MessageType.OBJECT_QUERY, new MapObjectQueryRequest
             {
                 RequestId = requestId,
                 InstanceKey = instanceKey,
@@ -251,7 +220,7 @@ internal sealed class MapWebServer : IAsyncDisposable
 
             string requestId = Guid.NewGuid().ToString("N");
             TaskCompletionSource<MapObjectDetailResponse> pending = _objectDetails.Register(requestId);
-            _hub.SendNoAck(connection, MessageTypes.ObjectDetailRequest, new MapObjectDetailRequest
+            _hub.SendNoAck(connection, MessageType.OBJECT_DETAIL_REQUEST, new MapObjectDetailRequest
             {
                 RequestId = requestId,
                 InstanceKey = instanceKey,
@@ -270,43 +239,6 @@ internal sealed class MapWebServer : IAsyncDisposable
                 : Results.NotFound(new { error = response.Error ?? "object not found" });
         });
 
-        _app.MapPost("/api/instances/{instanceKey}/world", (HttpRequest request, string instanceKey, MapWorldUpload upload) =>
-        {
-            if (!CheckToken(request)) return Results.Unauthorized();
-            var result = _store.SetWorld(instanceKey, upload);
-            return result == null
-                ? Results.BadRequest(new { error = "invalid world snapshot" })
-                : Results.Json(new { ok = true, version = result.Value.Version, worldVersion = result.Value.WorldVersion });
-        });
-
-        _app.MapPost("/api/instances/{instanceKey}/blocks", (HttpRequest request, string instanceKey, MapBlockUpload upload) =>
-        {
-            if (!CheckToken(request)) return Results.Unauthorized();
-            int? version = _store.ApplyBlocks(instanceKey, upload);
-            return version == null
-                ? Results.Json(new { error = "unknown instance or world version mismatch" }, statusCode: 409)
-                : Results.Json(new { ok = true, version = version.Value });
-        });
-    }
-
-    private bool CheckToken(HttpRequest request)
-    {
-        if (string.IsNullOrEmpty(_config.WebUploadToken)) return false;
-
-        string? token = request.Headers["X-Casu-Token"].FirstOrDefault();
-        if (string.IsNullOrEmpty(token))
-        {
-            string authorization = request.Headers.Authorization.ToString();
-            const string prefix = "Bearer ";
-            if (authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                token = authorization[prefix.Length..];
-        }
-        if (string.IsNullOrEmpty(token)) return false;
-
-        byte[] expected = Encoding.UTF8.GetBytes(_config.WebUploadToken);
-        byte[] actual = Encoding.UTF8.GetBytes(token);
-        return expected.Length == actual.Length
-            && CryptographicOperations.FixedTimeEquals(expected, actual);
     }
 
     private async Task<string?> GetAvatarAsync(ulong steamId)

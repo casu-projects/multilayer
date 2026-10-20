@@ -2,6 +2,8 @@ namespace CasuMpServer;
 
 public sealed class ClientGateway
 {
+    private static readonly TimeSpan RoutingWaitTimeout = TimeSpan.FromSeconds(300);
+
     public ServerConfig Config { get; }
 
     private readonly Dictionary<PlayerKey, ClientSession> _sessions = new();
@@ -321,7 +323,7 @@ public sealed class ClientGateway
             session.Tick();
             if (session.State == SessionState.Routing
                 && session.RoutingWaitStartedAt.HasValue
-                && DateTime.UtcNow - session.RoutingWaitStartedAt.Value > TimeSpan.FromSeconds(Config.RoutingWaitTimeoutSeconds))
+                && DateTime.UtcNow - session.RoutingWaitStartedAt.Value > RoutingWaitTimeout)
             {
                 Log.Info($"{session.Username} 라우팅 대기 타임아웃 — 거부.");
                 session.Kick("Server is busy, please try again.");

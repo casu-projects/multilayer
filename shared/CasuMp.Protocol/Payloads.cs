@@ -61,6 +61,7 @@ public sealed class ModHelloPayload
     public string InstanceKey { get; set; } = "";
     public int Port { get; set; }
     public int Depth { get; set; }
+    public string? VersionTag { get; set; }
 }
 
 public sealed class LayerEndPayload
@@ -96,7 +97,6 @@ public sealed class ChatPayload
     public string Layer { get; set; } = "";
     public string Prefix { get; set; } = "";
     public string PrefixColor { get; set; } = "";
-    public bool Web { get; set; }
 }
 
 public sealed class ListRequestPayload
@@ -108,12 +108,6 @@ public sealed class ListResultPayload
 {
     public string PlayerKey { get; set; } = "";
     public string[] Lines { get; set; } = Array.Empty<string>();
-}
-
-public sealed class CallAdminPayload
-{
-    public string PlayerKey { get; set; } = "";
-    public string Username { get; set; } = "";
 }
 
 public sealed class PlayerEventPayload
@@ -149,32 +143,6 @@ public sealed class RunRulesPayload
 {
     public Dictionary<string, string> RunSettings { get; set; } = new();
     public Dictionary<string, string> Rules { get; set; } = new();
-}
-
-public sealed class VoteRunPayload
-{
-    public string VoteId { get; set; } = "";
-    public string Kind { get; set; } = "";
-    public string Title { get; set; } = "";
-    public string PromptBody { get; set; } = "";
-    public float TimeoutSeconds { get; set; }
-    public Dictionary<string, string> Payload { get; set; } = new();
-}
-
-public sealed class VoteResultPayload
-{
-    public string VoteId { get; set; } = "";
-    public string Kind { get; set; } = "";
-    public int Yes { get; set; }
-    public int No { get; set; }
-    public int Ignore { get; set; }
-    public Dictionary<string, string> Payload { get; set; } = new();
-}
-
-public sealed class VoteRejectedPayload
-{
-    public string CallerClientId { get; set; } = "";
-    public string Reason { get; set; } = "";
 }
 
 public sealed class LobbyMetadataPayload

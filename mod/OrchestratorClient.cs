@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
-using System.Text;
 using Together;
 using UnityEngine;
 
@@ -67,7 +66,7 @@ public sealed class OrchestratorClient : MonoBehaviour
         if (!_connected || _readyReportedOnConnection) return;
         if (!CasualtiesTogetherUtils.Util.IsWorldGenerated()) return;
         _readyReportedOnConnection = true;
-        SendEvent(MessageTypes.InstanceReady, new { instanceKey = InstanceKey });
+        SendEvent(MessageType.INSTANCE_READY, new { instanceKey = InstanceKey });
     }
 
     public void ProcessInbound()
@@ -79,7 +78,7 @@ public sealed class OrchestratorClient : MonoBehaviour
         }
     }
 
-    public void SendEvent(string type, object payload)
+    public void SendEvent(MessageType type, object payload)
     {
         _outbound.Enqueue(ControlMessage.Create(0, type, payload));
         SignalOutbound();
@@ -106,83 +105,80 @@ public sealed class OrchestratorClient : MonoBehaviour
     {
         switch (msg.Type)
         {
-            case MessageTypes.StartRun:
+            case MessageType.START_RUN:
                 RunModule.HandleStartRun();
                 Ack(msg, true);
                 break;
-            case MessageTypes.Shutdown:
+            case MessageType.SHUTDOWN:
                 RunModule.HandleShutdown();
                 Ack(msg, true);
                 break;
-            case MessageTypes.Reset:
+            case MessageType.RESET:
                 RunModule.HandleReset();
                 Ack(msg, true);
                 break;
-            case MessageTypes.Freeze:
+            case MessageType.FREEZE:
                 MigrationModule.HandleFreeze(msg);
                 Ack(msg, true);
                 break;
-            case MessageTypes.PreClear:
+            case MessageType.PRECLEAR:
                 MigrationModule.HandlePreClear(msg);
                 Ack(msg, true);
                 break;
-            case MessageTypes.Unfreeze:
+            case MessageType.UNFREEZE:
                 MigrationModule.HandleUnfreeze(msg);
                 Ack(msg, true);
                 break;
-            case MessageTypes.Resume:
+            case MessageType.RESUME:
                 MigrationModule.HandleResume(msg);
                 Ack(msg, true);
                 break;
-            case MessageTypes.TriggerWorldgen:
+            case MessageType.TRIGGER_WORLDGEN:
                 MigrationModule.HandleTriggerWorldgen(msg.PayloadAs<PlayerKeyPayload>()?.PlayerKey ?? "");
                 Ack(msg, true);
                 break;
-            case MessageTypes.Release:
+            case MessageType.RELEASE:
                 MigrationModule.HandleRelease(msg.PayloadAs<PlayerKeyPayload>()?.PlayerKey ?? "",
                     msg.PayloadAs<PlayerKeyPayload>()?.Epoch ?? -1);
                 Ack(msg, true);
                 break;
-            case MessageTypes.PlayerDataResponse:
+            case MessageType.PLAYER_DATA_RESPONSE:
                 SaveModule.HandlePlayerDataResponse(msg);
                 break;
-            case MessageTypes.PlayerDetailRequest:
+            case MessageType.PLAYER_DETAIL_REQUEST:
                 PlayerDetailModule.HandleRequest(msg.PayloadAs<PlayerDetailRequest>());
                 break;
-            case MessageTypes.ObjectQuery:
+            case MessageType.OBJECT_QUERY:
                 ObjectIndexModule.Instance?.HandleQuery(msg.PayloadAs<MapObjectQueryRequest>());
                 break;
-            case MessageTypes.ObjectDetailRequest:
+            case MessageType.OBJECT_DETAIL_REQUEST:
                 ObjectIndexModule.Instance?.HandleDetail(msg.PayloadAs<MapObjectDetailRequest>());
                 break;
-            case MessageTypes.ModHelloAck:
+            case MessageType.MAP_WORLD_ACK:
+                MapModule.Instance?.HandleWorldAck(msg.PayloadAs<MapUploadAck>());
                 break;
-            case MessageTypes.RunRulesState:
+            case MessageType.MAP_BLOCKS_ACK:
+                MapModule.Instance?.HandleBlocksAck(msg.PayloadAs<MapUploadAck>());
+                break;
+            case MessageType.MOD_HELLO_ACK:
+                break;
+            case MessageType.RUN_RULES_STATE:
                 RunRuleState.Apply(msg.PayloadAs<RunRulesPayload>());
                 break;
-            case MessageTypes.Chat:
+            case MessageType.CHAT:
                 ChatRelay.Receive(msg.PayloadAs<ChatPayload>());
                 break;
-            case MessageTypes.Announce:
+            case MessageType.ANNOUNCE:
                 AnnounceRelay.Handle(msg.PayloadAs<AnnouncePayload>());
                 break;
-            case MessageTypes.VoteRun:
-                VoteRelay.HandleRun(msg.PayloadAs<VoteRunPayload>());
-                break;
-            case MessageTypes.VoteResult:
-                VoteRelay.HandleResult(msg.PayloadAs<VoteResultPayload>());
-                break;
-            case MessageTypes.VoteRejected:
-                VoteRelay.HandleRejected(msg.PayloadAs<VoteRejectedPayload>());
-                break;
-            case MessageTypes.ListResult:
+            case MessageType.LIST_RESULT:
                 ChatCommands.HandleListResult(msg);
                 break;
-            case MessageTypes.Console:
+            case MessageType.CONSOLE:
                 RunModule.HandleConsole(msg.PayloadAs<ConsolePayload>()?.Command ?? "");
                 Ack(msg, true);
                 break;
-            case MessageTypes.KickPlayer:
+            case MessageType.KICK_PLAYER:
                 HandleKickPlayer(msg);
                 break;
             default:
@@ -221,8 +217,6 @@ public sealed class OrchestratorClient : MonoBehaviour
                 using var client = new TcpClient();
                 client.Connect(host, port);
                 using var stream = client.GetStream();
-                using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-                using var reader = new StreamReader(stream, new UTF8Encoding(false));
 
                 _connected = true;
                 Plugin.Log.LogInfo($"[Orch] 오케스트레이터 연결: {OrchAddr}");
@@ -233,16 +227,19 @@ public sealed class OrchestratorClient : MonoBehaviour
                 }
                 _everConnected = true;
 
-                writer.WriteLine(ControlMessage.Create(1, MessageTypes.ModHello, new
+                ControlMessage hello = ControlMessage.Create(1, MessageType.MOD_HELLO, new
                 {
                     instanceKey = InstanceKey,
                     port = InstancePort,
                     depth = InstanceDepth,
-                }).Serialize());
+                    versionTag = Multiplayer.FULL_VERSION_TAG,
+                });
+                ControlFrameCodec.WriteAsync(stream, hello.ToFrame(), CancellationToken.None)
+                    .GetAwaiter().GetResult();
 
                 using var cts = new CancellationTokenSource();
-                Task readTask = ReadLoopAsync(reader, cts.Token);
-                Task writeTask = WriteLoopAsync(writer, cts.Token);
+                Task readTask = ReadLoopAsync(stream, cts.Token);
+                Task writeTask = WriteLoopAsync(stream, cts.Token);
                 Task.WaitAny(readTask, writeTask);
                 cts.Cancel();
                 try { Task.WaitAll(readTask, writeTask); } catch { }
@@ -260,15 +257,16 @@ public sealed class OrchestratorClient : MonoBehaviour
         }
     }
 
-    private async Task ReadLoopAsync(StreamReader reader, CancellationToken ct)
+    private async Task ReadLoopAsync(Stream stream, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            string line = await reader.ReadLineAsync();
-            if (line == null) break;
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            ControlMessage msg = ControlMessage.Parse(line);
+            ControlFrame frame = await ControlFrameCodec.ReadAsync(stream, ct);
+            if (frame == null) break;
+
+            ControlMessage msg = ControlMessage.FromFrame(frame);
             if (msg == null) continue;
+
             _inbound.Enqueue(msg);
         }
     }
@@ -280,7 +278,7 @@ public sealed class OrchestratorClient : MonoBehaviour
         catch (SemaphoreFullException) { }
     }
 
-    private async Task WriteLoopAsync(StreamWriter writer, CancellationToken ct)
+    private async Task WriteLoopAsync(Stream stream, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -295,7 +293,7 @@ public sealed class OrchestratorClient : MonoBehaviour
 
             while (_outbound.TryDequeue(out ControlMessage msg))
             {
-                try { await writer.WriteLineAsync(msg.Serialize()); }
+                try { await ControlFrameCodec.WriteAsync(stream, msg.ToFrame(), ct); }
                 catch { return; }
             }
         }

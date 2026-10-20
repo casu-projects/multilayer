@@ -33,6 +33,8 @@ public sealed class InstanceInfo
 
 public sealed class InstanceManager
 {
+    public const int LayerCount = 5;
+
     private readonly ServerConfig _config;
     private readonly ControlHub _hub;
 
@@ -69,7 +71,7 @@ public sealed class InstanceManager
         get
         {
             if (_prewarmInFlight >= 0) return false;
-            for (int depth = 1; depth <= _config.LayerCount; depth++)
+            for (int depth = 1; depth <= LayerCount; depth++)
             {
                 InstanceInfo? info = FindByDepth(depth);
                 if (info == null || info.Status != InstanceStatus.Suspended) return false;
@@ -125,7 +127,7 @@ public sealed class InstanceManager
         }
 
         Log.Info($"에이전트 {machineId} 프로세스 정리 요청.");
-        _hub.Send(conn, MessageTypes.CleanupAll, null, (ok, reason) =>
+        _hub.Send(conn, MessageType.CLEANUP_ALL, null, (ok, reason) =>
         {
             _cleanupPending.Remove(machineId);
             if (!ok)
@@ -219,7 +221,7 @@ public sealed class InstanceManager
         _agents.IncrementUsage(machineId);
 
         ControlHub.ClientConnection? conn = _hub.AgentConnection(machineId);
-        bool sent = _hub.Send(conn, MessageTypes.Spawn, new
+        bool sent = _hub.Send(conn, MessageType.SPAWN, new
         {
             instanceKey = key,
             depth,
@@ -265,7 +267,7 @@ public sealed class InstanceManager
         InstanceInfo? info = Find(key);
         if (info == null) return;
         info.Status = InstanceStatus.Stopping;
-        _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageTypes.Stop, new { instanceKey = key });
+        _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageType.STOP, new { instanceKey = key });
     }
 
     public bool ResetInstance(string key)
@@ -289,7 +291,7 @@ public sealed class InstanceManager
         info.HasPlayedSinceReset = false;
         info.SuspendAfterReset = true;
 
-        _hub.Send(info.ModConnection, MessageTypes.Reset, new { instanceKey = key }, (ok, reason) =>
+        _hub.Send(info.ModConnection, MessageType.RESET, new { instanceKey = key }, (ok, reason) =>
         {
             if (!ok)
             {
@@ -308,7 +310,7 @@ public sealed class InstanceManager
         if (info.Status is not (InstanceStatus.Ready or InstanceStatus.Idle)) return false;
 
         info.Status = InstanceStatus.Suspending;
-        bool sent = _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageTypes.ProcessSuspend,
+        bool sent = _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageType.PROCESS_SUSPEND,
             new { instanceKey = key }, (ok, reason) =>
             {
                 if (!ok)
@@ -340,7 +342,7 @@ public sealed class InstanceManager
         if (info.Status is not (InstanceStatus.Suspended or InstanceStatus.Suspending)) return false;
 
         info.Status = InstanceStatus.Resuming;
-        bool sent = _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageTypes.ProcessResume,
+        bool sent = _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageType.PROCESS_RESUME,
             new { instanceKey = key }, (ok, reason) =>
             {
                 if (!ok)
@@ -369,7 +371,7 @@ public sealed class InstanceManager
     {
         if (_agents.IsEmpty) return;
 
-        for (int depth = 1; depth <= _config.LayerCount; depth++)
+        for (int depth = 1; depth <= LayerCount; depth++)
         {
             if (_prewarmInFlight == depth) continue;
             InstanceInfo? existing = FindByDepth(depth);
@@ -405,7 +407,7 @@ public sealed class InstanceManager
 
         if (_cleanedMachines.Count > 0)
         {
-            for (int depth = 1; depth <= _config.LayerCount; depth++)
+            for (int depth = 1; depth <= LayerCount; depth++)
             {
                 InstanceInfo? info = FindByDepth(depth);
                 if (info == null || info.Status == InstanceStatus.Stopped)
@@ -433,7 +435,7 @@ public sealed class InstanceManager
             }
             else
             {
-                if (now - _prewarmWaitStartedUtc > TimeSpan.FromSeconds(_config.MigrationReadyWaitTimeoutSeconds))
+                if (now - _prewarmWaitStartedUtc > TimeSpan.FromSeconds(_config.InstanceReadyTimeoutSeconds))
                 {
                     Log.Info($"{info.Key} 프리웜 대기 타임아웃 ({info.Status}) — 프로세스 중지 후 재시도.");
                     StopInstance(info.Key);
@@ -502,7 +504,7 @@ public sealed class InstanceManager
         if (info == null || info.WorldReady) return;
         if (info.Status is not (InstanceStatus.Starting or InstanceStatus.Booting)) return;
 
-        _hub.Send(_hub.ModConnection(key), MessageTypes.StartRun, new { instanceKey = key });
+        _hub.Send(_hub.ModConnection(key), MessageType.START_RUN, new { instanceKey = key });
     }
 
     public void OnModHello(ControlHub.ClientConnection conn, ModHelloPayload payload)
@@ -578,24 +580,25 @@ public sealed class InstanceManager
     public bool IsQueryable(string key) =>
         Find(key)?.Status is InstanceStatus.Ready or InstanceStatus.Idle;
 
-    public bool CanSendModCommand(string? instanceKey, string messageType)
+    public bool CanSendModCommand(string? instanceKey, MessageType messageType)
     {
         if (string.IsNullOrEmpty(instanceKey)) return false;
         InstanceInfo? info = Find(instanceKey);
         if (info == null) return false;
 
-        if (messageType == MessageTypes.ModHelloAck) return true;
-        if (messageType == MessageTypes.StartRun)
+        if (messageType == MessageType.MOD_HELLO_ACK) return true;
+        if (messageType is MessageType.MAP_WORLD_ACK or MessageType.MAP_BLOCKS_ACK) return true;
+        if (messageType == MessageType.START_RUN)
             return (info.Status is InstanceStatus.Starting or InstanceStatus.Booting) && !info.WorldReady;
-        if (messageType == MessageTypes.Reset)
+        if (messageType == MessageType.RESET)
             return info.Status is InstanceStatus.Ready or InstanceStatus.Idle or InstanceStatus.IdleReset;
-        if (messageType == MessageTypes.RunRulesState)
+        if (messageType == MessageType.RUN_RULES_STATE)
             return info.Status is InstanceStatus.Booting or InstanceStatus.Ready
                 or InstanceStatus.Idle or InstanceStatus.IdleReset;
 
-        if (messageType is MessageTypes.PlayerDetailRequest or MessageTypes.ObjectQuery
-            or MessageTypes.ObjectDetailRequest or MessageTypes.Chat
-            or MessageTypes.Console or MessageTypes.Announce)
+        if (messageType is MessageType.PLAYER_DETAIL_REQUEST or MessageType.OBJECT_QUERY
+            or MessageType.OBJECT_DETAIL_REQUEST or MessageType.CHAT
+            or MessageType.CONSOLE or MessageType.ANNOUNCE)
             return info.Status is InstanceStatus.Ready or InstanceStatus.Idle;
 
         if (info.Status is InstanceStatus.Suspended or InstanceStatus.Suspending
@@ -604,7 +607,7 @@ public sealed class InstanceManager
             return false;
 
         if (info.Status is InstanceStatus.Starting or InstanceStatus.Booting or InstanceStatus.IdleReset)
-            return messageType is MessageTypes.StartRun or MessageTypes.RunRulesState or MessageTypes.ModHelloAck;
+            return messageType is MessageType.START_RUN or MessageType.RUN_RULES_STATE or MessageType.MOD_HELLO_ACK;
 
         return info.Status is InstanceStatus.Ready or InstanceStatus.Idle;
     }
@@ -686,7 +689,7 @@ public sealed class InstanceManager
                 continue;
             }
 
-            if (now - info.LastNonIdleAt < TimeSpan.FromSeconds(_config.IdleTeardownGraceSeconds))
+            if (now - info.LastNonIdleAt < TimeSpan.FromSeconds(_config.IdleShutdownDelaySeconds))
             {
                 if (info.Status == InstanceStatus.Ready)
                     info.Status = InstanceStatus.Idle;

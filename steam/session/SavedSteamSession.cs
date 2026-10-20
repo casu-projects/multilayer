@@ -1,4 +1,4 @@
-namespace CasuMp.SteamSession;
+namespace CasuMpSteam.Session;
 
 public sealed class SavedSteamSession
 {

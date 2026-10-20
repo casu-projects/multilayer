@@ -14,8 +14,8 @@ public sealed class ControlChannel
         Func<IReadOnlyList<AgentInstanceInfo>> instanceSnapshot)
     {
         _inbound = inbound;
-        _client = new ControlClient(config.OrchestratorAddr, config.ReconnectIntervalSeconds,
-            () => ControlMessage.Create(1, MessageTypes.AgentHello, new
+        _client = new ControlClient(config.OrchestratorAddr, 2,
+            () => ControlMessage.Create(1, MessageType.AGENT_HELLO, new
             {
                 machineId = config.MachineId,
                 capacity = config.Capacity,

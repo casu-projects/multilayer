@@ -1,6 +1,6 @@
 using SteamKit2;
 
-namespace CasuMp.SteamSession;
+namespace CasuMpSteam.Session;
 
 public static class SteamSessionAuth
 {

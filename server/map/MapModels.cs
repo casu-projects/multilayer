@@ -68,25 +68,3 @@ public sealed class MapRenderData
     public int BiomeDepth { get; set; }
     public int[] Grid { get; set; } = Array.Empty<int>();
 }
-
-public sealed class ChatHistoryMessage
-{
-    public long Id { get; set; }
-    public DateTime At { get; set; }
-    public string Source { get; set; } = "";
-    public string Speaker { get; set; } = "";
-    public string Layer { get; set; } = "";
-    public string Color { get; set; } = "";
-    public string Text { get; set; } = "";
-}
-
-public sealed class ChatHistoryResponse
-{
-    public long LastId { get; set; }
-    public List<ChatHistoryMessage> Messages { get; set; } = new();
-}
-
-public sealed class ChatSendRequest
-{
-    public string Message { get; set; } = "";
-}

@@ -108,7 +108,7 @@ internal static class BasePlayer_ServerCreatePlayer_ApplyIdentityPatch
 
         if (OrchestratorClient.Instance != null)
         {
-            OrchestratorClient.Instance.SendEvent(MessageTypes.PlayerDataRequest, // 저장 데이터 요청
+            OrchestratorClient.Instance.SendEvent(MessageType.PLAYER_DATA_REQUEST, // 저장 데이터 요청
                 new { playerKey = CasuMod.MigrationModule.PlayerKeyOf(plr) });
         }
     }

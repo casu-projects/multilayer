@@ -1,7 +1,7 @@
 using System.Text.Json;
 using CasuMp.Runtime;
 
-namespace CasuMp.SteamSession;
+namespace CasuMpSteam.Session;
 
 public static class SteamSessionStore
 {

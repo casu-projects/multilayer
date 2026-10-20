@@ -30,7 +30,7 @@ public static class AnnounceRelay
     internal static void SendDeath(ScavPlayer plr, string text)
     {
         if (plr == null || string.IsNullOrEmpty(text)) return;
-        OrchestratorClient.Instance?.SendEvent(MessageTypes.Announce, new
+        OrchestratorClient.Instance?.SendEvent(MessageType.ANNOUNCE, new
         {
             kind = KindDeath,
             playerKey = MigrationModule.PlayerKeyOf(plr),
@@ -44,7 +44,7 @@ public static class AnnounceRelay
     {
         if (plr == null || string.IsNullOrEmpty(text)) return;
         SendChatAnnouncementTo(text, new List<knetid>(ServerMain.AllClientIds)); // 발신 레이어 즉시 표시
-        OrchestratorClient.Instance?.SendEvent(MessageTypes.Announce, new // 타 레이어 릴레이
+        OrchestratorClient.Instance?.SendEvent(MessageType.ANNOUNCE, new // 타 레이어 릴레이
         {
             kind,
             playerKey = MigrationModule.PlayerKeyOf(plr),

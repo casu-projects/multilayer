@@ -35,7 +35,7 @@ internal sealed class SessionLifecycle
         string joinName = session.Username.Length > 0 ? session.Username : key.Value;
         foreach (var modConn in _hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
         {
-            _hub.SendNoAck(modConn, MessageTypes.Announce, new
+            _hub.SendNoAck(modConn, MessageType.ANNOUNCE, new
             {
                 kind = "join",
                 playerKey = key.Value,
@@ -70,7 +70,7 @@ internal sealed class SessionLifecycle
         _ = _discord.SendJoinLeaveAsync(name, LobbyMetadataService.SteamIdOf(key), joined: false);
         foreach (var modConn in _hub.Connections.Where(c => c.Kind == ClientKind.Mod && !c.Closed))
         {
-            _hub.SendNoAck(modConn, MessageTypes.Announce, new
+            _hub.SendNoAck(modConn, MessageType.ANNOUNCE, new
             {
                 kind = "leave",
                 playerKey = key.Value,

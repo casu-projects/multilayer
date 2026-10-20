@@ -3,7 +3,6 @@ const POLL_MS = 1000;
 const INSTANCE_POLL_MS = 2000;
 const DETAIL_MS = 2000;
 const ASSET_BASE = '/assets/game/';
-const CHAT_POLL_MS = 1500;
 const MAP_SCALE = (window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900) ? 4 : 8;
 const OBJECT_FILTER_KEY = 'casumap.objectFilter.v1';
 const MAX_ZOOM = 3;
@@ -23,7 +22,6 @@ const el = {
   zoomReset: document.getElementById('zoomReset'),
   steamToggle: document.getElementById('steamToggle'),
   objectFilterButton: document.getElementById('objectFilterButton'),
-  chatToggle: document.getElementById('chatToggle'),
   usersToggle: document.getElementById('usersToggle'),
   objectFilterPanel: document.getElementById('objectFilterPanel'),
   objectFilterList: document.getElementById('objectFilterList'),
@@ -31,11 +29,6 @@ const el = {
   objectFilterAllOff: document.getElementById('objectFilterAllOff'),
   userList: document.getElementById('userList'),
   userCount: document.getElementById('userCount'),
-  chatHistory: document.getElementById('chatHistory'),
-  chatForm: document.getElementById('chatForm'),
-  chatInput: document.getElementById('chatInput'),
-  chatSend: document.getElementById('chatSend'),
-  chatAutocomplete: document.getElementById('chatAutocomplete'),
   detailDrawer: document.getElementById('detailDrawer'),
   detailClose: document.getElementById('detailClose'),
   detailHead: document.getElementById('detailHead'),
@@ -58,7 +51,6 @@ const el = {
 const state = {
   instances: [],
   selected: null,
-  chatVisible: true,
   usersVisible: true,
   worldVersion: '',
   version: 0,
@@ -84,14 +76,6 @@ const state = {
   detailLoading: false,
   detail: null,
   detailTimer: null,
-  chatMessages: [],
-  chatLastId: 0,
-  chatLoading: false,
-  chatSending: false,
-  commands: [],
-  autocompleteItems: [],
-  autocompleteIndex: 0,
-  autocompleteOpen: false,
   showSteam: true,
   objects: [],
   objectClusters: [],
@@ -723,243 +707,6 @@ async function loadPlayers() {
     console.error('players', error);
   } finally {
     state.playersLoading = false;
-  }
-}
-
-function isChatNearBottom() {
-  const element = el.chatHistory;
-  return element.scrollHeight - element.scrollTop - element.clientHeight < 40;
-}
-
-function chatTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function renderChat(scrollToBottom = false) {
-  el.chatHistory.innerHTML = '';
-  if (!state.chatMessages.length) {
-    const empty = document.createElement('div');
-    empty.className = 'chat-empty';
-    empty.textContent = '채팅 내역이 없습니다.';
-    el.chatHistory.appendChild(empty);
-    return;
-  }
-
-  for (const message of state.chatMessages) {
-    const source = message.source || 'game';
-    const row = document.createElement('div');
-    row.className = `chat-message ${source}`;
-    const time = document.createElement('span');
-    time.className = 'chat-time';
-    time.textContent = chatTime(message.at);
-    row.appendChild(time);
-
-    const badge = document.createElement('span');
-    badge.className = `chat-badge ${source}`;
-    let name = message.speaker || '';
-    let text = message.text || '';
-    if (source === 'web') {
-      badge.textContent = '[WEB]';
-      name = '';
-    } else if (source === 'discord') {
-      badge.textContent = '[D]';
-    } else if (source === 'command') {
-      badge.textContent = '[CMD]';
-      name = '';
-    } else {
-      badge.textContent = `[${message.layer || '?'}]`;
-    }
-    row.appendChild(badge);
-
-    if (name) {
-      const nameElement = document.createElement('span');
-      nameElement.className = 'chat-name';
-      nameElement.textContent = `${name}:`;
-      if (/^#[0-9a-f]{6}$/i.test(message.color || '')) {
-        nameElement.style.color = message.color;
-      }
-      row.appendChild(nameElement);
-    }
-
-    const textElement = document.createElement('span');
-    textElement.className = 'chat-text';
-    textElement.textContent = text;
-    row.appendChild(textElement);
-    el.chatHistory.appendChild(row);
-  }
-
-  if (scrollToBottom) {
-    el.chatHistory.scrollTop = el.chatHistory.scrollHeight;
-  }
-}
-
-async function loadChat() {
-  if (state.chatLoading) return;
-  state.chatLoading = true;
-  try {
-    const response = await getJson(`/api/chat?since=${state.chatLastId}`);
-    if (!response) return;
-    if (response.lastId < state.chatLastId) {
-      state.chatMessages = [];
-      state.chatLastId = 0;
-    }
-    if (response.messages?.length) {
-      const stick = isChatNearBottom();
-      for (const message of response.messages) {
-        if (!state.chatMessages.some(existing => existing.id === message.id)) {
-          state.chatMessages.push(message);
-        }
-      }
-      state.chatMessages.sort((a, b) => a.id - b.id);
-      if (state.chatMessages.length > 200) {
-        state.chatMessages = state.chatMessages.slice(-200);
-      }
-      state.chatLastId = Math.max(state.chatLastId, response.lastId);
-      renderChat(stick);
-    } else if (!state.chatMessages.length) {
-      renderChat();
-    }
-  } catch (error) {
-    console.error('chat history', error);
-  } finally {
-    state.chatLoading = false;
-  }
-}
-
-async function loadCommands() {
-  try {
-    const commands = await getJson('/api/chat/commands');
-    state.commands = Array.isArray(commands) ? commands : [];
-  } catch (error) {
-    console.error('commands', error);
-  }
-}
-
-function hideAutocomplete() {
-  state.autocompleteOpen = false;
-  state.autocompleteItems = [];
-  state.autocompleteIndex = 0;
-  el.chatAutocomplete.classList.add('hidden');
-  el.chatAutocomplete.innerHTML = '';
-}
-
-function renderAutocomplete() {
-  el.chatAutocomplete.innerHTML = '';
-  state.autocompleteItems.forEach((command, index) => {
-    const item = document.createElement('div');
-    item.className = 'chat-autocomplete-item' + (index === state.autocompleteIndex ? ' active' : '');
-    const name = document.createElement('span');
-    name.className = 'chat-autocomplete-name';
-    name.textContent = `/${command.name}`;
-    const usage = document.createElement('span');
-    usage.className = 'chat-autocomplete-usage';
-    usage.textContent = command.usage || '';
-    const description = document.createElement('span');
-    description.className = 'chat-autocomplete-desc';
-    description.textContent = command.description || '';
-    item.appendChild(name);
-    item.appendChild(usage);
-    item.appendChild(description);
-    item.addEventListener('click', () => applyAutocomplete(command));
-    el.chatAutocomplete.appendChild(item);
-  });
-  el.chatAutocomplete.classList.remove('hidden');
-}
-
-function updateAutocomplete() {
-  const value = el.chatInput.value;
-  if (!value.startsWith('/') || value.includes(' ')) {
-    hideAutocomplete();
-    return;
-  }
-  const query = value.slice(1).toLowerCase();
-  const matches = state.commands
-    .filter(command => command.name.toLowerCase().startsWith(query))
-    .slice(0, 8);
-  if (!matches.length) {
-    hideAutocomplete();
-    return;
-  }
-  state.autocompleteOpen = true;
-  state.autocompleteItems = matches;
-  state.autocompleteIndex = 0;
-  renderAutocomplete();
-}
-
-function applyAutocomplete(command) {
-  el.chatInput.value = `/${command.name} `;
-  hideAutocomplete();
-  el.chatInput.focus();
-}
-
-async function sendCommand(command) {
-  if (state.chatSending) return;
-  state.chatSending = true;
-  el.chatInput.disabled = true;
-  el.chatSend.disabled = true;
-  try {
-    const response = await fetch(`${API}/api/chat/command`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command }),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const message = await response.json();
-    if (message?.id) {
-      state.chatMessages.push(message);
-      state.chatMessages.sort((a, b) => a.id - b.id);
-      state.chatLastId = Math.max(state.chatLastId, message.id);
-      renderChat(true);
-    }
-    el.chatInput.value = '';
-  } catch (error) {
-    console.error('command send', error);
-  } finally {
-    state.chatSending = false;
-    el.chatInput.disabled = false;
-    el.chatSend.disabled = false;
-    el.chatInput.focus();
-  }
-}
-
-async function sendChat(event) {
-  event.preventDefault();
-  if (state.chatSending) return;
-  const text = el.chatInput.value.trim();
-  if (!text) return;
-  hideAutocomplete();
-  if (text.startsWith('/')) {
-    await sendCommand(text);
-    return;
-  }
-
-  state.chatSending = true;
-  el.chatInput.disabled = true;
-  el.chatSend.disabled = true;
-  try {
-    const response = await fetch(`${API}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text }),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const message = await response.json();
-    if (message?.id) {
-      state.chatMessages.push(message);
-      state.chatMessages.sort((a, b) => a.id - b.id);
-      state.chatLastId = Math.max(state.chatLastId, message.id);
-      renderChat(true);
-    }
-    el.chatInput.value = '';
-  } catch (error) {
-    console.error('chat send', error);
-  } finally {
-    state.chatSending = false;
-    el.chatInput.disabled = false;
-    el.chatSend.disabled = false;
-    el.chatInput.focus();
   }
 }
 
@@ -1850,26 +1597,6 @@ function inventoryRow(item) {
 }
 
 el.detailClose.addEventListener('click', closeDetail);
-el.chatInput.addEventListener('input', updateAutocomplete);
-el.chatInput.addEventListener('keydown', event => {
-  if (!state.autocompleteOpen) return;
-  if (event.key === 'ArrowDown') {
-    event.preventDefault();
-    state.autocompleteIndex = (state.autocompleteIndex + 1) % state.autocompleteItems.length;
-    renderAutocomplete();
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault();
-    state.autocompleteIndex = (state.autocompleteIndex - 1 + state.autocompleteItems.length) % state.autocompleteItems.length;
-    renderAutocomplete();
-  } else if (event.key === 'Enter' || event.key === 'Tab') {
-    event.preventDefault();
-    const command = state.autocompleteItems[state.autocompleteIndex];
-    if (command) applyAutocomplete(command);
-  } else if (event.key === 'Escape') {
-    hideAutocomplete();
-  }
-});
-el.chatForm.addEventListener('submit', sendChat);
 el.objectFilterAllOn.addEventListener('click', () => setAllObjectNames(true));
 el.objectFilterAllOff.addEventListener('click', () => setAllObjectNames(false));
 el.objectFilterButton.addEventListener('click', event => {
@@ -1881,17 +1608,6 @@ document.addEventListener('click', event => {
   if (event.target.closest('#objectFilterPanel') || event.target.closest('#objectFilterButton')) return;
   toggleObjectFilter(false);
 });
-function setChatVisible(visible) {
-  state.chatVisible = visible;
-  document.body.classList.toggle('chat-hidden', !visible);
-  el.chatToggle.classList.toggle('active', visible);
-  el.chatToggle.setAttribute('aria-pressed', String(visible));
-  if (!visible) {
-    el.chatInput.blur();
-    hideAutocomplete();
-  }
-}
-
 function setUsersVisible(visible) {
   state.usersVisible = visible;
   document.body.classList.toggle('users-hidden', !visible);
@@ -1900,7 +1616,6 @@ function setUsersVisible(visible) {
   if (visible) loadAllUsers();
 }
 
-el.chatToggle.addEventListener('click', () => setChatVisible(!state.chatVisible));
 el.usersToggle.addEventListener('click', () => setUsersVisible(!state.usersVisible));
 el.steamToggle.addEventListener('click', () => {
   state.showSteam = !state.showSteam;
@@ -1977,7 +1692,6 @@ window.addEventListener('resize', handleResize);
 new ResizeObserver(handleResize).observe(el.mapViewport);
 setInterval(() => { loadWorld(false); loadPlayers(); }, POLL_MS);
 setInterval(() => { loadInstances(); }, INSTANCE_POLL_MS);
-setInterval(loadChat, CHAT_POLL_MS);
 setInterval(loadObjects, 60000);
 setInterval(loadAllUsers, 2000);
 
@@ -1986,8 +1700,6 @@ setInterval(loadAllUsers, 2000);
   await loadMeta();
   await loadCatalog();
   resetWorldView();
-  loadChat();
-  loadCommands();
   await loadInstances();
   loadAllUsers();
 })();

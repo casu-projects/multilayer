@@ -1,5 +1,4 @@
 using System.Net.Sockets;
-using System.Text;
 using System.Threading.Channels;
 using CasuMp.Protocol;
 
@@ -68,42 +67,39 @@ public sealed class ControlClient
         await client.ConnectAsync(host, port, ct);
 
         using var stream = client.GetStream();
-        using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-        using var reader = new StreamReader(stream, new UTF8Encoding(false));
 
-        await writer.WriteLineAsync(_hello().Serialize().AsMemory(), ct);
+        await ControlFrameCodec.WriteAsync(stream, _hello().ToFrame(), ct);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        Task readTask = ReadLoopAsync(reader, cts.Token);
-        Task writeTask = WriteLoopAsync(writer, cts.Token);
+        Task readTask = ReadLoopAsync(stream, cts.Token);
+        Task writeTask = WriteLoopAsync(stream, cts.Token);
 
         await Task.WhenAny(readTask, writeTask);
         cts.Cancel();
         try { await Task.WhenAll(readTask, writeTask); } catch { }
     }
 
-    private async Task ReadLoopAsync(StreamReader reader, CancellationToken ct)
+    private async Task ReadLoopAsync(Stream stream, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            string? line = await reader.ReadLineAsync(ct);
-            if (line == null) break;
-            if (string.IsNullOrWhiteSpace(line)) continue;
+            ControlFrame? frame = await ControlFrameCodec.ReadAsync(stream, ct);
+            if (frame == null) break;
 
-            ControlMessage? message = ControlMessage.Parse(line);
-            if (message == null || message.Type == MessageTypes.Ack) continue;
+            ControlMessage? message = ControlMessage.FromFrame(frame);
+            if (message == null || message.Type == MessageType.ACK) continue;
 
             _onMessage(message);
         }
     }
 
-    private async Task WriteLoopAsync(StreamWriter writer, CancellationToken ct)
+    private async Task WriteLoopAsync(Stream stream, CancellationToken ct)
     {
         try
         {
             await foreach (ControlMessage message in _outbound.Reader.ReadAllAsync(ct))
             {
-                await writer.WriteLineAsync(message.Serialize().AsMemory(), ct);
+                await ControlFrameCodec.WriteAsync(stream, message.ToFrame(), ct);
             }
         }
         catch (OperationCanceledException)

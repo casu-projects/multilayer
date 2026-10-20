@@ -15,8 +15,9 @@ public sealed class MapRleRun
     public int Block { get; set; }
 }
 
-public sealed class MapWorldUpload
+public sealed class MapWorldBegin
 {
+    public string RequestId { get; set; } = "";
     public string InstanceKey { get; set; } = "";
     public int Depth { get; set; }
     public int BiomeDepth { get; set; }
@@ -24,7 +25,25 @@ public sealed class MapWorldUpload
     public int Width { get; set; }
     public int Height { get; set; }
     public List<MapPaletteEntry> Palette { get; set; } = new();
+}
+
+public sealed class MapWorldChunk
+{
+    public string RequestId { get; set; } = "";
+    public string WorldVersion { get; set; } = "";
+    public int Offset { get; set; }
     public List<MapRleRun> Runs { get; set; } = new();
+}
+
+public sealed class MapUploadAck
+{
+    public string RequestId { get; set; } = "";
+    public bool Ok { get; set; }
+    public string WorldVersion { get; set; } = "";
+    public int Version { get; set; }
+    public int Received { get; set; }
+    public bool Complete { get; set; }
+    public string Error { get; set; } = "";
 }
 
 public sealed class MapBlockChange
@@ -36,6 +55,7 @@ public sealed class MapBlockChange
 
 public sealed class MapBlockUpload
 {
+    public string RequestId { get; set; } = "";
     public string WorldVersion { get; set; } = "";
     public int BaseVersion { get; set; }
     public List<MapBlockChange> Changes { get; set; } = new();

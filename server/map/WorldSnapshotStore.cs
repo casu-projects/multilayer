@@ -20,6 +20,8 @@ public sealed class WorldSnapshotStore
         public int[] Grid = Array.Empty<int>();
         public List<MapPaletteEntry> Palette = new();
         public int Version;
+        public int WorldReceived;
+        public bool WorldComplete;
         public readonly List<DeltaBatch> Deltas = new();
         public List<PlayerPositionEntry> Players = new();
         public bool HasSpawn;
@@ -52,23 +54,13 @@ public sealed class WorldSnapshotStore
 
     public void RemoveInstance(string instanceKey) => _instances.TryRemove(instanceKey, out _);
 
-    public (int Version, string WorldVersion)? SetWorld(string instanceKey, MapWorldUpload upload)
+    public (int Version, string WorldVersion)? BeginWorld(string instanceKey, MapWorldBegin upload)
     {
         if (upload.Width <= 0 || upload.Height <= 0) return null;
         if ((long)upload.Width * upload.Height > int.MaxValue) return null;
         if (string.IsNullOrWhiteSpace(upload.WorldVersion)) return null;
 
         int total = upload.Width * upload.Height;
-        var grid = new int[total];
-        int offset = 0;
-        foreach (MapRleRun run in upload.Runs)
-        {
-            if (run.Count <= 0) continue;
-            if (offset + run.Count > total) return null;
-            for (int i = 0; i < run.Count; i++) grid[offset++] = run.Block;
-        }
-        if (offset != total) return null;
-
         InstanceState state = _instances.GetOrAdd(instanceKey, _ => new InstanceState());
         lock (state.Lock)
         {
@@ -77,13 +69,62 @@ public sealed class WorldSnapshotStore
             state.WorldVersion = upload.WorldVersion;
             state.Width = upload.Width;
             state.Height = upload.Height;
-            state.Grid = grid;
+            state.Grid = new int[total];
             state.Palette = upload.Palette.ToList();
             state.Version = 0;
+            state.WorldReceived = 0;
+            state.WorldComplete = total == 0;
             state.Deltas.Clear();
             state.HasSpawn = false;
             state.WorldUpdatedAt = DateTime.UtcNow;
             return (state.Version, state.WorldVersion);
+        }
+    }
+
+    public (int Version, int Received, bool Complete)? ApplyWorldChunk(string instanceKey, MapWorldChunk chunk)
+    {
+        if (!_instances.TryGetValue(instanceKey, out InstanceState? state)) return null;
+        lock (state.Lock)
+        {
+            if (state.Grid.Length == 0) return null;
+            if (!string.Equals(state.WorldVersion, chunk.WorldVersion, StringComparison.Ordinal)) return null;
+            if (chunk.Offset < 0 || chunk.Offset > state.WorldReceived) return null;
+            if (chunk.Offset < state.WorldReceived)
+                return (state.Version, state.WorldReceived, state.WorldComplete);
+
+            long total = chunk.Runs.Sum(run => (long)Math.Max(0, run.Count));
+            if (total <= 0 || chunk.Offset + total > state.Grid.Length) return null;
+
+            var batch = new DeltaBatch { Version = state.Version + 1 };
+            int offset = chunk.Offset;
+            foreach (MapRleRun run in chunk.Runs)
+            {
+                if (run.Count <= 0) continue;
+                for (int i = 0; i < run.Count; i++)
+                {
+                    int index = offset + i;
+                    if (state.Grid[index] == run.Block) continue;
+                    state.Grid[index] = run.Block;
+                    batch.Changes.Add(new MapBlockChange
+                    {
+                        X = index % state.Width,
+                        Y = index / state.Width,
+                        Block = run.Block,
+                    });
+                }
+                offset += run.Count;
+            }
+
+            state.WorldReceived = offset;
+            state.WorldComplete = state.WorldReceived >= state.Grid.Length;
+            state.WorldUpdatedAt = DateTime.UtcNow;
+            if (batch.Changes.Count > 0)
+            {
+                state.Version++;
+                state.Deltas.Add(batch);
+                while (state.Deltas.Count > MaxDeltaHistory) state.Deltas.RemoveAt(0);
+            }
+            return (state.Version, state.WorldReceived, state.WorldComplete);
         }
     }
 

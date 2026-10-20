@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Linq;
 using Discord;
 using Discord.WebSocket;
 
@@ -11,7 +10,6 @@ internal sealed class DiscordBot
     private readonly ulong _channelId;
     private readonly ulong _consoleChannelId;
     private readonly string _token;
-    private readonly ulong _adminUserId;
     private readonly Func<ulong, Task<string?>>? _avatarResolver;
     private readonly Action<string, string>? _onDiscordChat;   // 채팅 채널 -> 게임 (유저명, 텍스트 - Program.cs가 브로드캐스트)
     private readonly Action<string>? _onConsoleCommand;   // 콘솔 채널 -> 서버 콘솔 명령
@@ -28,14 +26,13 @@ internal sealed class DiscordBot
     private readonly ConcurrentQueue<string> _consoleLogQueue = new();
     private int _consoleLogDropped;
 
-    internal DiscordBot(string token, ulong channelId, ulong consoleChannelId, ulong adminUserId,
+    internal DiscordBot(string token, ulong channelId, ulong consoleChannelId,
         Action<string, string>? onDiscordChat = null, Action<string>? onConsoleCommand = null,
         Func<ulong, Task<string?>>? avatarResolver = null)
     {
         _token = token;
         _channelId = channelId;
         _consoleChannelId = consoleChannelId;
-        _adminUserId = adminUserId;
         _avatarResolver = avatarResolver;
         _onDiscordChat = onDiscordChat;
         _onConsoleCommand = onConsoleCommand;
@@ -192,23 +189,6 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
-    internal async Task SendCallAdminAsync(string playerName, ulong steamId)
-    {
-        if (!IsConnected || _channelId == 0) return;
-        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
-        if (channel == null) return;
-
-        string mention = BuildAdminMention();
-        await channel.SendMessageAsync($"🚨 **{playerName}**의 호출!{mention}");
-    }
-
-    private string BuildAdminMention()
-    {
-        if (_adminUserId == 0) return "";
-        bool isRole = _client.Guilds.Any(g => g.GetRole(_adminUserId) != null);
-        return isRole ? $" <@&{_adminUserId}>" : $" <@{_adminUserId}>";
-    }
-
     internal async Task SendDeathRespawnAsync(string playerName, ulong steamId, bool died, string layer)
     {
         if (!IsConnected || _channelId == 0) return;
@@ -236,15 +216,6 @@ internal sealed class DiscordBot
         if (channel == null) return;
 
         await channel.SendMessageAsync(text: $"[{layer}] **{playerName}**: {message}");
-    }
-
-    internal async Task SendWebChatAsync(string message)
-    {
-        if (!IsConnected) return;
-        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
-        if (channel == null) return;
-
-        await channel.SendMessageAsync(text: $"[WEB] {message}");
     }
 
     internal async Task UpdatePlayerCountTopicAsync(string text)

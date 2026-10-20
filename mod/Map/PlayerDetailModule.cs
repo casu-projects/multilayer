@@ -15,7 +15,7 @@ public static class PlayerDetailModule
         if (client == null) return;
 
         PlayerDetailResponse response = Build(request);
-        client.SendEvent(MessageTypes.PlayerDetailResponse, response);
+        client.SendEvent(MessageType.PLAYER_DETAIL_RESPONSE, response);
     }
 
     private static PlayerDetailResponse Build(PlayerDetailRequest request)

@@ -27,10 +27,8 @@ public static class ChatCommands
         _registry.Register("help", "Show help", HelpCommand.Cmd);
         _registry.Register("chatmode", "Toggle chat share scope", ChatModeCommand.Cmd);
         _registry.Register("list", "List online players", PlayerListCommand.Cmd);
-        _registry.Register("calladmin", "Call an admin", CallAdminCommand.Cmd);
         _registry.Register("respawn", "Respawn on layer 1 as a new character (when dead)", RespawnCommand.Cmd);
         _registry.Register("pos", "Show current coordinates", PosCommand.Cmd);
-        _registry.Register("banvote", "Vote to permanently ban a player", "<name>", VoteCommands.CmdBanVote);
     }
 
     [HarmonyPatch(typeof(Chat), "Server_PlayerChatMessageSend")]
@@ -132,18 +130,8 @@ public static class ChatCommands
     {
         internal static void Cmd(ScavPlayer caller, string[] argv)
         {
-            OrchestratorClient.Instance?.SendEvent(MessageTypes.ListRequest,
+            OrchestratorClient.Instance?.SendEvent(MessageType.LIST_REQUEST,
                 new { playerKey = MigrationModule.PlayerKeyOf(caller) });
-        }
-    }
-
-    internal static class CallAdminCommand
-    {
-        internal static void Cmd(ScavPlayer caller, string[] argv)
-        {
-            OrchestratorClient.Instance?.SendEvent(MessageTypes.CallAdmin,
-                new { playerKey = MigrationModule.PlayerKeyOf(caller), username = caller.playerName });
-            ChatPrivateReply.SendToPlayer(caller, "Your admin call has been sent.");
         }
     }
 
@@ -185,7 +173,7 @@ public static class ChatCommands
             int depth = OrchestratorClient.Instance.InstanceDepth;
             if (!PerformInPlaceRespawn(caller, grantSupplies: false)) // 먼저 살린 뒤 마이그레이션
             {
-                OrchestratorClient.Instance.SendEvent(MessageTypes.Respawn,
+                OrchestratorClient.Instance.SendEvent(MessageType.RESPAWN,
                     new { playerKey = pid, fromDepth = depth });
                 ChatPrivateReply.SendToPlayer(caller, "Respawning — moving to layer 1.");
                 return;
@@ -196,7 +184,7 @@ public static class ChatCommands
             CasualtiesTogetherUtils.Util.DelayCallLambda(0.6f, (Action)(() => // 클라 revive 적용 후
             {
                 if (caller == null || caller.body == null) return;
-                OrchestratorClient.Instance?.SendEvent(MessageTypes.Respawn,
+                OrchestratorClient.Instance?.SendEvent(MessageType.RESPAWN,
                     new { playerKey = pid, fromDepth = depth });
             }));
         }
@@ -204,7 +192,7 @@ public static class ChatCommands
         private static void RespawnLocally(ScavPlayer caller)
         {
             string pid = MigrationModule.PlayerKeyOf(caller);
-            OrchestratorClient.Instance.SendEvent(MessageTypes.Respawn, new { playerKey = pid, fromDepth = 1 });
+            OrchestratorClient.Instance.SendEvent(MessageType.RESPAWN, new { playerKey = pid, fromDepth = 1 });
             if (PerformInPlaceRespawn(caller, grantSupplies: true))
             {
                 ChatPrivateReply.SendToPlayer(caller, "You have respawned.");

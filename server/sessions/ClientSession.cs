@@ -9,6 +9,8 @@ public sealed class ClientSession : INetEventListener
 {
     private static long _nextSessionId;
     private const int MaxPendingReliablePackets = 256;
+    private static readonly TimeSpan BackendRetryInterval = TimeSpan.FromSeconds(0.5);
+    private const int BackendMaxRetries = 600;
 
     private readonly IClientSink _clientSink;
     private readonly byte[] _intro;
@@ -166,7 +168,7 @@ public sealed class ClientSession : INetEventListener
         State = SessionState.Connecting;
         if (!ClientGateway.IsUsableBackendAddr(addr))
         {
-            _nextRetryAtUtc = DateTime.UtcNow + TimeSpan.FromSeconds(_core.Config.BackendRetryIntervalSeconds);
+            _nextRetryAtUtc = DateTime.UtcNow + BackendRetryInterval;
             return;
         }
         try
@@ -239,10 +241,10 @@ public sealed class ClientSession : INetEventListener
         }
 
         if (!isDefiniteRejection && !_hasEverConnectedToBackend && !Disposed
-            && _connectRetryCount < _core.Config.BackendMaxRetries)
+            && _connectRetryCount < BackendMaxRetries)
         {
             _connectRetryCount++;
-            _nextRetryAtUtc = DateTime.UtcNow + TimeSpan.FromSeconds(_core.Config.BackendRetryIntervalSeconds);
+            _nextRetryAtUtc = DateTime.UtcNow + BackendRetryInterval;
             return;
         }
 

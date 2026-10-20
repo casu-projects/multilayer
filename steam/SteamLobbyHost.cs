@@ -1,5 +1,5 @@
 using System.IO.Compression;
-using CasuMp.SteamSession;
+using CasuMpSteam.Session;
 using LiteNetLib.Utils;
 using SteamKit2;
 using Polly.Contrib.WaitAndRetry;
@@ -113,7 +113,7 @@ public sealed class SteamLobbyHost
         _metadataReceived = true;
         _lastMetadataAtUtc = DateTime.UtcNow;
         _serverName = string.IsNullOrEmpty(payload.ServerName) ? _fallbackServerName : payload.ServerName;
-        if (payload.VersionTag != null) _versionTag = payload.VersionTag;
+        if (!string.IsNullOrEmpty(payload.VersionTag)) _versionTag = payload.VersionTag;
         if (payload.Motd != null) _motd = payload.Motd;
         if (payload.MaxPlayers > 0) _maxPlayers = payload.MaxPlayers;
         _hasPassword = payload.HasPassword;
@@ -207,17 +207,20 @@ public sealed class SteamLobbyHost
         }
 
         bool metadataFresh = _metadataReceived && now - _lastMetadataAtUtc <= MetadataTimeout;
+        bool versionKnown = !string.IsNullOrEmpty(_versionTag);
 
         if (_loggedOn && !_lobbyCreated && !_lobbyCreationPending
             && now >= _lobbyRetryAfterUtc)
         {
-            if (!metadataFresh)
+            if (!metadataFresh || !versionKnown)
             {
                 _state = LobbyState.WaitAuth;
                 if (now - _lastAuthWaitWarnAtUtc >= AuthWaitWarnInterval)
                 {
                     _lastAuthWaitWarnAtUtc = now;
-                    SteamLog.Info("코어 메타데이터 미수신 — casu-server 연결 대기 (로비 미생성).");
+                    SteamLog.Info(metadataFresh
+                        ? "버전 태그 미수신 — 프리웜 레이어 보고 대기 (로비 미생성)."
+                        : "코어 메타데이터 미수신 — casu-server 연결 대기 (로비 미생성).");
                 }
                 _lobbyRetryAfterUtc = now + TimeSpan.FromSeconds(1);
             }
@@ -346,6 +349,7 @@ public sealed class SteamLobbyHost
         _lobbyCreated = false;
         _lobbyCreationPending = false;
         _state = _metadataReceived && DateTime.UtcNow - _lastMetadataAtUtc <= MetadataTimeout
+            && !string.IsNullOrEmpty(_versionTag)
             ? LobbyState.Creating
             : LobbyState.WaitAuth;
     }

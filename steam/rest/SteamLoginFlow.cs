@@ -1,4 +1,4 @@
-using CasuMp.SteamSession;
+using CasuMpSteam.Session;
 using SteamKit2;
 using SteamKit2.Authentication;
 

@@ -29,7 +29,6 @@
   <ItemGroup>
     <ProjectReference Include="..\shared\CasuMp.Protocol\CasuMp.Protocol.csproj" />
     <ProjectReference Include="..\shared\CasuMp.Runtime\CasuMp.Runtime.csproj" />
-    <ProjectReference Include="..\shared\CasuMp.SteamSession\CasuMp.SteamSession.csproj" />
   </ItemGroup>
 
   <ItemGroup>

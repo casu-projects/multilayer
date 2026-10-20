@@ -167,7 +167,7 @@ public static class RunModule
             if (OrchestratorClient.Instance == null || !OrchestratorClient.Instance.Connected) return;
 
             _readyReported = true;
-            OrchestratorClient.Instance.SendEvent(MessageTypes.InstanceReady,
+            OrchestratorClient.Instance.SendEvent(MessageType.INSTANCE_READY,
                 new { instanceKey = OrchestratorClient.Instance.InstanceKey });
             Plugin.Log.LogInfo($"[Run] INSTANCE_READY 보고 ({OrchestratorClient.Instance.InstanceKey}).");
         }

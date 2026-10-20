@@ -14,6 +14,7 @@ internal sealed class LobbyMetadataService
     private readonly Dictionary<PlayerKey, bool> _alive = new();
 
     private DateTime _lastPushAt = DateTime.MinValue;
+    private string? _versionTag;
 
     public LobbyMetadataService(ClientGateway gateway, RunRuleStore rules, PlayerSessionStore sessions,
         DiscordBot discord, SteamApiClient? steamApi)
@@ -23,6 +24,22 @@ internal sealed class LobbyMetadataService
         _sessions = sessions;
         _discord = discord;
         _steamApi = steamApi;
+    }
+
+    public void SetVersionTag(string? versionTag, string instanceKey)
+    {
+        if (string.IsNullOrWhiteSpace(versionTag)) return;
+
+        if (_versionTag == null)
+        {
+            _versionTag = versionTag;
+            Log.Info($"로비 버전 태그 확정: {_versionTag} ({instanceKey})");
+            Push(force: true);
+        }
+        else if (_versionTag != versionTag)
+        {
+            Log.Info($"로비 버전 태그 불일치 무시: {instanceKey}={versionTag}, 기존={_versionTag}");
+        }
     }
 
     public void SetAlive(PlayerKey key, bool alive) => _alive[key] = alive;
@@ -52,6 +69,8 @@ internal sealed class LobbyMetadataService
 
     public void Push(bool force = false)
     {
+        if (string.IsNullOrEmpty(_versionTag)) return;
+
         DateTime now = DateTime.UtcNow;
         if (!force && now - _lastPushAt < Interval) return;
         _lastPushAt = now;
@@ -67,8 +86,8 @@ internal sealed class LobbyMetadataService
         _steamApi?.Post(new LobbyMetadataPayload
         {
             ServerName = _gateway.ServerName,
-            VersionTag = _gateway.Config.SteamVersionTag,
-            Motd = _gateway.Config.Motd,
+            VersionTag = _versionTag,
+            Motd = _gateway.Config.Description,
             MaxPlayers = _gateway.MaxPlayers,
             HasPassword = _gateway.HasPassword,
             PlayerCount = _gateway.SessionCount,

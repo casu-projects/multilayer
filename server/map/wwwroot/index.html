@@ -36,7 +36,6 @@
     <button id="zoomReset" type="button" title="화면 맞춤">⤢</button>
     <button id="steamToggle" type="button" class="active" aria-pressed="true" title="Steam 프로필 이미지 표시" aria-label="Steam 프로필 이미지 표시">S</button>
     <button id="objectFilterButton" type="button" title="오브젝트 필터" aria-label="오브젝트 필터" aria-pressed="false">F</button>
-    <button id="chatToggle" type="button" class="active" title="채팅창 표시/숨김" aria-label="채팅창 표시/숨김" aria-pressed="true" aria-controls="chatPanel">C</button>
     <button id="usersToggle" type="button" class="active" title="유저 목록 표시/숨김" aria-label="유저 목록 표시/숨김" aria-pressed="true" aria-controls="userPanel">U</button>
   </div>
 
@@ -55,15 +54,6 @@
   <section id="userPanel" class="user-panel" aria-label="유저 목록">
     <div class="user-panel-head"><span>유저</span><span id="userCount">0명</span></div>
     <div id="userList" class="user-list"></div>
-  </section>
-
-  <section id="chatPanel" class="chat-panel" aria-label="웹 채팅">
-    <div id="chatHistory" class="chat-history" aria-live="polite"></div>
-    <div id="chatAutocomplete" class="chat-autocomplete hidden"></div>
-    <form id="chatForm" class="chat-form">
-      <input id="chatInput" type="text" maxlength="150" autocomplete="off" placeholder="메시지 입력...">
-      <button type="submit" id="chatSend">전송</button>
-    </form>
   </section>
 
   <aside id="detailDrawer" class="detail-drawer" aria-label="플레이어 상세">

@@ -13,7 +13,7 @@ public static class DiscordEventReporter
         return (WorldGeneration.world.biomeDepth + 1).ToString();
     }
 
-    internal static void Send(string type, ScavPlayer plr)
+    internal static void Send(MessageType type, ScavPlayer plr)
     {
         if (plr == null || plr.IsLocal) return;
         OrchestratorClient.Instance?.SendEvent(type, new
@@ -30,7 +30,7 @@ internal static class ServerMain_OnPlayerDeath_DiscordReportPatch
 {
     private static void Postfix(ScavPlayer plr)
     {
-        DiscordEventReporter.Send(MessageTypes.Died, plr);
+        DiscordEventReporter.Send(MessageType.DIED, plr);
     }
 }
 
@@ -39,6 +39,6 @@ internal static class NetPlayer_Server_RespawnCharacter_DiscordReportPatch
 {
     private static void Postfix(ScavPlayer __instance)
     {
-        DiscordEventReporter.Send(MessageTypes.Respawned, __instance);
+        DiscordEventReporter.Send(MessageType.RESPAWNED, __instance);
     }
 }

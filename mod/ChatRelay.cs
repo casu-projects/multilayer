@@ -5,8 +5,6 @@ namespace CasuMod;
 
 public static class ChatRelay
 {
-    private const string WebColor = "#3FB950";
-
     private static bool _suppress;
     private static bool _subscribed;
 
@@ -25,7 +23,7 @@ public static class ChatRelay
         Color24 c = plr.playerColor;
         string color = $"#{c.r:X2}{c.g:X2}{c.b:X2}";
 
-        OrchestratorClient.Instance.SendEvent(MessageTypes.Chat,
+        OrchestratorClient.Instance.SendEvent(MessageType.CHAT,
             new { speaker = plr.playerName, message = message, color = color });
     }
 
@@ -34,11 +32,6 @@ public static class ChatRelay
         if (payload == null || string.IsNullOrEmpty(payload.Message)) return;
         string speaker = payload.Speaker ?? "";
         if (speaker == "" || speaker == "*") return; // 시스템 공지 제외
-        if (payload.Web)
-        {
-            Chat.Server_ChatAnnouncement($"<color={WebColor}>WEB</color>", null, payload.Message);
-            return;
-        }
 
         try
         {

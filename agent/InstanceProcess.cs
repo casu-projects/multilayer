@@ -7,6 +7,7 @@ public sealed class InstanceProcess
 {
     private const int SigCont = 18;
     private const int SigStop = 19;
+    private const int StopTimeoutMilliseconds = 3000;
 
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int pid, int sig);
@@ -54,7 +55,7 @@ public sealed class InstanceProcess
             + $"--ksmulti-setpass \"{payload.ServerPassword}\" "
             + $"--ksmulti-runcommand \"startserver {payload.Port}\" "
             + $"--ksmulti-runcommand \"maxplayers 200\" "
-            + (config.HeadlessMode ? "-batchmode -nographics " : "")
+            + $"-batchmode -nographics "
             + $"-logFile \"{unityLogPath}\"";
 
         string? setsid = FindSetsid();
@@ -79,7 +80,6 @@ public sealed class InstanceProcess
         psi.Environment["CASU_INSTANCE_KEY"] = payload.InstanceKey;
         psi.Environment["CASU_PORT"] = payload.Port.ToString();
         psi.Environment["CASU_ORCH_ADDR"] = config.OrchestratorAddr;
-        MapEnvironment.ApplyTo(psi, config);
 
         try
         {
@@ -134,7 +134,7 @@ public sealed class InstanceProcess
         return true;
     }
 
-    public void Stop()
+    public async Task StopAsync()
     {
         if (IsSuspended) Resume();
 
@@ -142,19 +142,45 @@ public sealed class InstanceProcess
         {
             _stdin.WriteLine("quit");
             _stdin.Flush();
-            int waitMilliseconds = checked(_config.StopGraceSeconds * 1000);
-            _process.WaitForExit(waitMilliseconds);
         }
         catch { }
 
         try
         {
+            using var cts = new CancellationTokenSource(StopTimeoutMilliseconds);
+            await _process.WaitForExitAsync(cts.Token);
+            return;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.Info($"{Key} 종료 대기 오류: {ex.Message}");
+        }
+
+        Kill();
+    }
+
+    public void Kill()
+    {
+        try
+        {
             if (!_process.HasExited)
             {
                 _process.Kill(entireProcessTree: true);
+                Logger.Info($"{Key} 강제 종료.");
             }
         }
         catch (InvalidOperationException) { }
+        catch (Exception ex)
+        {
+            Logger.Info($"{Key} 강제 종료 실패: {ex.Message}");
+        }
     }
 
     public void Cleanup()

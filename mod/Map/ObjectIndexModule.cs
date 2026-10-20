@@ -115,7 +115,7 @@ public sealed class ObjectIndexModule : MonoBehaviour
             response.Truncated = visible.Count > max;
         }
 
-        OrchestratorClient.Instance.SendEvent(MessageTypes.ObjectQueryResponse, response);
+        OrchestratorClient.Instance.SendEvent(MessageType.OBJECT_QUERY_RESPONSE, response);
     }
 
     public void HandleDetail(MapObjectDetailRequest? request)
@@ -131,14 +131,14 @@ public sealed class ObjectIndexModule : MonoBehaviour
         {
             response.Found = false;
             response.Error = "object not found";
-            OrchestratorClient.Instance.SendEvent(MessageTypes.ObjectDetailResponse, response);
+            OrchestratorClient.Instance.SendEvent(MessageType.OBJECT_DETAIL_RESPONSE, response);
             return;
         }
 
         MapObjectDetail detail = BuildDetail(reference);
         response.Found = true;
         response.Detail = detail;
-        OrchestratorClient.Instance.SendEvent(MessageTypes.ObjectDetailResponse, response);
+        OrchestratorClient.Instance.SendEvent(MessageType.OBJECT_DETAIL_RESPONSE, response);
     }
 
     private void Refresh()
@@ -313,7 +313,7 @@ public sealed class ObjectIndexModule : MonoBehaviour
         _backgrounds.AddRange(backgrounds.OrderBy(b => b.SortingOrder));
         _hasWorld = true;
 
-        OrchestratorClient.Instance.SendEvent(MessageTypes.ObjectBackgrounds, new MapBackgroundPayload
+        OrchestratorClient.Instance.SendEvent(MessageType.OBJECT_BACKGROUNDS, new MapBackgroundPayload
         {
             InstanceKey = _instanceKey,
             Objects = _backgrounds,

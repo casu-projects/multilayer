@@ -120,7 +120,7 @@ public static class SaveModule
         try
         {
             JObject data = SerializePlayer(plr);
-            OrchestratorClient.Instance?.SendEvent(MessageTypes.PlayerDataSubmit, // 직렬화 후 제출
+            OrchestratorClient.Instance?.SendEvent(MessageType.PLAYER_DATA_SUBMIT, // 직렬화 후 제출
                 new { playerKey = MigrationModule.PlayerKeyOf(plr), payload = data });
         }
         catch (System.Exception ex)

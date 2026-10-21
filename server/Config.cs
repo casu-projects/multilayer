@@ -36,6 +36,8 @@ public sealed class ServerConfig
 
     public string SteamApiUrl { get; set; } = "http://127.0.0.1:17910";
 
+    public string SteamApiToken { get; set; } = "";
+
     public bool WebEnabled { get; set; } = true;
 
     public string WebListen { get; set; } = "http://0.0.0.0:17920";

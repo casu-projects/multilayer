@@ -5,13 +5,19 @@ namespace CasuMpServer;
 
 public sealed class PlayerDetailRegistry
 {
+    public const int MaxPending = 256;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<PlayerDetailResponse>> _pending = new();
+    private readonly object _registerGate = new();
 
-    public TaskCompletionSource<PlayerDetailResponse> Register(string requestId)
+    public TaskCompletionSource<PlayerDetailResponse>? Register(string requestId)
     {
-        var source = new TaskCompletionSource<PlayerDetailResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[requestId] = source;
-        return source;
+        lock (_registerGate)
+        {
+            if (_pending.Count >= MaxPending) return null;
+            var source = new TaskCompletionSource<PlayerDetailResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_pending.TryAdd(requestId, source)) return null;
+            return source;
+        }
     }
 
     public bool Resolve(PlayerDetailResponse response)

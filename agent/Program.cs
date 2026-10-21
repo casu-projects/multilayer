@@ -58,7 +58,7 @@ internal static class Program
                     instances.Remove(proc.Key);
                     Logger.Info($"{proc.Key} 종료 (code {proc.ExitCode}).");
                     channel.Report(ControlMessage.Create(0, MessageType.INSTANCE_EXITED,
-                        new { instanceKey = proc.Key, code = proc.ExitCode ?? -1 }));
+                        new { instanceKey = proc.Key, generation = proc.Generation, code = proc.ExitCode ?? -1 }));
                 }
             }
 
@@ -106,16 +106,23 @@ internal static class Program
             case MessageType.STOP:
             {
                 var payload = msg.PayloadAs<StopPayload>();
-                if (payload == null || !instances.Remove(payload.InstanceKey, out InstanceProcess? proc))
+                if (payload == null || !instances.TryGetValue(payload.InstanceKey, out InstanceProcess? proc))
                 {
                     ack(ControlMessage.Ack(msg.Seq, false, "인스턴스 없음"));
                     return;
                 }
+                if (!InstanceGeneration.MatchesExact(payload.Generation, proc.Generation))
+                {
+                    Logger.Info($"{payload.InstanceKey} stale STOP 무시 (gen {payload.Generation}, current {proc.Generation}).");
+                    ack(ControlMessage.Ack(msg.Seq, false, "stale generation"));
+                    return;
+                }
+                instances.Remove(payload.InstanceKey);
                 proc.Kill();
                 proc.Cleanup();
                 DeletePid(config, payload.InstanceKey);
                 channel.Report(ControlMessage.Create(0, MessageType.INSTANCE_EXITED,
-                    new { instanceKey = payload.InstanceKey, code = proc.ExitCode ?? 0 }));
+                    new { instanceKey = payload.InstanceKey, generation = proc.Generation, code = proc.ExitCode ?? 0 }));
                 ack(ControlMessage.Ack(msg.Seq, true));
                 break;
             }
@@ -125,6 +132,12 @@ internal static class Program
                 if (payload == null || !instances.TryGetValue(payload.InstanceKey, out InstanceProcess? proc))
                 {
                     ack(ControlMessage.Ack(msg.Seq, false, "인스턴스 없음"));
+                    return;
+                }
+                if (!InstanceGeneration.MatchesExact(payload.Generation, proc.Generation))
+                {
+                    Logger.Info($"{payload.InstanceKey} stale SUSPEND 무시 (gen {payload.Generation}, current {proc.Generation}).");
+                    ack(ControlMessage.Ack(msg.Seq, false, "stale generation"));
                     return;
                 }
                 bool ok = proc.Suspend();
@@ -137,6 +150,12 @@ internal static class Program
                 if (payload == null || !instances.TryGetValue(payload.InstanceKey, out InstanceProcess? proc))
                 {
                     ack(ControlMessage.Ack(msg.Seq, false, "인스턴스 없음"));
+                    return;
+                }
+                if (!InstanceGeneration.MatchesExact(payload.Generation, proc.Generation))
+                {
+                    Logger.Info($"{payload.InstanceKey} stale RESUME 무시 (gen {payload.Generation}, current {proc.Generation}).");
+                    ack(ControlMessage.Ack(msg.Seq, false, "stale generation"));
                     return;
                 }
                 bool ok = proc.Resume();

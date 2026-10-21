@@ -66,6 +66,12 @@ public sealed class PlayerSessionStore
             state.Username = username;
         }
 
+        if (state.Session == PlayerSessionState.Migrating)
+        {
+            Log.Info($"{key} 마이그레이션 중 재접속 — 상태 유지, 완료 후 라우팅.");
+            return true;
+        }
+
         state.Session = PlayerSessionState.Connecting;
         Log.Info($"{key} 접속 — 레이어 {state.Depth} 배정.");
 
@@ -108,6 +114,16 @@ public sealed class PlayerSessionStore
         {
             SendRouteUpdate(state);
         }
+    }
+
+    public void RouteToCurrent(PlayerKey key)
+    {
+        PlayerState? state = Get(key);
+        if (state == null || string.IsNullOrEmpty(state.InstanceId)) return;
+
+        InstanceInfo? instance = _instances.Find(state.InstanceId);
+        if (instance == null || instance.Status is not (InstanceStatus.Ready or InstanceStatus.Idle)) return;
+        SendRouteUpdate(state);
     }
 
     public void OnBackendConnected(PlayerKey key, string instanceId)

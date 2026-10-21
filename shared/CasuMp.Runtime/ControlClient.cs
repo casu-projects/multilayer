@@ -12,13 +12,21 @@ public sealed class ControlClient
     private readonly Action<ControlMessage> _onMessage;
     private readonly Action<string>? _onError;
 
-    private readonly Channel<ControlMessage> _outbound = Channel.CreateBounded<ControlMessage>(
-        new BoundedChannelOptions(4096)
+    private readonly Channel<ControlMessage> _control = Channel.CreateBounded<ControlMessage>(
+        new BoundedChannelOptions(1024)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+    private readonly Channel<ControlMessage> _logs = Channel.CreateBounded<ControlMessage>(
+        new BoundedChannelOptions(2048)
         {
             SingleReader = true,
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.DropOldest,
         });
+    private readonly SemaphoreSlim _outboundSignal = new(0, 1);
 
     public ControlClient(string address, double reconnectSeconds, Func<ControlMessage> hello,
         Action<ControlMessage> onMessage, Action<string>? onError = null)
@@ -30,7 +38,24 @@ public sealed class ControlClient
         _onError = onError;
     }
 
-    public void Enqueue(ControlMessage message) => _outbound.Writer.TryWrite(message);
+    public void Enqueue(ControlMessage message)
+    {
+        bool written = message.Type == MessageType.LOG
+            ? _logs.Writer.TryWrite(message)
+            : _control.Writer.TryWrite(message);
+        if (!written)
+        {
+            _onError?.Invoke($"outbound queue full — {message.Type} 폐기");
+        }
+        SignalOutbound();
+    }
+
+    private void SignalOutbound()
+    {
+        if (_outboundSignal.CurrentCount != 0) return;
+        try { _outboundSignal.Release(); }
+        catch (SemaphoreFullException) { }
+    }
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -97,9 +122,18 @@ public sealed class ControlClient
     {
         try
         {
-            await foreach (ControlMessage message in _outbound.Reader.ReadAllAsync(ct))
+            while (!ct.IsCancellationRequested)
             {
-                await ControlFrameCodec.WriteAsync(stream, message.ToFrame(), ct);
+                await _outboundSignal.WaitAsync(ct);
+
+                while (_control.Reader.TryRead(out ControlMessage? message))
+                {
+                    await ControlFrameCodec.WriteAsync(stream, message.ToFrame(), ct);
+                }
+                while (_logs.Reader.TryRead(out ControlMessage? message))
+                {
+                    await ControlFrameCodec.WriteAsync(stream, message.ToFrame(), ct);
+                }
             }
         }
         catch (OperationCanceledException)

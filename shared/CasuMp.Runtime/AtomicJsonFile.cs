@@ -12,9 +12,26 @@ public static class AtomicJsonFile
             Directory.CreateDirectory(directory);
         }
 
-        string temporary = path + ".tmp";
-        File.WriteAllText(temporary, content);
-        File.Move(temporary, path, overwrite: true);
+        string temporary = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write,
+                FileShare.None, 4096, FileOptions.WriteThrough))
+            using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), 1024, leaveOpen: true))
+            {
+                writer.Write(content);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                try { File.Delete(temporary); } catch { }
+            }
+        }
     }
 
     public static string? Read(string path) => File.Exists(path) ? File.ReadAllText(path) : null;

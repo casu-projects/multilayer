@@ -19,6 +19,7 @@ public sealed class ControlHub
     {
         public long Id { get; init; }
         public TcpClient Tcp { get; init; } = null!;
+        public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
         public ClientKind Kind { get; set; } = ClientKind.Unknown;
 
         public string? MachineId { get; set; }
@@ -30,8 +31,13 @@ public sealed class ControlHub
 
         public bool Closed { get; set; }
 
-        public readonly Channel<ControlMessage> Outbound = Channel.CreateUnbounded<ControlMessage>(
-            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+        public readonly Channel<ControlMessage> Outbound = Channel.CreateBounded<ControlMessage>(
+            new BoundedChannelOptions(OutboundCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
         public readonly ConcurrentDictionary<long, PendingCommand> PendingAcks = new();
     }
 
@@ -44,7 +50,10 @@ public sealed class ControlHub
     }
 
     private static readonly TimeSpan AckRetryInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
     private const int AckMaxRetries = 3;
+    public const int OutboundCapacity = 2048;
+    private const int MaxConnections = 512;
 
     private readonly ServerConfig _config;
     private readonly CancellationToken _ct;
@@ -94,7 +103,18 @@ public sealed class ControlHub
             {
                 TcpClient tcp = await _listener.AcceptTcpClientAsync(_ct);
                 var conn = new ClientConnection { Id = Interlocked.Increment(ref _nextConnId), Tcp = tcp };
-                lock (_connections) { _connections.Add(conn); }
+                bool accepted;
+                lock (_connections)
+                {
+                    accepted = _connections.Count < MaxConnections;
+                    if (accepted) _connections.Add(conn);
+                }
+                if (!accepted)
+                {
+                    Log.Info($"제어 연결 제한 초과 — 연결 {conn.Id} 거부.");
+                    tcp.Close();
+                    continue;
+                }
                 _ = ServeConnectionAsync(conn);
             }
             catch (OperationCanceledException) { break; }
@@ -169,7 +189,7 @@ public sealed class ControlHub
         }
     }
 
-    public long NextSeq() => ++_seqCounter;
+    public long NextSeq() => Interlocked.Increment(ref _seqCounter);
 
     public IReadOnlyList<ClientConnection> Connections
     {
@@ -194,7 +214,6 @@ public sealed class ControlHub
         }
 
         var msg = ControlMessage.Create(NextSeq(), type, payload);
-        conn.Outbound.Writer.TryWrite(msg);
         conn.PendingAcks[msg.Seq] = new PendingCommand // ack/타임아웃 추적
         {
             Msg = msg,
@@ -202,6 +221,12 @@ public sealed class ControlHub
             Retries = 0,
             OnResult = onResult,
         };
+        if (!conn.Outbound.Writer.TryWrite(msg))
+        {
+            conn.PendingAcks.TryRemove(msg.Seq, out _);
+            onResult?.Invoke(false, "outbound queue full");
+            return false;
+        }
         return true;
     }
 
@@ -209,7 +234,10 @@ public sealed class ControlHub
     {
         if (conn == null || conn.Closed) return;
         if (OutboundFilter != null && !OutboundFilter(conn, type)) return;
-        conn.Outbound.Writer.TryWrite(ControlMessage.Create(NextSeq(), type, payload));
+        if (!conn.Outbound.Writer.TryWrite(ControlMessage.Create(NextSeq(), type, payload)))
+        {
+            Log.Info($"제어 연결 {conn.Id} outbound 큐 포화 — {type} 폐기.");
+        }
     }
 
     public void DrainInbound(Action<ClientConnection, ControlMessage> dispatch)
@@ -233,6 +261,13 @@ public sealed class ControlHub
         DateTime now = DateTime.UtcNow;
         foreach (ClientConnection conn in Connections)
         {
+            if (conn.Kind == ClientKind.Unknown && now - conn.CreatedAtUtc > HandshakeTimeout)
+            {
+                Log.Info($"제어 연결 {conn.Id} 핸드셰이크 타임아웃 — 종료.");
+                try { conn.Tcp.Close(); } catch { }
+                continue;
+            }
+
             foreach ((long seq, PendingCommand pending) in conn.PendingAcks.ToList())
             {
                 if (now < pending.Deadline) continue;

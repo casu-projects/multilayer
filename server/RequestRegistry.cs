@@ -4,13 +4,19 @@ namespace CasuMpServer;
 
 public sealed class RequestRegistry<T> where T : class
 {
+    public const int MaxPending = 256;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<T>> _pending = new();
+    private readonly object _registerGate = new();
 
-    public TaskCompletionSource<T> Register(string requestId)
+    public TaskCompletionSource<T>? Register(string requestId)
     {
-        var source = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[requestId] = source;
-        return source;
+        lock (_registerGate)
+        {
+            if (_pending.Count >= MaxPending) return null;
+            var source = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_pending.TryAdd(requestId, source)) return null;
+            return source;
+        }
     }
 
     public bool Resolve(string requestId, T response)

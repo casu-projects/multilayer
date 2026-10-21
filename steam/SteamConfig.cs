@@ -11,6 +11,8 @@ public sealed class SteamConfig
 
     public string BridgeSecret { get; set; } = "";
 
+    public string ApiToken { get; set; } = "";
+
     public string SessionPath { get; set; } = "steam_session.json";
 
     public string WebApiKey { get; set; } = "";

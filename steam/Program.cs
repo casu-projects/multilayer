@@ -52,7 +52,7 @@ internal static class Program
 
             WebApplication app = builder.Build();
 
-            RestApi.Map(app);
+            RestApi.Map(app, config);
 
             SteamLog.Info($"REST API 시작: {config.RestListen}");
             await app.RunAsync();

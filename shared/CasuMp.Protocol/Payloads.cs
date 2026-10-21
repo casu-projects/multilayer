@@ -25,6 +25,7 @@ public sealed class SpawnPayload
     public string InstanceKey { get; set; } = "";
     public int Depth { get; set; }
     public int Port { get; set; }
+    public string Generation { get; set; } = "";
     public string? ServerName { get; set; }
     public string? ServerPassword { get; set; }
 }
@@ -32,11 +33,13 @@ public sealed class SpawnPayload
 public sealed class StopPayload
 {
     public string InstanceKey { get; set; } = "";
+    public string Generation { get; set; } = "";
 }
 
 public sealed class ProcessControlPayload
 {
     public string InstanceKey { get; set; } = "";
+    public string Generation { get; set; } = "";
 }
 
 public sealed class InstanceReadyPayload
@@ -47,6 +50,7 @@ public sealed class InstanceReadyPayload
 public sealed class InstanceExitedPayload
 {
     public string InstanceKey { get; set; } = "";
+    public string Generation { get; set; } = "";
     public int Code { get; set; }
 }
 

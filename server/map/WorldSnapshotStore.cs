@@ -5,6 +5,7 @@ namespace CasuMpServer;
 
 public sealed class WorldSnapshotStore
 {
+    public const int MaxWorldCells = 16 * 1024 * 1024;
     private const int MaxDeltaHistory = 4096;
 
     private readonly ConcurrentDictionary<string, InstanceState> _instances = new();
@@ -57,10 +58,11 @@ public sealed class WorldSnapshotStore
     public (int Version, string WorldVersion)? BeginWorld(string instanceKey, MapWorldBegin upload)
     {
         if (upload.Width <= 0 || upload.Height <= 0) return null;
-        if ((long)upload.Width * upload.Height > int.MaxValue) return null;
+        long cells = (long)upload.Width * upload.Height;
+        if (cells > MaxWorldCells) return null;
         if (string.IsNullOrWhiteSpace(upload.WorldVersion)) return null;
 
-        int total = upload.Width * upload.Height;
+        int total = (int)cells;
         InstanceState state = _instances.GetOrAdd(instanceKey, _ => new InstanceState());
         lock (state.Lock)
         {

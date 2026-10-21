@@ -1,13 +1,37 @@
 using CasuMp.Protocol;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace CasuMpSteam;
 
 internal static class RestApi
 {
-    public static void Map(WebApplication app)
+    public static void Map(WebApplication app, SteamConfig config)
     {
+        app.Use(async (context, next) =>
+        {
+            if (!RequiresToken(context.Request.Path) || IsLoopback(context.Connection.RemoteIpAddress))
+            {
+                await next();
+                return;
+            }
+
+            string expected = config.ApiToken ?? "";
+            string provided = context.Request.Headers["X-Api-Token"].ToString();
+            if (expected.Length == 0
+                || !CryptographicOperations.FixedTimeEquals(
+                    Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(provided)))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+
+            await next();
+        });
+
         app.MapGet("/api/health", () => Results.Json(new { ok = true }));
         app.MapGet("/api/status", (SteamService service) => Results.Json(service.GetStatus()));
         app.MapGet("/api/steam/avatar/{steamId}", async (SteamService service, ulong steamId, CancellationToken ct) =>
@@ -86,5 +110,17 @@ internal static class RestApi
 
         app.MapPost("/api/login/{id}/cancel", (SteamService service, string id) =>
             service.CancelLogin(id) ? Results.Accepted() : Results.NotFound());
+    }
+
+    private static bool RequiresToken(PathString path) =>
+        path.StartsWithSegments("/api/login")
+        || path.StartsWithSegments("/api/reload")
+        || path.StartsWithSegments("/api/lobby/metadata");
+
+    private static bool IsLoopback(IPAddress? address)
+    {
+        if (address == null) return true;
+        if (IPAddress.IsLoopback(address)) return true;
+        return address.IsIPv4MappedToIPv6 && IPAddress.IsLoopback(address.MapToIPv4());
     }
 }

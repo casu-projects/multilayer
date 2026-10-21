@@ -55,7 +55,7 @@ public static class TailCodec
         int searchEnd = Math.Max(userDataOffset, end - FixedTailSize - MaxNameBytes);
         for (int i = end - 2; i >= searchEnd; i--)
         {
-            if (rawData[i] != MagicHigh || rawData[i + 1] != MagicLow || i + 3 >= rawData.Length)
+            if (rawData[i] != MagicHigh || rawData[i + 1] != MagicLow || i + 3 >= end)
             {
                 continue;
             }
@@ -77,11 +77,11 @@ public static class TailCodec
             bool isMigrating = rawData[offset++] != 0;
 
             string? name = null;
-            if (version == VersionWithName && i + FixedTailSize < rawData.Length)
+            if (version == VersionWithName && i + FixedTailSize < end)
             {
                 int nameLength = rawData[i + FixedTailSize];
                 int nameStart = i + FixedTailSize + 1;
-                if (nameLength > 0 && nameStart + nameLength <= rawData.Length)
+                if (nameLength > 0 && nameLength <= MaxNameBytes && nameStart + nameLength <= end)
                 {
                     name = Encoding.UTF8.GetString(rawData, nameStart, nameLength);
                 }

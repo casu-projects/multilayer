@@ -17,5 +17,15 @@ public static class SteamSessionStore
     public static void Save(string path, SavedSteamSession session)
     {
         AtomicJsonFile.Write(path, JsonSerializer.Serialize(session, Options));
+        if (!OperatingSystem.IsWindows())
+        {
+            try
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+            catch
+            {
+            }
+        }
     }
 }

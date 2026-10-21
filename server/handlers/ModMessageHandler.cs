@@ -81,7 +81,7 @@ internal sealed class ModMessageHandler
                         Ok = worldResult != null,
                         WorldVersion = worldBegin.WorldVersion,
                         Version = worldResult?.Version ?? 0,
-                        Complete = worldResult != null && worldBegin.Width * worldBegin.Height == 0,
+                        Complete = worldResult != null && (long)worldBegin.Width * worldBegin.Height == 0,
                         Error = worldResult == null ? "invalid world begin" : "",
                     });
                 }
@@ -156,23 +156,23 @@ internal sealed class ModMessageHandler
                 break;
             case MessageType.FREEZE_DONE:
                 if (Program.TryPlayerKey(msg, out var fd))
-                    migrations.OnFreezeDone(fd, Program.GetEpoch(msg));
+                    migrations.OnFreezeDone(fd, Program.GetEpoch(msg), conn.InstanceKey);
                 break;
             case MessageType.PRECLEAR_DONE:
                 if (Program.TryPlayerKey(msg, out var pc))
-                    migrations.OnPreClearDone(pc, Program.GetEpoch(msg));
+                    migrations.OnPreClearDone(pc, Program.GetEpoch(msg), conn.InstanceKey);
                 break;
             case MessageType.RESUME_DONE:
                 if (Program.TryPlayerKey(msg, out var rd))
-                    migrations.OnResumeDone(rd, Program.GetEpoch(msg));
+                    migrations.OnResumeDone(rd, Program.GetEpoch(msg), conn.InstanceKey);
                 break;
             case MessageType.WORLDGEN_DONE:
                 if (Program.TryPlayerKey(msg, out var wg))
-                    migrations.OnWorldgenDone(wg, Program.GetEpoch(msg));
+                    migrations.OnWorldgenDone(wg, Program.GetEpoch(msg), conn.InstanceKey);
                 break;
             case MessageType.PLAYER_LEFT:
                 if (Program.TryPlayerKey(msg, out var pl))
-                    migrations.OnPlayerLeftDuringMigration(pl, Program.GetEpoch(msg));
+                    migrations.OnPlayerLeftDuringMigration(pl, Program.GetEpoch(msg), conn.InstanceKey);
                 break;
             case MessageType.PLAYER_DATA_SUBMIT:
                 if (Program.TryPlayerKey(msg, out var ps) && msg.Payload is { } submitPayload

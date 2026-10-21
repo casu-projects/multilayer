@@ -1,4 +1,6 @@
 using CasuMp.Protocol;
+using System.Collections.Concurrent;
+
 namespace CasuMpServer;
 
 public enum InstanceStatus
@@ -21,13 +23,14 @@ public sealed class InstanceInfo
     public required string Key { get; init; }
     public required int Depth { get; init; }
     public int Port { get; set; }
+    public string Generation { get; set; } = "";
     public string? MachineId { get; set; }
-    public InstanceStatus Status { get; set; } = InstanceStatus.Stopped;
+    public volatile InstanceStatus Status = InstanceStatus.Stopped;
     public DateTime LastNonIdleAt { get; set; } = DateTime.UtcNow;
     public int ConnectedCount { get; set; }
-    public ControlHub.ClientConnection? ModConnection { get; set; }
+    public volatile ControlHub.ClientConnection? ModConnection;
     public bool HasPlayedSinceReset { get; set; }
-    public bool WorldReady { get; set; }
+    public volatile bool WorldReady;
     public bool SuspendAfterReset { get; set; }
 }
 
@@ -38,7 +41,7 @@ public sealed class InstanceManager
     private readonly ServerConfig _config;
     private readonly ControlHub _hub;
 
-    private readonly Dictionary<string, InstanceInfo> _instances = new();
+    private readonly ConcurrentDictionary<string, InstanceInfo> _instances = new();
     private readonly HashSet<int> _usedPorts = new();
     private readonly AgentRegistry _agents = new();
 
@@ -205,13 +208,21 @@ public sealed class InstanceManager
             return null;
         }
 
-        int port = AllocatePort();
+        int? allocatedPort = AllocatePort();
+        if (allocatedPort == null)
+        {
+            Log.Info($"인스턴스 포트 고갈 — depth-{depth} 스폰 불가.");
+            return null;
+        }
+        int port = allocatedPort.Value;
         string key = DepthKey(depth);
+        string generation = Guid.NewGuid().ToString("N");
         var info = new InstanceInfo
         {
             Key = key,
             Depth = depth,
             Port = port,
+            Generation = generation,
             MachineId = machineId,
             Status = InstanceStatus.Starting,
         };
@@ -220,33 +231,42 @@ public sealed class InstanceManager
 
         _agents.IncrementUsage(machineId);
 
+        int spawnCleanedUp = 0;
+        void CleanupFailedSpawn(string reason)
+        {
+            if (Interlocked.Exchange(ref spawnCleanedUp, 1) != 0) return;
+            Log.Info($"depth-{depth} SPAWN 실패: {reason}");
+            info.Status = InstanceStatus.Crashed;
+            _agents.DecrementUsage(machineId);
+            _usedPorts.Remove(port);
+            ((ICollection<KeyValuePair<string, InstanceInfo>>)_instances)
+                .Remove(new KeyValuePair<string, InstanceInfo>(key, info));
+            _runNeeded.Remove(key);
+        }
+
         ControlHub.ClientConnection? conn = _hub.AgentConnection(machineId);
         bool sent = _hub.Send(conn, MessageType.SPAWN, new
         {
             instanceKey = key,
             depth,
             port,
+            generation,
             serverName = _config.ServerName,
             serverPassword = _config.ServerPassword,
         }, (ok, reason) =>
         {
-            if (!ok)
-            {
-                Log.Info($"depth-{depth} SPAWN 실패: {reason}");
-                info.Status = InstanceStatus.Crashed;
-            }
+            if (!ok) CleanupFailedSpawn(reason ?? "unknown");
         });
 
         if (!sent)
         {
-            _agents.DecrementUsage(machineId);
-            info.Status = InstanceStatus.Crashed;
+            CleanupFailedSpawn("send failed");
             return null;
         }
         return info;
     }
 
-    private int AllocatePort()
+    private int? AllocatePort()
     {
         for (int p = _config.InstancePortStart; p < _config.InstancePortStart + _config.InstancePortRange; p++)
         {
@@ -254,7 +274,7 @@ public sealed class InstanceManager
             _usedPorts.Add(p);
             return p;
         }
-        throw new InvalidOperationException("인스턴스 포트 고갈");
+        return null;
     }
 
     private string? SelectMachine()
@@ -267,7 +287,8 @@ public sealed class InstanceManager
         InstanceInfo? info = Find(key);
         if (info == null) return;
         info.Status = InstanceStatus.Stopping;
-        _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageType.STOP, new { instanceKey = key });
+        _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageType.STOP,
+            new { instanceKey = key, generation = info.Generation });
     }
 
     public bool ResetInstance(string key)
@@ -311,7 +332,7 @@ public sealed class InstanceManager
 
         info.Status = InstanceStatus.Suspending;
         bool sent = _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageType.PROCESS_SUSPEND,
-            new { instanceKey = key }, (ok, reason) =>
+            new { instanceKey = key, generation = info.Generation }, (ok, reason) =>
             {
                 if (!ok)
                 {
@@ -343,7 +364,7 @@ public sealed class InstanceManager
 
         info.Status = InstanceStatus.Resuming;
         bool sent = _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageType.PROCESS_RESUME,
-            new { instanceKey = key }, (ok, reason) =>
+            new { instanceKey = key, generation = info.Generation }, (ok, reason) =>
             {
                 if (!ok)
                 {
@@ -650,10 +671,16 @@ public sealed class InstanceManager
         }
     }
 
-    public void OnInstanceExited(string key, int code)
+    public bool OnInstanceExited(string key, string generation, int code)
     {
         InstanceInfo? info = Find(key);
-        if (info == null) return;
+        if (info == null) return false;
+        if (!InstanceGeneration.Matches(info.Generation, generation))
+        {
+            Log.Info($"{key} stale INSTANCE_EXITED 무시 (gen {generation}, current {info.Generation}, code {code}).");
+            return false;
+        }
+
         _usedPorts.Remove(info.Port);
         if (info.MachineId != null)
         {
@@ -664,6 +691,7 @@ public sealed class InstanceManager
         info.WorldReady = false;
         info.SuspendAfterReset = false;
         _runNeeded.Remove(key);
+        return true;
     }
 
     public void TickIdle(DateTime now, Func<string, int> connectedCountForInstance, int serverOnlineCount)

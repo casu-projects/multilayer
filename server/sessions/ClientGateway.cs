@@ -172,56 +172,47 @@ public sealed class ClientGateway
 
     public void AcceptSession(ClientSession session)
     {
-        ClientSession? replaced = null;
-        lock (_lock)
-        {
-            if (_sessions.TryGetValue(session.Player, out ClientSession? old))
-            {
-                _sessions.Remove(session.Player);
-                replaced = old;
-            }
-            _sessions[session.Player] = session;
-        }
-        replaced?.Kick("Reconnected from a new session.");
-
-        bool reject = false;
+        ClientSession? replaced;
         string reason = "";
         lock (_lock)
         {
+            _sessions.TryGetValue(session.Player, out replaced);
+            int countAfter = _sessions.Count + (replaced == null ? 1 : 0);
+
             if (_maintenance && !IsBypassed(session))
             {
-                reject = true;
                 reason = _maintenanceMessage.Length > 0 ? _maintenanceMessage : "Server is in maintenance mode.";
             }
             else if (_prewarmGate)
             {
-                reject = true;
                 reason = _prewarmGateMessage;
             }
             else if (_banned.Contains(session.Player))
             {
-                reject = true;
                 reason = "You are banned from this server.";
             }
             else if (!ValidatePassword(session.Password))
             {
-                reject = true;
                 reason = "Wrong password.";
             }
-            else if (_sessions.Count > _maxPlayers)
+            else if (countAfter > _maxPlayers)
             {
-                reject = true;
                 reason = "Server is full.";
+            }
+            else
+            {
+                if (replaced != null) _sessions.Remove(session.Player);
+                _sessions[session.Player] = session;
             }
         }
 
-        if (reject)
+        if (reason.Length > 0)
         {
             session.Kick(reason);
-            RemoveSession(session, reason, notifyLifecycle: false);
             return;
         }
 
+        replaced?.Kick("Reconnected from a new session.");
         session.EnterRoutingWait();
         _lifecycle?.OnConnected(session);
     }

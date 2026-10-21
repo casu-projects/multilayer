@@ -18,6 +18,7 @@ public sealed class InstanceProcess
     private readonly bool _usesProcessGroup;
 
     public string Key { get; }
+    public string Generation { get; }
     public int Depth { get; }
     public int Port { get; }
     public int Pid => _process.Id;
@@ -25,10 +26,11 @@ public sealed class InstanceProcess
     public int? ExitCode { get; private set; }
     public bool IsSuspended { get; private set; }
 
-    private InstanceProcess(AgentConfig config, string key, int depth, int port, Process process, bool usesProcessGroup)
+    private InstanceProcess(AgentConfig config, string key, string generation, int depth, int port, Process process, bool usesProcessGroup)
     {
         _config = config;
         Key = key;
+        Generation = generation;
         Depth = depth;
         Port = port;
         _process = process;
@@ -51,8 +53,8 @@ public sealed class InstanceProcess
         string exeDir = Path.GetDirectoryName(Path.GetFullPath(config.GameExecutablePath))!;
         string gameExePath = Path.Combine(exeDir, "CasualtiesUnknown.x86_64");
 
-        string args = $"{Quote(gameExePath)} --ksmulti-servername \"dedicated\" "
-            + $"--ksmulti-setpass \"{payload.ServerPassword}\" "
+        string args = $"{Quote(gameExePath)} --ksmulti-servername {Quote("dedicated")} "
+            + $"--ksmulti-setpass {Quote(payload.ServerPassword ?? "")} "
             + $"--ksmulti-runcommand \"startserver {payload.Port}\" "
             + $"--ksmulti-runcommand \"maxplayers 200\" "
             + $"-batchmode -nographics "
@@ -88,7 +90,8 @@ public sealed class InstanceProcess
 
             _ = DrainAsync(process.StandardOutput, payload.InstanceKey);
             _ = DrainAsync(process.StandardError, payload.InstanceKey);
-            return new InstanceProcess(config, payload.InstanceKey, payload.Depth, payload.Port, process, usesProcessGroup);
+            return new InstanceProcess(config, payload.InstanceKey, payload.Generation,
+                payload.Depth, payload.Port, process, usesProcessGroup);
         }
         catch (Exception ex)
         {

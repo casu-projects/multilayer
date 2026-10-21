@@ -49,12 +49,6 @@ public sealed class DirectIpAdapter : INetEventListener
             return;
         }
 
-        if (_core.SessionCount >= _core.MaxPlayers)
-        {
-            Reject(request, "Server is full.");
-            return;
-        }
-
         byte[] raw = request.Data.RawData[request.Data.UserDataOffset..(request.Data.UserDataOffset + request.Data.UserDataSize)];
         if (!HandshakeReader.TryParseCredentials(raw, out string username, out string password))
         {
@@ -78,6 +72,7 @@ public sealed class DirectIpAdapter : INetEventListener
             transport: "Direct");
         _sessionsByPeer[peer] = session;
         _core.AcceptSession(session);
+        if (session.Disposed) _sessionsByPeer.Remove(peer);
     }
 
     public void OnNetworkReceive(NetPeer peer, NetPacketReader reader, byte channelNumber, DeliveryMethod deliveryMethod)

@@ -36,7 +36,8 @@ internal static class Program
         var gateway = new ClientGateway(config);
         gateway.SetPrewarmGate(true);
         hub.OutboundFilter = (conn, type) =>
-            conn.Kind != ClientKind.Mod || conn.InstanceKey == null
+            type == MessageType.SHUTDOWN
+            || conn.Kind != ClientKind.Mod || conn.InstanceKey == null
             || instances.CanSendModCommand(conn.InstanceKey, type);
         var sessions = new PlayerSessionStore(config, instances);
         instances.InstanceResumed += key => sessions.PushRoutesForInstance(key);
@@ -104,7 +105,7 @@ internal static class Program
         {
             try
             {
-                steamApi = new SteamApiClient(config.SteamApiUrl);
+                steamApi = new SteamApiClient(config.SteamApiUrl, config.SteamApiToken);
             }
             catch (Exception ex)
             {
@@ -401,9 +402,9 @@ internal static class Program
         switch (msg.Type)
         {
             case MessageType.INSTANCE_EXITED:
-                if (msg.PayloadAs<InstanceExitedPayload>() is { } exited)
+                if (msg.PayloadAs<InstanceExitedPayload>() is { } exited
+                    && instances.OnInstanceExited(exited.InstanceKey, exited.Generation, exited.Code))
                 {
-                    instances.OnInstanceExited(exited.InstanceKey, exited.Code);
                     sessions.OnInstanceExited(exited.InstanceKey);
                     mapStore.RemoveInstance(exited.InstanceKey);
                     objectBackgrounds.Remove(exited.InstanceKey);

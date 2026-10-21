@@ -11,13 +11,17 @@ internal sealed class SteamApiClient : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _worker;
 
-    public SteamApiClient(string baseUrl)
+    public SteamApiClient(string baseUrl, string? apiToken = null)
     {
         _http = new HttpClient
         {
             BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"),
             Timeout = TimeSpan.FromSeconds(5),
         };
+        if (!string.IsNullOrEmpty(apiToken))
+        {
+            _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Token", apiToken);
+        }
 
         _queue = Channel.CreateBounded<LobbyMetadataPayload>(new BoundedChannelOptions(1)
         {

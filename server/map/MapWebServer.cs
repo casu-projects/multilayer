@@ -149,7 +149,9 @@ internal sealed class MapWebServer : IAsyncDisposable
             if (conn == null) return Results.NotFound();
 
             string requestId = Guid.NewGuid().ToString("N");
-            TaskCompletionSource<PlayerDetailResponse> pending = _playerDetails.Register(requestId);
+            TaskCompletionSource<PlayerDetailResponse>? pending = _playerDetails.Register(requestId);
+            if (pending == null)
+                return Results.Json(new { error = "too many pending requests" }, statusCode: StatusCodes.Status429TooManyRequests);
             _hub.SendNoAck(conn, MessageType.PLAYER_DETAIL_REQUEST,
                 new PlayerDetailRequest { RequestId = requestId, InstanceKey = instanceKey, PlayerKey = playerKey });
 
@@ -180,7 +182,9 @@ internal sealed class MapWebServer : IAsyncDisposable
             if (connection == null) return Results.NotFound();
 
             string requestId = Guid.NewGuid().ToString("N");
-            TaskCompletionSource<MapObjectQueryResponse> pending = _objectQueries.Register(requestId);
+            TaskCompletionSource<MapObjectQueryResponse>? pending = _objectQueries.Register(requestId);
+            if (pending == null)
+                return Results.Json(new { error = "too many pending requests" }, statusCode: StatusCodes.Status429TooManyRequests);
             _hub.SendNoAck(connection, MessageType.OBJECT_QUERY, new MapObjectQueryRequest
             {
                 RequestId = requestId,
@@ -219,7 +223,9 @@ internal sealed class MapWebServer : IAsyncDisposable
             if (connection == null) return Results.NotFound();
 
             string requestId = Guid.NewGuid().ToString("N");
-            TaskCompletionSource<MapObjectDetailResponse> pending = _objectDetails.Register(requestId);
+            TaskCompletionSource<MapObjectDetailResponse>? pending = _objectDetails.Register(requestId);
+            if (pending == null)
+                return Results.Json(new { error = "too many pending requests" }, statusCode: StatusCodes.Status429TooManyRequests);
             _hub.SendNoAck(connection, MessageType.OBJECT_DETAIL_REQUEST, new MapObjectDetailRequest
             {
                 RequestId = requestId,

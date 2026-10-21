@@ -17,6 +17,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Server", "server\Server.csp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Steam", "steam\Steam.csproj", "{CD4E16E5-0FE6-4C01-8F05-FC7A5BA30B63}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{5F543892-2C6F-4816-BD64-254F306D7008}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CasuMp.Tests", "tests\CasuMp.Tests\CasuMp.Tests.csproj", "{0F65929A-003A-4FB1-B87E-D8DF115D4E24}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -50,9 +54,14 @@ Global
 		{CD4E16E5-0FE6-4C01-8F05-FC7A5BA30B63}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CD4E16E5-0FE6-4C01-8F05-FC7A5BA30B63}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CD4E16E5-0FE6-4C01-8F05-FC7A5BA30B63}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0F65929A-003A-4FB1-B87E-D8DF115D4E24}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0F65929A-003A-4FB1-B87E-D8DF115D4E24}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0F65929A-003A-4FB1-B87E-D8DF115D4E24}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0F65929A-003A-4FB1-B87E-D8DF115D4E24}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{9444A38A-9C63-4D6A-9B54-337242CEDD2D} = {C3E9138B-6AFA-4BDA-B901-32AF424292EA}
 		{B0A17F70-23D0-4A65-B691-5AF742A1DE6B} = {C3E9138B-6AFA-4BDA-B901-32AF424292EA}
+		{0F65929A-003A-4FB1-B87E-D8DF115D4E24} = {5F543892-2C6F-4816-BD64-254F306D7008}
 	EndGlobalSection
 EndGlobal

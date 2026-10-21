@@ -30,10 +30,23 @@ internal sealed class LobbyMetadataService
     {
         if (string.IsNullOrWhiteSpace(versionTag)) return;
 
+        bool authoritative = instanceKey == InstanceManager.DepthKey(1);
+        if (authoritative)
+        {
+            if (_versionTag == versionTag) return;
+            string? previous = _versionTag;
+            _versionTag = versionTag;
+            Log.Info(previous == null
+                ? $"로비 버전 태그 확정: {_versionTag} ({instanceKey})"
+                : $"로비 버전 태그 갱신: {previous} -> {_versionTag} ({instanceKey})");
+            Push(force: true);
+            return;
+        }
+
         if (_versionTag == null)
         {
             _versionTag = versionTag;
-            Log.Info($"로비 버전 태그 확정: {_versionTag} ({instanceKey})");
+            Log.Info($"로비 버전 태그 임시 확정: {_versionTag} ({instanceKey})");
             Push(force: true);
         }
         else if (_versionTag != versionTag)

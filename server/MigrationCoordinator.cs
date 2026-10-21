@@ -352,10 +352,11 @@ public sealed class MigrationCoordinator
             });
     }
 
-    public void OnFreezeDone(PlayerKey player, int? epoch)
+    public void OnFreezeDone(PlayerKey player, int? epoch, string? originInstance)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx) || tx.State != TxState.Freezing) return;
         if (!IsCurrent(tx, epoch)) return;
+        if (!IsExpectedInstance(originInstance, tx.FromInstance)) return;
 
         tx.State = TxState.WaitingReady; // 목적지 READY 게이트
         tx.StepDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(_config.InstanceReadyTimeoutSeconds);
@@ -364,10 +365,11 @@ public sealed class MigrationCoordinator
         TryProceedSwap(tx);
     }
 
-    public void OnPreClearDone(PlayerKey player, int? epoch)
+    public void OnPreClearDone(PlayerKey player, int? epoch, string? originInstance)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx) || tx.State != TxState.WaitingReady) return;
         if (!IsCurrent(tx, epoch)) return;
+        if (!IsExpectedInstance(originInstance, tx.FromInstance)) return;
 
         tx.PreClearDone = true; // 출발지 엔티티 정리 완료
         TryProceedSwap(tx);
@@ -499,21 +501,25 @@ public sealed class MigrationCoordinator
         }
     }
 
-    public void OnResumeDone(PlayerKey player, int? epoch)
+    public void OnResumeDone(PlayerKey player, int? epoch, string? originInstance)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx) || tx.State != TxState.Resuming) return;
         if (!IsCurrent(tx, epoch)) return;
+        if (!IsExpectedInstance(originInstance, tx.TargetInstance)) return;
         tx.State = TxState.Worldgen;
         tx.StepDeadline = DateTime.UtcNow + MigrationPhaseTimeout;
         WriteWal(tx);
     }
 
-    public void OnWorldgenDone(PlayerKey player, int? epoch)
+    public void OnWorldgenDone(PlayerKey player, int? epoch, string? originInstance)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
+        if (tx.State != TxState.Worldgen) return;
         if (!IsCurrent(tx, epoch)) return;
+        if (!IsExpectedInstance(originInstance, tx.TargetInstance)) return;
 
         _sessions.CommitMigration(player, tx.ToDepth, tx.TargetInstance); // 라우팅 확정
+        _sessions.RouteToCurrent(player);
         _dataStore.CommitPending(player); // 보류분 확정
         if (tx.IsRespawn)
         {
@@ -544,11 +550,12 @@ public sealed class MigrationCoordinator
         Abort(tx, $"SWAP_FAILED: {reason}");
     }
 
-    public void OnPlayerLeftDuringMigration(PlayerKey player, int? epoch)
+    public void OnPlayerLeftDuringMigration(PlayerKey player, int? epoch, string? originInstance)
     {
         if (!_transactions.TryGetValue(player, out Transaction? tx)) return;
         if (tx.State != TxState.Freezing) return;
         if (!IsCurrent(tx, epoch)) return;
+        if (!IsExpectedInstance(originInstance, tx.FromInstance)) return;
 
         EndMigrationOnLeave(tx);
     }
@@ -566,28 +573,35 @@ public sealed class MigrationCoordinator
 
         _dataStore.CommitPending(tx.Player);
 
+        bool postSwap = tx.SwapSent || tx.State is TxState.Swapping or TxState.Resuming or TxState.Worldgen;
         PlayerState? state = _sessions.Get(tx.Player);
         if (state != null)
         {
-            state.Depth = tx.ToDepth;
+            state.Depth = postSwap ? tx.ToDepth : tx.FromDepth;
+            state.InstanceId = postSwap ? tx.TargetInstance : tx.FromInstance;
             state.Session = PlayerSessionState.Offline;
-            state.IsReturning = true;
+            state.IsReturning = postSwap;
             _sessions.Persist(state);
         }
 
         InstanceInfo? fromInstance = _instances.Find(tx.FromInstance);
-        if (fromInstance != null)
-        {
-            _hub.Send(fromInstance.ModConnection, MessageType.RELEASE,
-                new { playerKey = tx.Player.Value, epoch = tx.Epoch });
-        }
         InstanceInfo? targetInstance = _instances.Find(tx.TargetInstance ?? "");
-        if (targetInstance != null && targetInstance.Key != tx.FromInstance)
+        if (!postSwap)
         {
-            _hub.Send(targetInstance.ModConnection, MessageType.RELEASE,
-                new { playerKey = tx.Player.Value, epoch = tx.Epoch });
+            JsonElement? payload = tx.IsRespawn ? null : _dataStore.GetForMigration(tx.Player);
+            _hub.Send(fromInstance?.ModConnection, MessageType.UNFREEZE,
+                new { playerKey = tx.Player.Value, epoch = tx.Epoch, payload = payload });
         }
-
+        else
+        {
+            _hub.Send(fromInstance?.ModConnection, MessageType.UNFREEZE,
+                new { playerKey = tx.Player.Value, epoch = tx.Epoch });
+            if (targetInstance != null && targetInstance.Key != tx.FromInstance)
+            {
+                _hub.Send(targetInstance.ModConnection, MessageType.UNFREEZE,
+                    new { playerKey = tx.Player.Value, epoch = tx.Epoch });
+            }
+        }
     }
 
     public void OnInstanceReady(string instanceKey)
@@ -655,7 +669,7 @@ public sealed class MigrationCoordinator
         RemoveWal(tx.Player);
         Log.Info($"{tx.Player} 중단: {reason} — 롤백.");
 
-        bool postSwap = tx.State is TxState.Resuming or TxState.Worldgen; // 스왑 이후 실패 여부
+        bool postSwap = tx.State is TxState.Swapping or TxState.Resuming or TxState.Worldgen; // 스왑 이후 실패 여부
 
         PlayerState? state = _sessions.Get(tx.Player);
         if (state != null)
@@ -664,6 +678,7 @@ public sealed class MigrationCoordinator
             state.InstanceId = tx.TargetInstance;
             state.Depth = tx.ToDepth;
             _sessions.Persist(state);
+            _sessions.RouteToCurrent(tx.Player);
         }
         _dataStore.CommitPending(tx.Player);
 
@@ -699,6 +714,10 @@ public sealed class MigrationCoordinator
 
     private static bool IsCurrent(Transaction tx, int? epoch) =>
         !epoch.HasValue || epoch.Value == tx.Epoch;
+
+    private static bool IsExpectedInstance(string? originInstance, string? expectedInstance) =>
+        string.IsNullOrEmpty(expectedInstance)
+        || string.Equals(originInstance, expectedInstance, StringComparison.Ordinal);
 
     private bool MigratingToSameTarget(Transaction tx, PlayerKey other) =>
         _transactions.TryGetValue(other, out Transaction? t) && t.TargetInstance == tx.TargetInstance;

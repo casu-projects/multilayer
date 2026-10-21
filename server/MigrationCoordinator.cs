@@ -81,6 +81,9 @@ public sealed class MigrationCoordinator
     public int CountTargeting(string instanceKey) =>
         _transactions.Values.Count(t => t.TargetInstance == instanceKey);
 
+    public int CountUsing(string instanceKey) =>
+        _transactions.Values.Count(t => t.FromInstance == instanceKey || t.TargetInstance == instanceKey);
+
     private string WalPath => Path.Combine(_config.SaveRootPath, "migration-wal.json");
 
     private void LoadWalAndRecover()

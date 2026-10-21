@@ -67,9 +67,12 @@ public sealed class OperatorConsole
         _registry.Register("ban", "유저 차단", "<player>", CmdBan);
         _registry.Register("unban", "차단 해제", "<player>", CmdUnban);
         _registry.Register("lockdown", "점검 모드 토글", CmdLockdown);
-        _registry.Register("connections", "연결 목록", CmdConnections);
+        _registry.Register("connections", "연결/레이어 목록", CmdConnections);
         _registry.Register("clear", "화면 지우기", CmdClear);
         _registry.Register("migrate", "수동 마이그레이션", "<player> [targetLayer]", CmdMigrate);
+        _registry.Register("freeze", "레이어 동결", "<layer>", CmdFreeze);
+        _registry.Register("unfreeze", "레이어 동결 해제", "<layer>", CmdUnfreeze);
+        _registry.Register("swap", "두 레이어의 에이전트 교체", "<layerA> <layerB>", CmdSwap);
         _registry.Register("exec", "전 인스턴스 콘솔 명령 실행", "<command...>", CmdExec);
         _registry.Register("rule", "rule 업데이트", "<이름> <값>", CmdRule);
         _registry.Register("run", "run 업데이트", "<설정> <값>", CmdRun);
@@ -233,38 +236,62 @@ public sealed class OperatorConsole
 
     private void CmdConnections(string[] args)
     {
-        var conns = _hub.Connections.Where(c => !c.Closed).ToList();
-        if (conns.Count == 0)
-        {
-            Log.Info("연결된 프로세스가 없습니다.");
-            return;
-        }
-        var table = new Table().Title("연결").AddColumn("종류").AddColumn("정보").AddColumn("원격");
+        var table = new Table().Title("연결/레이어").AddColumn("종류").AddColumn("대상")
+            .AddColumn("상태").AddColumn("에이전트").AddColumn("포트").AddColumn("원격");
         var discordLines = new List<string>();
-        foreach (ControlHub.ClientConnection c in conns)
+
+        foreach (ControlHub.ClientConnection c in _hub.Connections
+            .Where(c => !c.Closed && c.Kind == ClientKind.Agent)
+            .OrderBy(c => c.MachineId))
         {
-            string remote = c.Tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep
-                ? $"{ep.Address}:{ep.Port}" : "-";
-            string kind;
-            string info;
-            switch (c.Kind)
-            {
-                case ClientKind.Agent:
-                    kind = "Agent"; info = $"{c.MachineId} (수용 {c.AgentCapacity}, {c.AgentAddress})"; break;
-                case ClientKind.Mod:
-                    kind = "Instance"; info = $"{c.InstanceKey} (포트 {c.InstancePort}, depth {c.InstanceDepth})"; break;
-                default:
-                    kind = "Unknown"; info = $"conn #{c.Id}"; break;
-            }
-            table.AddRow(Markup.Escape(kind), Markup.Escape(info), Markup.Escape(remote));
-            discordLines.Add($"[{kind}] {info} {remote}");
+            int used = _instances.All.Count(i => i.MachineId == c.MachineId
+                && i.Status is not (InstanceStatus.Stopped or InstanceStatus.Crashed));
+            string status = $"connected ({used}/{c.AgentCapacity})";
+            string remote = RemoteAddress(c);
+            table.AddRow("Agent", Markup.Escape(c.MachineId ?? "-"), Markup.Escape(status),
+                Markup.Escape(c.AgentAddress ?? "-"), "-", Markup.Escape(remote));
+            discordLines.Add($"[Agent] {c.MachineId} {status} {c.AgentAddress} {remote}");
         }
-        var (direct, steam) = _gateway.TransportCounts;
-        string clientInfo = $"Direct {direct} / Steam {steam} (총 {_gateway.SessionCount})";
-        table.AddRow("Clients", Markup.Escape(clientInfo), "-");
-        discordLines.Add($"[Clients] Direct {direct} / Steam {steam}");
+
+        for (int depth = 1; depth <= InstanceManager.LayerCount; depth++)
+        {
+            InstanceInfo? info = _instances.FindByDepth(depth);
+            string target = info == null ? $"L{depth}" : $"L{depth} ({info.Key})";
+            string status = info?.Status.ToString() ?? "-";
+            string machine = info?.MachineId ?? "-";
+            if (info?.MachineId != null && _hub.AgentConnection(info.MachineId) == null)
+                machine += " (offline)";
+            string port = info?.Port.ToString() ?? "-";
+            string remote = RemoteAddress(info?.ModConnection);
+            table.AddRow("Layer", Markup.Escape(target), Markup.Escape(status),
+                Markup.Escape(machine), port, Markup.Escape(remote));
+            discordLines.Add($"[Layer] {target} {status} {machine} :{port} {remote}");
+        }
+
+        foreach (ControlHub.ClientConnection c in _hub.Connections
+            .Where(c => !c.Closed && c.Kind == ClientKind.Unknown)
+            .OrderBy(c => c.Id))
+        {
+            string remote = RemoteAddress(c);
+            table.AddRow("Handshake", Markup.Escape($"conn #{c.Id}"), "waiting",
+                "-", "-", Markup.Escape(remote));
+            discordLines.Add($"[Handshake] conn #{c.Id} {remote}");
+        }
+
+        if (_config.SteamEnabled)
+        {
+            string endpoint = $"127.0.0.1:{_config.SteamBridgePort}";
+            table.AddRow("Service", "Steam Bridge", "active", "-",
+                _config.SteamBridgePort.ToString(), Markup.Escape(endpoint));
+            discordLines.Add($"[Service] Steam Bridge active {endpoint}");
+        }
+
         ConsoleRenderer.Write(table, discordLines);
     }
+
+    private static string RemoteAddress(ControlHub.ClientConnection? conn) =>
+        conn?.Tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep
+            ? $"{ep.Address}:{ep.Port}" : "-";
 
     private void CmdMigrate(string[] args)
     {
@@ -306,6 +333,168 @@ public sealed class OperatorConsole
             Log.Info($"{mstate.Username ?? migrateKey.Value}: L{mstate.Depth} → L{migrateTarget} 마이그레이션 시작.");
         }
     }
+
+    private void CmdFreeze(string[] args)
+    {
+        if (args.Length != 1 || !TryParseLayer(args[0], out int depth))
+        {
+            Log.Info("사용법: freeze <layer>  (예: freeze 3)");
+            return;
+        }
+
+        InstanceInfo? info = _instances.FindByDepth(depth);
+        if (info == null)
+        {
+            Log.Info($"L{depth} 인스턴스가 없습니다.");
+            return;
+        }
+        if (_instances.IsSwapping(depth))
+        {
+            Log.Info($"L{depth}는 레이어 교체 진행 중입니다.");
+            return;
+        }
+        if (info.Status is InstanceStatus.Suspended or InstanceStatus.Suspending)
+        {
+            Log.Info($"L{depth}는 이미 동결 상태입니다.");
+            return;
+        }
+        if (info.Status is not (InstanceStatus.Ready or InstanceStatus.Idle))
+        {
+            Log.Info($"L{depth} 동결 불가: 현재 상태 {info.Status}");
+            return;
+        }
+
+        int users = CountLayerUsers(info);
+        if (users > 0)
+        {
+            Log.Info($"L{depth} 동결 불가: 접속자 {users}명");
+            return;
+        }
+
+        int targeting = _migrations.CountTargeting(info.Key);
+        if (targeting > 0)
+        {
+            Log.Info($"L{depth} 동결 불가: 마이그레이션 대상 {targeting}건");
+            return;
+        }
+
+        if (_instances.SuspendInstance(info.Key, "manual"))
+            Log.Info($"L{depth} 동결 요청 — 유저 접속 시 자동으로 해제됩니다.");
+        else
+            Log.Info($"L{depth} 동결 실패 — 에이전트/모드 연결을 확인하세요.");
+    }
+
+    private void CmdUnfreeze(string[] args)
+    {
+        if (args.Length != 1 || !TryParseLayer(args[0], out int depth))
+        {
+            Log.Info("사용법: unfreeze <layer>  (예: unfreeze 3)");
+            return;
+        }
+
+        InstanceInfo? info = _instances.FindByDepth(depth);
+        if (info == null)
+        {
+            Log.Info($"L{depth} 인스턴스가 없습니다.");
+            return;
+        }
+        if (_instances.IsSwapping(depth))
+        {
+            Log.Info($"L{depth}는 레이어 교체 진행 중입니다.");
+            return;
+        }
+        if (info.Status is InstanceStatus.Ready or InstanceStatus.Idle)
+        {
+            Log.Info($"L{depth}는 이미 활성 상태입니다.");
+            return;
+        }
+        if (info.Status == InstanceStatus.Resuming)
+        {
+            Log.Info($"L{depth}는 이미 동결 해제 중입니다.");
+            return;
+        }
+        if (info.Status is not (InstanceStatus.Suspended or InstanceStatus.Suspending))
+        {
+            Log.Info($"L{depth} 동결 해제 불가: 현재 상태 {info.Status}");
+            return;
+        }
+
+        if (_instances.ResumeInstance(info.Key))
+            Log.Info($"L{depth} 동결 해제 요청 — 유휴 시 {_config.IdleShutdownDelaySeconds}초 후 자동 동결됩니다.");
+        else
+            Log.Info($"L{depth} 동결 해제 실패 — 에이전트/모드 연결을 확인하세요.");
+    }
+
+    private void CmdSwap(string[] args)
+    {
+        if (args.Length != 2
+            || !TryParseLayer(args[0], out int depthA)
+            || !TryParseLayer(args[1], out int depthB))
+        {
+            Log.Info("사용법: swap <layerA> <layerB>  (예: swap 1 3)");
+            return;
+        }
+        if (depthA == depthB)
+        {
+            Log.Info("서로 다른 두 레이어를 지정해야 합니다.");
+            return;
+        }
+
+        InstanceInfo? a = _instances.FindByDepth(depthA);
+        InstanceInfo? b = _instances.FindByDepth(depthB);
+        if (a == null || b == null)
+        {
+            Log.Info(a == null ? $"L{depthA} 인스턴스가 없습니다." : $"L{depthB} 인스턴스가 없습니다.");
+            return;
+        }
+
+        var blockers = new List<string>();
+        int usersA = CountLayerUsers(a);
+        int usersB = CountLayerUsers(b);
+        if (usersA > 0) blockers.Add($"L{depthA} 접속자 {usersA}명");
+        if (usersB > 0) blockers.Add($"L{depthB} 접속자 {usersB}명");
+
+        int usingA = _migrations.CountUsing(a.Key);
+        int usingB = _migrations.CountUsing(b.Key);
+        if (usingA > 0) blockers.Add($"L{depthA} 마이그레이션 {usingA}건");
+        if (usingB > 0) blockers.Add($"L{depthB} 마이그레이션 {usingB}건");
+
+        if (blockers.Count > 0)
+        {
+            Log.Info($"레이어 교체 불가: {string.Join(", ", blockers)}");
+            return;
+        }
+
+        string? reason = _instances.ValidateSwap(depthA, depthB);
+        if (reason != null)
+        {
+            Log.Info($"레이어 교체 불가: {reason}");
+            return;
+        }
+
+        if (!_instances.TryStartSwap(depthA, depthB, out reason))
+        {
+            Log.Info($"레이어 교체 실패: {reason}");
+            return;
+        }
+
+        Log.Info($"L{depthA} ↔ L{depthB} 교체를 시작했습니다. " +
+            "두 레이어는 재스폰되며 월드가 재생성됩니다.");
+    }
+
+    private static bool TryParseLayer(string text, out int depth)
+    {
+        string value = text.Trim();
+        if (value.StartsWith('L') || value.StartsWith('l'))
+            value = value[1..];
+        return int.TryParse(value, out depth)
+            && depth >= 1 && depth <= InstanceManager.LayerCount;
+    }
+
+    private int CountLayerUsers(InstanceInfo info) =>
+        _sessions.All.Count(p => p.Session != PlayerSessionState.Offline
+            && (p.InstanceId == info.Key
+                || (p.Session == PlayerSessionState.Connecting && p.Depth == info.Depth)));
 
     private void CmdClear(string[] args) => AnsiConsole.Clear();
 

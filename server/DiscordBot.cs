@@ -155,6 +155,48 @@ internal sealed class DiscordBot
         await channel.SendMessageAsync(embed: embed);
     }
 
+    internal async Task SendLayerSuspendedAsync(int depth, string reason)
+    {
+        if (!IsConnected || _channelId == 0) return;
+        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
+        if (channel == null) return;
+
+        string description = reason switch
+        {
+            "idle" => "유휴 상태가 되어 동결되었습니다.",
+            "reset" => "레이어 초기화 후 동결되었습니다.",
+            "prewarm" => "프리웜 준비 후 동결되었습니다.",
+            "manual" => "운영자 명령으로 동결되었습니다.",
+            "swap" => "레이어 교체 후 동결되었습니다.",
+            _ => "동결되었습니다.",
+        };
+
+        var embed = new EmbedBuilder()
+            .WithTitle($"레이어 L{depth} 동결")
+            .WithDescription(description)
+            .WithColor(new Color(0x95, 0xA5, 0xA6))
+            .WithFooter(text: $"depth-{depth}")
+            .WithCurrentTimestamp()
+            .Build();
+        await channel.SendMessageAsync(embed: embed);
+    }
+
+    internal async Task SendLayerResumedAsync(int depth)
+    {
+        if (!IsConnected || _channelId == 0) return;
+        var channel = await _client.GetChannelAsync(_channelId) as IMessageChannel;
+        if (channel == null) return;
+
+        var embed = new EmbedBuilder()
+            .WithTitle($"레이어 L{depth} 동결 해제")
+            .WithDescription("레이어가 다시 활성화되었습니다.")
+            .WithColor(Color.Green)
+            .WithFooter(text: $"depth-{depth}")
+            .WithCurrentTimestamp()
+            .Build();
+        await channel.SendMessageAsync(embed: embed);
+    }
+
     internal async Task SendLockdownAsync(bool started)
     {
         if (!IsConnected || _channelId == 0) return;

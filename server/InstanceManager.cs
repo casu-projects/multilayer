@@ -32,6 +32,7 @@ public sealed class InstanceInfo
     public bool HasPlayedSinceReset { get; set; }
     public volatile bool WorldReady;
     public bool SuspendAfterReset { get; set; }
+    public string SuspendReasonAfterReset { get; set; } = "reset";
 }
 
 public sealed class InstanceManager
@@ -54,6 +55,7 @@ public sealed class InstanceManager
     private string _prewarmNotice = "";
     private bool _prewarmCompletedOnce;
     private bool _admissionReady;
+    private bool _admissionEverOpened;
 
     private static readonly TimeSpan PrewarmNoticeInterval = TimeSpan.FromSeconds(60);
 
@@ -61,6 +63,28 @@ public sealed class InstanceManager
     private readonly HashSet<string> _cleanedMachines = new();
     private readonly HashSet<string> _cleanupPending = new();
     private readonly Dictionary<string, DateTime> _cleanupRetryAt = new();
+
+    private readonly HashSet<int> _swapDepths = new();
+    private SwapRequest? _swap;
+
+    private enum SwapPhase
+    {
+        Stopping,
+        WaitingReady,
+        RollbackStopping,
+    }
+
+    private sealed class SwapRequest
+    {
+        public required int DepthA { get; init; }
+        public required int DepthB { get; init; }
+        public required string MachineA { get; init; }
+        public required string MachineB { get; init; }
+        public required bool SuspendA { get; init; }
+        public required bool SuspendB { get; init; }
+        public SwapPhase Phase { get; set; } = SwapPhase.Stopping;
+        public DateTime Deadline { get; set; }
+    }
 
     public InstanceManager(ServerConfig config, ControlHub hub)
     {
@@ -71,8 +95,10 @@ public sealed class InstanceManager
     public IReadOnlyCollection<InstanceInfo> All => _instances.Values.ToList();
 
     public event Action<string>? InstanceResumed;
+    public event Action<string, string>? InstanceSuspended;
 
     public bool AdmissionReady => _admissionReady;
+    public bool AdmissionEverOpened => _admissionEverOpened;
 
     public int CleanedAgentCapacity =>
         _agents.TotalCapacity(IsCleanedMachine);
@@ -187,6 +213,13 @@ public sealed class InstanceManager
     public string? EnsureInstance(int depth)
     {
         InstanceInfo? info = FindByDepth(depth);
+        if (_swapDepths.Contains(depth)
+            && (info == null || info.Status is InstanceStatus.Stopping
+                or InstanceStatus.Stopped or InstanceStatus.Crashed))
+        {
+            Log.Info($"depth-{depth} 레이어 교체 중 — 접속 배정을 잠시 보류합니다.");
+            return null;
+        }
         if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
         {
             info = Spawn(depth);
@@ -216,10 +249,34 @@ public sealed class InstanceManager
             return null;
         }
 
+        InstanceInfo? info = SpawnOnMachine(depth, machineId, false, "reset", out string? reason);
+        if (info == null)
+        {
+            Log.Info($"depth-{depth} 스폰 불가 — {reason}");
+        }
+        return info;
+    }
+
+    private InstanceInfo? SpawnOnMachine(int depth, string machineId, bool suspendAfterReady,
+        string suspendReason, out string? reason)
+    {
+        reason = null;
+        if (!_cleanedMachines.Contains(machineId))
+        {
+            reason = $"에이전트 {machineId} 정리 완료 전";
+            return null;
+        }
+        if (!_agents.TryReserve(machineId))
+        {
+            reason = $"에이전트 {machineId} 수용량 초과";
+            return null;
+        }
+
         int? allocatedPort = AllocatePort();
         if (allocatedPort == null)
         {
-            Log.Info($"인스턴스 포트 고갈 — depth-{depth} 스폰 불가.");
+            _agents.DecrementUsage(machineId);
+            reason = "인스턴스 포트 고갈";
             return null;
         }
         int port = allocatedPort.Value;
@@ -233,23 +290,28 @@ public sealed class InstanceManager
             Generation = generation,
             MachineId = machineId,
             Status = InstanceStatus.Starting,
+            SuspendAfterReset = suspendAfterReady,
+            SuspendReasonAfterReset = suspendReason,
         };
         _instances[key] = info;
         _runNeeded.Add(key);
 
-        _agents.IncrementUsage(machineId);
-
         int spawnCleanedUp = 0;
-        void CleanupFailedSpawn(string reason)
+        void CleanupFailedSpawn(string failReason)
         {
             if (Interlocked.Exchange(ref spawnCleanedUp, 1) != 0) return;
-            Log.Info($"depth-{depth} SPAWN 실패: {reason}");
-            info.Status = InstanceStatus.Crashed;
+            Log.Info($"depth-{depth} SPAWN 실패: {failReason}");
             _agents.DecrementUsage(machineId);
             _usedPorts.Remove(port);
-            ((ICollection<KeyValuePair<string, InstanceInfo>>)_instances)
-                .Remove(new KeyValuePair<string, InstanceInfo>(key, info));
-            _runNeeded.Remove(key);
+
+            bool stillCurrent = ReferenceEquals(Find(key), info);
+            if (stillCurrent)
+            {
+                info.Status = InstanceStatus.Crashed;
+                ((ICollection<KeyValuePair<string, InstanceInfo>>)_instances)
+                    .Remove(new KeyValuePair<string, InstanceInfo>(key, info));
+                _runNeeded.Remove(key);
+            }
         }
 
         ControlHub.ClientConnection? conn = _hub.AgentConnection(machineId);
@@ -261,14 +323,15 @@ public sealed class InstanceManager
             generation,
             serverName = _config.ServerName,
             serverPassword = _config.ServerPassword,
-        }, (ok, reason) =>
+        }, (ok, failReason) =>
         {
-            if (!ok) CleanupFailedSpawn(reason ?? "unknown");
+            if (!ok) CleanupFailedSpawn(failReason ?? "unknown");
         });
 
         if (!sent)
         {
             CleanupFailedSpawn("send failed");
+            reason = "SPAWN 전송 실패";
             return null;
         }
         return info;
@@ -292,14 +355,239 @@ public sealed class InstanceManager
         return _agents.Select(IsCleanedMachine);
     }
 
-    public void StopInstance(string key)
+    public bool StopInstance(string key) => StopInstance(key, out _);
+
+    public bool StopInstance(string key, out string? reason)
     {
+        reason = null;
         InstanceInfo? info = Find(key);
-        if (info == null) return;
+        if (info == null)
+        {
+            reason = "인스턴스 없음";
+            return false;
+        }
+        if (info.Status == InstanceStatus.Stopping) return true;
+
+        ControlHub.ClientConnection? conn = _hub.AgentConnection(info.MachineId ?? "");
+        if (conn == null)
+        {
+            reason = "에이전트 연결 없음";
+            return false;
+        }
+
+        InstanceStatus previous = info.Status;
         info.Status = InstanceStatus.Stopping;
-        _hub.Send(_hub.AgentConnection(info.MachineId ?? ""), MessageType.STOP,
+        bool sent = _hub.Send(conn, MessageType.STOP,
             new { instanceKey = key, generation = info.Generation });
+        if (!sent)
+        {
+            info.Status = previous;
+            reason = "STOP 전송 실패";
+            return false;
+        }
+        return true;
     }
+
+    public bool IsSwapping(int depth) => _swapDepths.Contains(depth);
+
+    public string? ValidateSwap(int depthA, int depthB)
+    {
+        if (depthA == depthB)
+            return "서로 다른 두 레이어를 지정해야 합니다.";
+        if (depthA < 1 || depthA > LayerCount || depthB < 1 || depthB > LayerCount)
+            return $"레이어 번호는 1~{LayerCount} 범위여야 합니다.";
+        if (_swap != null || _swapDepths.Count > 0)
+            return "이미 레이어 교체가 진행 중입니다.";
+
+        InstanceInfo? a = FindByDepth(depthA);
+        InstanceInfo? b = FindByDepth(depthB);
+        if (a == null) return $"L{depthA} 인스턴스가 없습니다.";
+        if (b == null) return $"L{depthB} 인스턴스가 없습니다.";
+        if (a.Status is not (InstanceStatus.Ready or InstanceStatus.Idle or InstanceStatus.Suspended))
+            return $"L{depthA} 교체 불가: 현재 상태 {a.Status}";
+        if (b.Status is not (InstanceStatus.Ready or InstanceStatus.Idle or InstanceStatus.Suspended))
+            return $"L{depthB} 교체 불가: 현재 상태 {b.Status}";
+        if (_prewarmInFlight == depthA || _prewarmInFlight == depthB
+            || _prewarmQueued.Contains(depthA) || _prewarmQueued.Contains(depthB))
+            return "프리웜 진행 중인 레이어는 교체할 수 없습니다.";
+        if (string.IsNullOrEmpty(a.MachineId) || string.IsNullOrEmpty(b.MachineId))
+            return "레이어의 에이전트 정보가 없습니다.";
+        if (string.Equals(a.MachineId, b.MachineId, StringComparison.Ordinal))
+            return $"L{depthA}와 L{depthB}가 같은 에이전트({a.MachineId})에 있습니다.";
+        if (!_cleanedMachines.Contains(a.MachineId))
+            return $"에이전트 {a.MachineId}가 아직 정리되지 않았습니다.";
+        if (!_cleanedMachines.Contains(b.MachineId))
+            return $"에이전트 {b.MachineId}가 아직 정리되지 않았습니다.";
+        if (_hub.AgentConnection(a.MachineId) == null)
+            return $"에이전트 {a.MachineId} 연결이 없습니다.";
+        if (_hub.AgentConnection(b.MachineId) == null)
+            return $"에이전트 {b.MachineId} 연결이 없습니다.";
+        return null;
+    }
+
+    public bool TryStartSwap(int depthA, int depthB, out string? reason)
+    {
+        reason = ValidateSwap(depthA, depthB);
+        if (reason != null) return false;
+
+        InstanceInfo a = FindByDepth(depthA)!;
+        InstanceInfo b = FindByDepth(depthB)!;
+        var swap = new SwapRequest
+        {
+            DepthA = depthA,
+            DepthB = depthB,
+            MachineA = a.MachineId!,
+            MachineB = b.MachineId!,
+            SuspendA = a.Status == InstanceStatus.Suspended,
+            SuspendB = b.Status == InstanceStatus.Suspended,
+            Deadline = DateTime.UtcNow.AddSeconds(10),
+        };
+        _swap = swap;
+        _swapDepths.Add(depthA);
+        _swapDepths.Add(depthB);
+
+        bool stopA = StopInstance(a.Key, out string? stopReasonA);
+        bool stopB = StopInstance(b.Key, out string? stopReasonB);
+        if (!stopA || !stopB)
+        {
+            if (stopA) RequeuePrewarm(depthA);
+            if (stopB) RequeuePrewarm(depthB);
+            _swap = null;
+            _swapDepths.Clear();
+            reason = stopReasonA ?? stopReasonB ?? "레이어 중지 실패";
+            return false;
+        }
+
+        Log.Info($"L{depthA}({swap.MachineA}) ↔ L{depthB}({swap.MachineB}) 교체 시작 — " +
+            "두 레이어를 중지하고 반대 에이전트에서 재스폰합니다.");
+        return true;
+    }
+
+    public void TickSwap()
+    {
+        SwapRequest? swap = _swap;
+        if (swap == null) return;
+
+        DateTime now = DateTime.UtcNow;
+        switch (swap.Phase)
+        {
+            case SwapPhase.Stopping:
+                if (IsTerminal(swap.DepthA) && IsTerminal(swap.DepthB))
+                {
+                    InstanceInfo? newA = SpawnOnMachine(swap.DepthA, swap.MachineB,
+                        swap.SuspendA, "swap", out string? failA);
+                    InstanceInfo? newB = SpawnOnMachine(swap.DepthB, swap.MachineA,
+                        swap.SuspendB, "swap", out string? failB);
+                    if (newA == null || newB == null)
+                    {
+                        BeginRollback(swap, failA ?? failB ?? "재스폰 실패");
+                        return;
+                    }
+
+                    swap.Phase = SwapPhase.WaitingReady;
+                    swap.Deadline = now.AddSeconds(_config.InstanceReadyTimeoutSeconds + 30);
+                }
+                else if (now >= swap.Deadline)
+                {
+                    Log.Info($"L{swap.DepthA} ↔ L{swap.DepthB} 교체 중지 타임아웃 — 교체 취소.");
+                    _swap = null;
+                    _swapDepths.Clear();
+                    RequeuePrewarm(swap.DepthA);
+                    RequeuePrewarm(swap.DepthB);
+                }
+                break;
+
+            case SwapPhase.WaitingReady:
+                if (IsSettled(swap.DepthA) && IsSettled(swap.DepthB))
+                {
+                    Log.Info($"L{swap.DepthA} ↔ L{swap.DepthB} 교체 완료 — " +
+                        $"L{swap.DepthA}: {FindByDepth(swap.DepthA)?.MachineId}, " +
+                        $"L{swap.DepthB}: {FindByDepth(swap.DepthB)?.MachineId}");
+                    _swap = null;
+                    _swapDepths.Clear();
+                }
+                else if (IsTerminal(swap.DepthA) || IsTerminal(swap.DepthB))
+                {
+                    BeginRollback(swap, "재스폰/월드젠 실패");
+                }
+                else if (now >= swap.Deadline)
+                {
+                    BeginRollback(swap, "재스폰 준비 타임아웃");
+                }
+                break;
+
+            case SwapPhase.RollbackStopping:
+                if (IsTerminal(swap.DepthA) && IsTerminal(swap.DepthB))
+                {
+                    SpawnOriginals(swap);
+                }
+                else if (now >= swap.Deadline)
+                {
+                    Log.Info($"L{swap.DepthA} ↔ L{swap.DepthB} 롤백 중지 타임아웃 — 프리웜 복구에 맡깁니다.");
+                    _swap = null;
+                    _swapDepths.Clear();
+                    RequeuePrewarm(swap.DepthA);
+                    RequeuePrewarm(swap.DepthB);
+                }
+                break;
+        }
+    }
+
+    private void BeginRollback(SwapRequest swap, string reason)
+    {
+        Log.Info($"L{swap.DepthA} ↔ L{swap.DepthB} 교체 실패({reason}) — 원래 배치로 롤백합니다.");
+
+        bool stopping = false;
+        foreach (int depth in new[] { swap.DepthA, swap.DepthB })
+        {
+            InstanceInfo? info = FindByDepth(depth);
+            if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed
+                or InstanceStatus.Stopping)
+                continue;
+            stopping |= StopInstance(info.Key);
+        }
+
+        if (!stopping)
+        {
+            SpawnOriginals(swap);
+            return;
+        }
+
+        swap.Phase = SwapPhase.RollbackStopping;
+        swap.Deadline = DateTime.UtcNow.AddSeconds(10);
+    }
+
+    private void SpawnOriginals(SwapRequest swap)
+    {
+        InstanceInfo? restoredA = SpawnOnMachine(swap.DepthA, swap.MachineA,
+            swap.SuspendA, "swap", out string? failA);
+        InstanceInfo? restoredB = SpawnOnMachine(swap.DepthB, swap.MachineB,
+            swap.SuspendB, "swap", out string? failB);
+        if (restoredA != null && restoredB != null)
+        {
+            Log.Info($"L{swap.DepthA} ↔ L{swap.DepthB} 롤백 완료 — 원래 에이전트로 복구했습니다.");
+        }
+        else
+        {
+            Log.Info($"L{swap.DepthA} ↔ L{swap.DepthB} 롤백 일부 실패 — " +
+                $"{failA ?? failB ?? "알 수 없음"}. 프리웜 복구를 기다립니다.");
+        }
+
+        _swap = null;
+        _swapDepths.Clear();
+    }
+
+    private bool IsTerminal(int depth)
+    {
+        InstanceInfo? info = FindByDepth(depth);
+        return info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed;
+    }
+
+    private static bool IsSettledInfo(InstanceInfo? info) =>
+        info?.Status is InstanceStatus.Ready or InstanceStatus.Idle
+            or InstanceStatus.Suspended or InstanceStatus.Suspending;
+
+    private bool IsSettled(int depth) => IsSettledInfo(FindByDepth(depth));
 
     public bool ResetInstance(string key)
     {
@@ -321,6 +609,7 @@ public sealed class InstanceManager
         info.WorldReady = false;
         info.HasPlayedSinceReset = false;
         info.SuspendAfterReset = true;
+        info.SuspendReasonAfterReset = "reset";
 
         _hub.Send(info.ModConnection, MessageType.RESET, new { instanceKey = key }, (ok, reason) =>
         {
@@ -333,7 +622,7 @@ public sealed class InstanceManager
         return true;
     }
 
-    public bool SuspendInstance(string key)
+    public bool SuspendInstance(string key, string suspendReason = "idle")
     {
         InstanceInfo? info = Find(key);
         if (info == null) return false;
@@ -355,6 +644,7 @@ public sealed class InstanceManager
                 if (info.Status != InstanceStatus.Suspending) return;
                 info.Status = InstanceStatus.Suspended;
                 info.LastNonIdleAt = DateTime.UtcNow;
+                InstanceSuspended?.Invoke(key, suspendReason);
             });
 
         if (!sent && info.Status == InstanceStatus.Suspending)
@@ -405,6 +695,7 @@ public sealed class InstanceManager
 
         for (int depth = 1; depth <= LayerCount; depth++)
         {
+            if (_swapDepths.Contains(depth)) continue;
             if (_prewarmInFlight == depth) continue;
             InstanceInfo? existing = FindByDepth(depth);
             if (existing?.Status == InstanceStatus.Suspended) continue;
@@ -452,6 +743,7 @@ public sealed class InstanceManager
         {
             for (int depth = 1; depth <= LayerCount; depth++)
             {
+                if (_swapDepths.Contains(depth)) continue;
                 InstanceInfo? info = FindByDepth(depth);
                 if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
                     RequeuePrewarm(depth);
@@ -473,7 +765,7 @@ public sealed class InstanceManager
             }
             else if (info.Status is InstanceStatus.Ready or InstanceStatus.Idle)
             {
-                SuspendInstance(info.Key);
+                SuspendInstance(info.Key, "prewarm");
                 return;
             }
             else
@@ -494,6 +786,7 @@ public sealed class InstanceManager
         {
             int depth = _prewarmQueue.Dequeue();
             _prewarmQueued.Remove(depth);
+            if (_swapDepths.Contains(depth)) continue;
             InstanceInfo? existing = FindByDepth(depth);
             if (existing?.Status == InstanceStatus.Suspended) continue;
 
@@ -507,7 +800,7 @@ public sealed class InstanceManager
             if (existing != null && existing.Status is InstanceStatus.Ready or InstanceStatus.Idle)
             {
                 BeginPrewarmWait(depth);
-                SuspendInstance(existing.Key);
+                SuspendInstance(existing.Key, "prewarm");
                 return;
             }
 
@@ -553,6 +846,7 @@ public sealed class InstanceManager
             _prewarmNoticeNextAt = now + PrewarmNoticeInterval;
         }
 
+        if (ready) _admissionEverOpened = true;
         _admissionReady = ready;
     }
 
@@ -692,6 +986,8 @@ public sealed class InstanceManager
     public bool IsQueryable(string key) =>
         Find(key)?.Status is InstanceStatus.Ready or InstanceStatus.Idle;
 
+    public bool IsWebVisible(string key) => IsQueryable(key);
+
     public bool CanSendModCommand(string? instanceKey, MessageType messageType)
     {
         if (string.IsNullOrEmpty(instanceKey)) return false;
@@ -823,7 +1119,7 @@ public sealed class InstanceManager
 
             if (!info.HasPlayedSinceReset)
             {
-                SuspendInstance(info.Key);
+                SuspendInstance(info.Key, "idle");
                 continue;
             }
 

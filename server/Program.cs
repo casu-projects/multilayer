@@ -101,6 +101,19 @@ internal static class Program
                 console.SubmitLine(text);
             },
             avatarResolver: steamId => steamApi?.GetAvatarAsync(steamId) ?? Task.FromResult<string?>(null));
+
+        instances.InstanceSuspended += (key, reason) =>
+        {
+            if (reason == "prewarm" && !instances.AdmissionEverOpened) return;
+            InstanceInfo? info = instances.Find(key);
+            if (info != null) _ = discordBot.SendLayerSuspendedAsync(info.Depth, reason);
+        };
+        instances.InstanceResumed += key =>
+        {
+            InstanceInfo? info = instances.Find(key);
+            if (info != null) _ = discordBot.SendLayerResumedAsync(info.Depth);
+        };
+
         if (config.SteamEnabled)
         {
             try
@@ -237,6 +250,7 @@ internal static class Program
             lobby.Push();
 
             instances.TickAgentCleanup();
+            instances.TickSwap();
             instances.TickPrewarm();
             gateway.SetPrewarmGate(!instances.AdmissionReady);
             int online = TickRunLifecycle(sessions);

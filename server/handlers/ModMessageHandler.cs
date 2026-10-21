@@ -124,6 +124,7 @@ internal sealed class ModMessageHandler
                 {
                     if (instances.ShouldSuspendAfterReset(ready.InstanceKey))
                     {
+                        string suspendReason = instances.Find(ready.InstanceKey)?.SuspendReasonAfterReset ?? "reset";
                         instances.ClearSuspendAfterReset(ready.InstanceKey);
                         bool needed = sessions.All.Any(p => p.InstanceId == ready.InstanceKey
                                 && p.Session == PlayerSessionState.Connecting)
@@ -132,8 +133,8 @@ internal sealed class ModMessageHandler
                                 && sessions.All.Any(p => p.Session != PlayerSessionState.Offline));
                         if (!needed)
                         {
-                            if (!instances.SuspendInstance(ready.InstanceKey))
-                                Log.Info($"{ready.InstanceKey} RESET 후 재동결 실패.");
+                            if (!instances.SuspendInstance(ready.InstanceKey, suspendReason))
+                                Log.Info($"{ready.InstanceKey} 재동결 실패.");
                             break;
                         }
                     }

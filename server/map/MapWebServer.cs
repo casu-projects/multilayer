@@ -101,7 +101,8 @@ internal sealed class MapWebServer : IAsyncDisposable
             serverName = string.IsNullOrWhiteSpace(_config.ServerName) ? "CasuMP Server" : _config.ServerName,
         }));
 
-        _app.MapGet("/api/instances", () => Results.Json(_store.GetInstances()));
+        _app.MapGet("/api/instances", () => Results.Json(
+            _store.GetInstances().Where(instance => _instances.IsWebVisible(instance.InstanceKey)).ToList()));
 
         _app.MapGet("/api/instances/{instanceKey}/world", (string instanceKey, int? since) =>
         {

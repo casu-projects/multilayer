@@ -27,6 +27,32 @@ public sealed class AgentRegistry
         return false;
     }
 
+    public bool TryGet(string machineId, out int used, out int capacity, out string address)
+    {
+        if (_agents.TryGetValue(machineId, out var agent))
+        {
+            used = agent.Used;
+            capacity = agent.Capacity;
+            address = agent.Address;
+            return true;
+        }
+        used = 0;
+        capacity = 0;
+        address = "";
+        return false;
+    }
+
+    public bool HasCapacity(string machineId) =>
+        _agents.TryGetValue(machineId, out var agent) && agent.Used < agent.Capacity;
+
+    public bool TryReserve(string machineId)
+    {
+        if (!_agents.TryGetValue(machineId, out var agent) || agent.Used >= agent.Capacity)
+            return false;
+        _agents[machineId] = (agent.Used + 1, agent.Capacity, agent.Address);
+        return true;
+    }
+
     public string? Select(Func<string, bool>? predicate = null)
     {
         return _agents

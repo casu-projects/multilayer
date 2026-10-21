@@ -50,7 +50,12 @@ public sealed class InstanceManager
     private int _prewarmInFlight = -1;
     private DateTime _prewarmWaitStartedUtc = DateTime.MinValue;
     private DateTime _prewarmRetryAt = DateTime.MinValue;
+    private DateTime _prewarmNoticeNextAt = DateTime.MinValue;
+    private string _prewarmNotice = "";
+    private bool _prewarmCompletedOnce;
     private bool _admissionReady;
+
+    private static readonly TimeSpan PrewarmNoticeInterval = TimeSpan.FromSeconds(60);
 
     private readonly HashSet<string> _seenMachines = new();
     private readonly HashSet<string> _cleanedMachines = new();
@@ -68,6 +73,9 @@ public sealed class InstanceManager
     public event Action<string>? InstanceResumed;
 
     public bool AdmissionReady => _admissionReady;
+
+    public int CleanedAgentCapacity =>
+        _agents.TotalCapacity(IsCleanedMachine);
 
     public bool PrewarmComplete
     {
@@ -277,9 +285,11 @@ public sealed class InstanceManager
         return null;
     }
 
+    private bool IsCleanedMachine(string machineId) => _cleanedMachines.Contains(machineId);
+
     private string? SelectMachine()
     {
-        return _agents.Select(machineId => _cleanedMachines.Contains(machineId));
+        return _agents.Select(IsCleanedMachine);
     }
 
     public void StopInstance(string key)
@@ -391,6 +401,7 @@ public sealed class InstanceManager
     public void PrewarmLayers()
     {
         if (_agents.IsEmpty) return;
+        _prewarmRetryAt = DateTime.MinValue;
 
         for (int depth = 1; depth <= LayerCount; depth++)
         {
@@ -425,13 +436,24 @@ public sealed class InstanceManager
     public void TickPrewarm()
     {
         DateTime now = DateTime.UtcNow;
+        try
+        {
+            TickPrewarmCore(now);
+        }
+        finally
+        {
+            RefreshPrewarmState(now);
+        }
+    }
 
+    private void TickPrewarmCore(DateTime now)
+    {
         if (_cleanedMachines.Count > 0)
         {
             for (int depth = 1; depth <= LayerCount; depth++)
             {
                 InstanceInfo? info = FindByDepth(depth);
-                if (info == null || info.Status == InstanceStatus.Stopped)
+                if (info == null || info.Status is InstanceStatus.Stopped or InstanceStatus.Crashed)
                     RequeuePrewarm(depth);
             }
         }
@@ -489,6 +511,12 @@ public sealed class InstanceManager
                 return;
             }
 
+            if (_agents.AvailableCapacity(IsCleanedMachine) <= 0)
+            {
+                RequeuePrewarm(depth);
+                return;
+            }
+
             string? addr = EnsureInstance(depth);
             if (addr != null)
             {
@@ -500,13 +528,76 @@ public sealed class InstanceManager
             _prewarmRetryAt = now.AddSeconds(2);
             return;
         }
-
-        if (!_admissionReady && PrewarmComplete)
-        {
-            _admissionReady = true;
-            Log.Info("프리웜 완료 — 모든 레이어 동결됨. 접속 게이트 개방.");
-        }
     }
+
+    private void RefreshPrewarmState(DateTime now)
+    {
+        if (PrewarmComplete) _prewarmCompletedOnce = true;
+
+        bool ready = _prewarmCompletedOnce
+            && CleanedAgentCapacity >= LayerCount
+            && AllLayersUsable();
+        string notice = ready ? "" : DescribePrewarmWait();
+
+        if (notice != _prewarmNotice)
+        {
+            _prewarmNotice = notice;
+            _prewarmNoticeNextAt = now + PrewarmNoticeInterval;
+            Log.Info(notice.Length == 0
+                ? $"모든 {LayerCount}개 레이어 프리웜 완료 — 접속 게이트 개방."
+                : notice);
+        }
+        else if (notice.Length > 0 && now >= _prewarmNoticeNextAt)
+        {
+            Log.Info(notice);
+            _prewarmNoticeNextAt = now + PrewarmNoticeInterval;
+        }
+
+        _admissionReady = ready;
+    }
+
+    private string DescribePrewarmWait()
+    {
+        if (_agents.IsEmpty)
+            return "프리웜 대기: 연결된 에이전트 없음 — 접속 게이트 닫힘.";
+
+        if (_cleanedMachines.Count == 0)
+            return "프리웜 대기: 에이전트 프로세스 정리 완료 대기 중 — 접속 게이트 닫힘.";
+
+        int capacity = CleanedAgentCapacity;
+        if (capacity < LayerCount)
+        {
+            string waiting = string.Join(", ", Enumerable.Range(1, LayerCount)
+                .Where(depth => FindByDepth(depth)?.Status != InstanceStatus.Suspended)
+                .Select(depth => $"depth-{depth}"));
+            string target = waiting.Length == 0 ? "레이어 유지" : $"{waiting} 준비";
+            return $"프리웜 대기: capacity {capacity}/{LayerCount} — {target}를 위해 추가 에이전트 필요. 접속 게이트 닫힘.";
+        }
+
+        if (!AllLayersUsable())
+        {
+            int usable = Enumerable.Range(1, LayerCount)
+                .Count(depth => IsLayerUsable(FindByDepth(depth)));
+            return $"프리웜 진행: 사용 가능 레이어 {usable}/{LayerCount} — 레이어 복구 중. 접속 게이트 닫힘.";
+        }
+
+        int prepared = Enumerable.Range(1, LayerCount)
+            .Count(depth => FindByDepth(depth)?.Status == InstanceStatus.Suspended);
+        return $"프리웜 진행: {prepared}/{LayerCount} 레이어 준비됨. 접속 게이트 닫힘.";
+    }
+
+    private bool AllLayersUsable()
+    {
+        for (int depth = 1; depth <= LayerCount; depth++)
+        {
+            if (!IsLayerUsable(FindByDepth(depth))) return false;
+        }
+        return true;
+    }
+
+    private static bool IsLayerUsable(InstanceInfo? info) =>
+        info != null && info.Status is not (InstanceStatus.Stopped or InstanceStatus.Starting
+            or InstanceStatus.Booting or InstanceStatus.Stopping or InstanceStatus.Crashed);
 
     private readonly HashSet<string> _runNeeded = new();
 

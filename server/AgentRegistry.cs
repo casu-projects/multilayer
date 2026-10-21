@@ -37,6 +37,16 @@ public sealed class AgentRegistry
             .FirstOrDefault();
     }
 
+    public int TotalCapacity(Func<string, bool>? predicate = null) =>
+        _agents
+            .Where(kv => predicate == null || predicate(kv.Key))
+            .Sum(kv => Math.Max(0, kv.Value.Capacity));
+
+    public int AvailableCapacity(Func<string, bool>? predicate = null) =>
+        _agents
+            .Where(kv => predicate == null || predicate(kv.Key))
+            .Sum(kv => Math.Max(0, kv.Value.Capacity - kv.Value.Used));
+
     public void IncrementUsage(string machineId)
     {
         if (!_agents.TryGetValue(machineId, out var agent)) return;

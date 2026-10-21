@@ -19,6 +19,9 @@ var tests = new (string Name, Action Run)[]
     ("Instance command generation", TestInstanceCommandGeneration),
     ("Instance stale exit ignored", TestInstanceExitGenerationGuard),
     ("Failed spawn releases resources", TestFailedSpawnCleanup),
+    ("Agent capacity totals", TestAgentCapacityTotals),
+    ("Prewarm waits for capacity", TestPrewarmWaitsForCapacity),
+    ("Admission re-closes on capacity loss", TestAdmissionReclosesOnCapacityLoss),
 };
 
 int failed = 0;
@@ -253,6 +256,103 @@ static void TestFailedSpawnCleanup()
     Assert(((HashSet<int>)portsField.GetValue(manager)!).Count == 0, "failed spawn leaked port");
     Assert(((HashSet<string>)runNeededField.GetValue(manager)!).Count == 0, "failed spawn left run-needed entry");
 }
+
+static void TestAgentCapacityTotals()
+{
+    var registry = new AgentRegistry();
+    registry.Register("machine-1", 3, "127.0.0.1");
+    registry.Register("machine-2", 2, "127.0.0.2");
+
+    Assert(registry.TotalCapacity() == 5, "total capacity");
+    Assert(registry.AvailableCapacity() == 5, "initial available capacity");
+
+    registry.IncrementUsage("machine-1");
+    registry.IncrementUsage("machine-1");
+    Assert(registry.AvailableCapacity() == 3, "used capacity not deducted");
+    Assert(registry.TotalCapacity(id => id == "machine-1") == 3, "filtered total capacity");
+    Assert(registry.AvailableCapacity(id => id == "machine-1") == 1, "filtered available capacity");
+}
+
+static void TestPrewarmWaitsForCapacity()
+{
+    var config = new ServerConfig();
+    var hub = new ControlHub(config, CancellationToken.None);
+    var manager = new InstanceManager(config, hub);
+    AgentRegistry agents = GetField<AgentRegistry>(manager, "_agents");
+    HashSet<string> cleaned = GetField<HashSet<string>>(manager, "_cleanedMachines");
+    ConcurrentDictionary<string, InstanceInfo> instances =
+        GetField<ConcurrentDictionary<string, InstanceInfo>>(manager, "_instances");
+    Queue<int> queue = GetField<Queue<int>>(manager, "_prewarmQueue");
+    HashSet<int> queued = GetField<HashSet<int>>(manager, "_prewarmQueued");
+
+    agents.Register("machine-1", 3, "127.0.0.1");
+    cleaned.Add("machine-1");
+    agents.IncrementUsage("machine-1");
+    agents.IncrementUsage("machine-1");
+    agents.IncrementUsage("machine-1");
+
+    for (int depth = 1; depth <= 3; depth++)
+    {
+        string key = InstanceManager.DepthKey(depth);
+        instances[key] = new InstanceInfo
+        {
+            Key = key,
+            Depth = depth,
+            Port = 17790 + depth,
+            Generation = $"g{depth}",
+            MachineId = "machine-1",
+            Status = InstanceStatus.Suspended,
+        };
+    }
+
+    manager.PrewarmLayers();
+    Assert(queue.Count == 2, "missing layers not queued");
+
+    manager.TickPrewarm();
+    Assert(manager.FindByDepth(4) == null, "prewarm spawned beyond capacity");
+    Assert(manager.FindByDepth(5) == null, "prewarm spawned beyond capacity");
+    Assert(queue.Count == 2 && queued.SetEquals(new[] { 4, 5 }), "capacity wait lost queued layers");
+    Assert(!manager.AdmissionReady, "admission opened without all layers");
+}
+
+static void TestAdmissionReclosesOnCapacityLoss()
+{
+    var config = new ServerConfig();
+    var hub = new ControlHub(config, CancellationToken.None);
+    var manager = new InstanceManager(config, hub);
+    AgentRegistry agents = GetField<AgentRegistry>(manager, "_agents");
+    HashSet<string> cleaned = GetField<HashSet<string>>(manager, "_cleanedMachines");
+    ConcurrentDictionary<string, InstanceInfo> instances =
+        GetField<ConcurrentDictionary<string, InstanceInfo>>(manager, "_instances");
+
+    agents.Register("machine-1", 5, "127.0.0.1");
+    cleaned.Add("machine-1");
+    for (int depth = 1; depth <= InstanceManager.LayerCount; depth++)
+    {
+        string key = InstanceManager.DepthKey(depth);
+        instances[key] = new InstanceInfo
+        {
+            Key = key,
+            Depth = depth,
+            Port = 17790 + depth,
+            Generation = $"g{depth}",
+            MachineId = "machine-1",
+            Status = InstanceStatus.Suspended,
+        };
+    }
+
+    manager.TickPrewarm();
+    Assert(manager.AdmissionReady, "fully prewarmed server did not admit");
+
+    manager.UnregisterAgent("machine-1");
+    manager.TickPrewarm();
+    Assert(!manager.AdmissionReady, "admission stayed open after capacity loss");
+}
+
+static T GetField<T>(object target, string name) =>
+    (T)target.GetType()
+        .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+        .GetValue(target)!;
 
 static void Assert(bool condition, string message)
 {
